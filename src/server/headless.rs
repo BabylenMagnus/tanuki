@@ -4318,7 +4318,7 @@ pub fn run_server() -> io::Result<()> {
             client_socket = %client_socket_path().display(),
             "tanuki server started"
         );
-        print_ready_message(&api::socket_path(), &client_socket_path());
+        print_ready_message(&api::socket_path(), &client_socket_path(), cloud_host);
         server.app.run_plugin_startup_hooks();
 
         server.run().await
@@ -4421,7 +4421,7 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
             warn!(err = %err, "failed to report handoff ownership; continuing as owner");
         }
         info!("handoff import server started");
-        print_ready_message(&api::socket_path(), &client_socket_path());
+        print_ready_message(&api::socket_path(), &client_socket_path(), false);
         server.app.run_plugin_startup_hooks();
         server.run().await
     });
@@ -4456,7 +4456,7 @@ fn run_handoff_import_server(_socket_path: &Path, _token: &str) -> io::Result<()
     Err(io::Error::other("live handoff is only supported on Unix"))
 }
 
-fn print_ready_message(api_socket: &Path, client_socket: &Path) {
+fn print_ready_message(api_socket: &Path, client_socket: &Path, cloud_host: bool) {
     eprintln!("tanuki server running; you can use any tanuki CLI command in another terminal.");
     eprintln!("api socket: {}", api_socket.display());
     eprintln!("client socket: {}", client_socket.display());
@@ -4466,7 +4466,13 @@ fn print_ready_message(api_socket: &Path, client_socket: &Path) {
             .join("tanuki-server.log")
             .display()
     );
-    eprintln!("did you mean to open the Tanuki TUI? run `tanuki`; you do not need `tanuki server`.");
+    if cloud_host {
+        eprintln!("cloud host active; other devices on your account can attach with `tanuki --cloud <device-token-id>`.");
+    } else {
+        eprintln!(
+            "did you mean to open the Tanuki TUI? run `tanuki`; you do not need `tanuki server`."
+        );
+    }
 }
 
 /// Initialize logging for the server process.
