@@ -1,0 +1,66 @@
+---
+title: Install Tanuki
+description: Build and run Tanuki from source on Linux, macOS, and Windows.
+---
+
+Tanuki is a Rust binary (package name `tanuki`). There is no hosted installer or package-manager
+release yet — this page will grow install-script, Homebrew, mise, and Nix sections once release CI is set
+up for this repository ([tracked in the open-source-release checklist](https://github.com/BabylenMagnus/tanuki)).
+For now, build from source.
+
+## Requirements
+
+- [Rust toolchain](https://rustup.rs/) matching the version pinned in [`rust-toolchain.toml`](https://github.com/BabylenMagnus/tanuki/blob/master/rust-toolchain.toml)
+- `git`
+
+## Build from source
+
+```bash
+git clone https://github.com/BabylenMagnus/tanuki
+cd tanuki
+cargo build --release
+```
+
+The resulting binary is `target/release/tanuki` (`.exe` on Windows). Copy or symlink it onto your `PATH`:
+
+```bash
+# Linux / macOS
+cp target/release/tanuki ~/.local/bin/tanuki
+```
+
+```powershell
+# Windows (PowerShell)
+Copy-Item target\release\tanuki.exe "$env:USERPROFILE\bin\tanuki.exe"
+```
+
+## Verify
+
+Start Tanuki:
+
+```bash
+tanuki
+```
+
+If your shell cannot find `tanuki`, restart the terminal or check that the install directory is on your `PATH`.
+
+## Update
+
+There is no `tanuki update` command or update channel yet — pull the latest source and rebuild:
+
+```bash
+git pull
+cargo build --release
+```
+
+## Development builds
+
+```bash
+just test        # unit tests
+just check       # formatting, tests, and maintenance checks
+```
+
+## Platform support
+
+Tanuki builds and runs on Linux and macOS. Windows support is inherited from upstream Herdr's preview-beta
+Windows build and has not been separately verified for this fork yet — see [Windows beta](/docs/windows-beta/)
+for the upstream caveats.
