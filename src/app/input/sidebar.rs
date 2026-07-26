@@ -1162,7 +1162,10 @@ mod tests {
     fn clicking_worktree_parent_row_focuses_workspace_without_toggling() {
         let mut app = app_for_mouse_test();
         app.state.workspaces = vec![Workspace::test_new("main"), Workspace::test_new("issue")];
-        for (idx, checkout_path) in ["/repo/tanuki", "/repo/tanuki-issue"].into_iter().enumerate() {
+        for (idx, checkout_path) in ["/repo/tanuki", "/repo/tanuki-issue"]
+            .into_iter()
+            .enumerate()
+        {
             app.state.workspaces[idx].worktree_space =
                 Some(crate::workspace::WorktreeSpaceMembership {
                     key: "repo-key".into(),
@@ -1196,7 +1199,10 @@ mod tests {
     fn clicking_worktree_parent_chevron_toggles_group_only() {
         let mut app = app_for_mouse_test();
         app.state.workspaces = vec![Workspace::test_new("main"), Workspace::test_new("issue")];
-        for (idx, checkout_path) in ["/repo/tanuki", "/repo/tanuki-issue"].into_iter().enumerate() {
+        for (idx, checkout_path) in ["/repo/tanuki", "/repo/tanuki-issue"]
+            .into_iter()
+            .enumerate()
+        {
             app.state.workspaces[idx].worktree_space =
                 Some(crate::workspace::WorktreeSpaceMembership {
                     key: "repo-key".into(),

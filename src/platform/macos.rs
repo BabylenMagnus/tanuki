@@ -1047,7 +1047,11 @@ mod tests {
         let buf = build_procargs2(
             "/opt/homebrew/bin/nono",
             &["nono", "run", "TANUKI_AGENT=codex", "--", "claude"],
-            &["PATH=/usr/bin", "TANUKI_AGENT=claude", "TERM=xterm-256color"],
+            &[
+                "PATH=/usr/bin",
+                "TANUKI_AGENT=claude",
+                "TERM=xterm-256color",
+            ],
         );
 
         let env = procargs2_env(&buf).expect("expected env block");
@@ -1133,10 +1137,8 @@ mod tests {
 
     #[test]
     fn terminal_notifier_success_skips_osascript() {
-        let path = std::env::temp_dir().join(format!(
-            "tanuki-notifier-args-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("tanuki-notifier-args-{}", std::process::id()));
         let script = "printf '%s:%s\\n' \"$0\" \"$*\" >> \"$TANUKI_NOTIFY_ARGS\"";
         let mut command = |program: &str| {
             let mut cmd = Command::new("sh");

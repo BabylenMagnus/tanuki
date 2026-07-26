@@ -423,11 +423,13 @@ fn agent_focus(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn agent_attach(args: &[String]) -> std::io::Result<i32> {
-    let (target, takeover) =
-        match super::parse_attach_target(args, "usage: tanuki agent attach <target> [--takeover]") {
-            Ok(parsed) => parsed,
-            Err(code) => return Ok(code),
-        };
+    let (target, takeover) = match super::parse_attach_target(
+        args,
+        "usage: tanuki agent attach <target> [--takeover]",
+    ) {
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
 
     let response = resolve_agent_target(&target, "cli:agent:attach:resolve")?;
     if response.get("error").is_some() {

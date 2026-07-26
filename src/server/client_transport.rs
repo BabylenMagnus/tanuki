@@ -802,10 +802,10 @@ fn client_read_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::LocalStream;
+    use interprocess::local_socket::traits::Listener as _;
     #[cfg(not(windows))]
     use interprocess::local_socket::traits::Stream as _;
-    use interprocess::local_socket::traits::Listener as _;
-    use crate::ipc::LocalStream;
     use std::path::PathBuf;
 
     struct TestSocketPath(PathBuf);

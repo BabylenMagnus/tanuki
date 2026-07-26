@@ -595,7 +595,10 @@ fn main() -> io::Result<()> {
                 "Show local client and running server status",
             ),
             ("tanuki update", "Download and install the latest version"),
-            ("tanuki completion zsh", "Generate shell completions for zsh"),
+            (
+                "tanuki completion zsh",
+                "Generate shell completions for zsh",
+            ),
             (
                 "tanuki server stop",
                 "Stop the running server via the API socket",
@@ -898,7 +901,10 @@ mod tests {
     fn nested_tanuki_does_not_block_when_allowed() {
         let config: config::Config =
             toml::from_str("[experimental]\nallow_nested = true\n").unwrap();
-        assert!(!should_block_nested_for_env(&config, Some(TANUKI_ENV_VALUE)));
+        assert!(!should_block_nested_for_env(
+            &config,
+            Some(TANUKI_ENV_VALUE)
+        ));
     }
 
     #[test]

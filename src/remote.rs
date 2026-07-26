@@ -14,9 +14,7 @@ pub(crate) mod cloud;
 /// platform gate: `crate::remote::cloud` builds and works identically on
 /// Windows and Unix, so `--cloud` is recognized and usable on every
 /// platform this crate targets.
-pub(crate) fn extract_cloud_args(
-    args: &[String],
-) -> Result<(Vec<String>, Option<String>), String> {
+pub(crate) fn extract_cloud_args(args: &[String]) -> Result<(Vec<String>, Option<String>), String> {
     let mut cleaned = Vec::with_capacity(args.len());
     if let Some(program) = args.first() {
         cleaned.push(program.clone());

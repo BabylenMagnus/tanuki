@@ -355,9 +355,9 @@ impl CloudHostTransport {
                 should_quit,
             ));
         });
-        result_rx
-            .recv()
-            .map_err(|_| io::Error::other("cloud host: connect thread terminated without a result"))?
+        result_rx.recv().map_err(|_| {
+            io::Error::other("cloud host: connect thread terminated without a result")
+        })?
     }
 
     fn connect(
@@ -368,7 +368,8 @@ impl CloudHostTransport {
         let config = load_legion_config()?;
         let auth = auth_payload(&config, "term-host");
 
-        let viewers: Arc<Mutex<HashMap<String, CloudDuplex>>> = Arc::new(Mutex::new(HashMap::new()));
+        let viewers: Arc<Mutex<HashMap<String, CloudDuplex>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let client_id_allocator = Arc::new(client_id_allocator);
 
         let attach_viewers = Arc::clone(&viewers);
@@ -391,8 +392,8 @@ impl CloudHostTransport {
                 debug!("cloud host: registered with relay server");
             })
             .on("term:host_hello:error", |payload, _socket| {
-                let reason = extract_str_field(&payload, "reason")
-                    .unwrap_or_else(|| "unknown".to_owned());
+                let reason =
+                    extract_str_field(&payload, "reason").unwrap_or_else(|| "unknown".to_owned());
                 warn!(reason = %reason, "cloud host: term:host_hello rejected");
             })
             .on("term:peer_attached", move |payload, socket: RawClient| {
@@ -542,10 +543,9 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
             *open_client_cell
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(socket.clone());
-            if let Err(err) = socket.emit(
-                "term:attach",
-                json!({ "target_token_id": target_token_id }),
-            ) {
+            if let Err(err) =
+                socket.emit("term:attach", json!({ "target_token_id": target_token_id }))
+            {
                 signal_attach_result(
                     &open_attach_state,
                     Err(format!("failed to send term:attach: {err}")),
@@ -556,8 +556,8 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
             signal_attach_result(&ack_attach_state, Ok(()));
         })
         .on("term:attach:error", move |payload, _socket| {
-            let reason = extract_str_field(&payload, "reason")
-                .unwrap_or_else(|| "unknown".to_owned());
+            let reason =
+                extract_str_field(&payload, "reason").unwrap_or_else(|| "unknown".to_owned());
             signal_attach_result(&error_attach_state, Err(reason));
         })
         .on("term:frame", move |payload, _socket| {
@@ -592,10 +592,7 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
     Ok(Transport::Cloud(duplex))
 }
 
-fn signal_attach_result(
-    state: &Arc<(Mutex<Option<AttachResult>>, Condvar)>,
-    result: AttachResult,
-) {
+fn signal_attach_result(state: &Arc<(Mutex<Option<AttachResult>>, Condvar)>, result: AttachResult) {
     let (lock, cvar) = &**state;
     let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if guard.is_none() {

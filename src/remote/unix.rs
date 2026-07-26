@@ -778,7 +778,10 @@ fn remote_binary_candidates(
     Ok(candidates)
 }
 
-fn push_if_new_remote_binary_candidate(candidates: &mut Vec<RemoteTanuki>, candidate: RemoteTanuki) {
+fn push_if_new_remote_binary_candidate(
+    candidates: &mut Vec<RemoteTanuki>,
+    candidate: RemoteTanuki,
+) {
     if !candidates
         .iter()
         .any(|existing| existing.shell_path == candidate.shell_path)
@@ -860,7 +863,10 @@ fn remote_binary_on_path_any(
     Ok(remote_tanuki_from_path_discovery(remote_tanuki, &stdout))
 }
 
-fn remote_tanukis_from_path_discovery(remote_tanuki: &RemoteTanuki, stdout: &str) -> Vec<RemoteTanuki> {
+fn remote_tanukis_from_path_discovery(
+    remote_tanuki: &RemoteTanuki,
+    stdout: &str,
+) -> Vec<RemoteTanuki> {
     stdout
         .lines()
         .filter_map(|path| remote_tanuki_from_path(remote_tanuki, path))
@@ -1408,7 +1414,10 @@ fn stop_remote_server(ssh: &RemoteSsh, remote_tanuki: &RemoteTanuki) -> io::Resu
     Ok(())
 }
 
-fn wait_for_remote_server_shutdown(ssh: &RemoteSsh, remote_tanuki: &RemoteTanuki) -> io::Result<()> {
+fn wait_for_remote_server_shutdown(
+    ssh: &RemoteSsh,
+    remote_tanuki: &RemoteTanuki,
+) -> io::Result<()> {
     let deadline = Instant::now() + REMOTE_SERVER_SHUTDOWN_CONFIRM_TIMEOUT;
     loop {
         if remote_server_status(ssh, remote_tanuki)? == RemoteServerStatus::NotRunning {
@@ -1651,7 +1660,11 @@ fn reattach_command(
     keybindings: RemoteKeybindings,
     live_handoff: bool,
 ) -> String {
-    let program = if program.is_empty() { "tanuki" } else { program };
+    let program = if program.is_empty() {
+        "tanuki"
+    } else {
+        program
+    };
     let mut command = format!("{} --remote {}", shell_quote(program), shell_quote(target));
     if keybindings != RemoteKeybindings::Local {
         command.push_str(" --remote-keybindings ");
@@ -2352,7 +2365,11 @@ mod tests {
 
     #[test]
     fn extract_remote_args_rejects_option_like_target() {
-        let args = vec!["tanuki".into(), "--remote".into(), "-oProxyCommand=x".into()];
+        let args = vec![
+            "tanuki".into(),
+            "--remote".into(),
+            "-oProxyCommand=x".into(),
+        ];
         let err = extract_remote_args(&args).unwrap_err();
         assert_eq!(err, "--remote target must not start with '-'");
     }
@@ -2967,7 +2984,11 @@ mod tests {
             arch: "aarch64",
         };
         assert_eq!(
-            install_source_description_for(&platform, Some(Path::new("/tmp/tanuki-aarch64")), false),
+            install_source_description_for(
+                &platform,
+                Some(Path::new("/tmp/tanuki-aarch64")),
+                false
+            ),
             "TANUKI_REMOTE_BINARY (/tmp/tanuki-aarch64)"
         );
     }

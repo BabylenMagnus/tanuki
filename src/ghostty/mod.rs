@@ -3389,7 +3389,10 @@ mod tests {
         let output = responses.lock().unwrap().clone();
         assert!(!output.is_empty());
         assert!(String::from_utf8_lossy(&output).contains("R"));
-        assert_eq!(terminal.take_pwd_changes(), [b"file:///tmp/tanuki".to_vec()]);
+        assert_eq!(
+            terminal.take_pwd_changes(),
+            [b"file:///tmp/tanuki".to_vec()]
+        );
     }
 
     #[test]

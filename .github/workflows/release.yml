@@ -17,8 +17,34 @@ env:
   RUST_TOOLCHAIN_VERSION: 1.96.1
 
 jobs:
+  verify-lockfile:
+    name: verify Cargo.lock matches Cargo.toml
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+
+      # Fails fast (seconds, no compilation) if Cargo.lock's recorded version
+      # for this crate doesn't match Cargo.toml — e.g. a version bump that
+      # forgot to run `cargo update -p tanuki --precise <version>`. Without
+      # this, every platform in the build matrix independently discovers the
+      # same failure ~5-10 minutes into `cargo build --locked`, wasting CI
+      # time and, worse, can leave a tag pushed with no working release.
+      - name: Check Cargo.lock is in sync
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
   build:
     name: build (${{ matrix.asset_name }})
+    needs: verify-lockfile
     strategy:
       fail-fast: false
       matrix:

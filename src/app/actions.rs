@@ -3433,7 +3433,11 @@ mod tests {
             ),
             ("refs #123 and @owner/name", "#123", "#123"),
             ("refs #123 and @owner/name", "owner", "@owner/name"),
-            ("cargo test --package=tanuki", "--package", "--package=tanuki"),
+            (
+                "cargo test --package=tanuki",
+                "--package",
+                "--package=tanuki",
+            ),
             (
                 "cargo test app::actions::tests",
                 "app::",
@@ -5237,7 +5241,8 @@ mod tests {
     }
 
     #[test]
-    fn active_workspace_active_tab_keeps_tanuki_toast_suppressed_when_outer_terminal_is_unfocused() {
+    fn active_workspace_active_tab_keeps_tanuki_toast_suppressed_when_outer_terminal_is_unfocused()
+    {
         let mut state = app_with_workspaces(&["active"]);
         state.active = Some(0);
         state.outer_terminal_focus = Some(false);
