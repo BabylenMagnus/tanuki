@@ -1,0 +1,209 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and publish binaries for"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+
+jobs:
+  verify-lockfile:
+    name: verify Cargo.lock matches Cargo.toml
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+
+      # Fails fast (seconds, no compilation) if Cargo.lock's recorded version
+      # for this crate doesn't match Cargo.toml — e.g. a version bump that
+      # forgot to run `cargo update -p tanuki --precise <version>`. Without
+      # this, every platform in the build matrix independently discovers the
+      # same failure ~5-10 minutes into `cargo build --locked`, wasting CI
+      # time and, worse, can leave a tag pushed with no working release.
+      - name: Check Cargo.lock is in sync
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+  build:
+    name: build (${{ matrix.asset_name }})
+    needs: verify-lockfile
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux ships musl (static) builds, not glibc — works unmodified across old
+          # and new distros alike without separate per-glibc-version builds. Matches
+          # upstream Herdr's own release matrix.
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            kind: linux
+            asset_name: tanuki-linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            kind: linux-aarch64
+            asset_name: tanuki-linux-aarch64
+          # macOS is split by architecture, not by OS version — no separate "legacy
+          # macOS" build, same as upstream.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            kind: macos
+            asset_name: tanuki-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            kind: macos
+            asset_name: tanuki-macos-aarch64
+          # Windows: single x86_64 MSVC build, no legacy-Windows variant — same as
+          # upstream. Windows-on-ARM64 runs this build under emulation (install.ps1).
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            kind: windows
+            asset_name: tanuki-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install Zig
+        if: runner.os != 'macOS'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - name: Install patched Zig on macOS
+        if: runner.os == 'macOS'
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install zig@0.15
+          echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
+
+      # cargo-zigbuild wraps zig as a C cross-compiler/linker correctly for Rust's
+      # musl targets — a hand-rolled `zig cc` wrapper hits a duplicate `_start`
+      # symbol at link time (Rust's self-contained musl startfiles vs zig's own),
+      # which cargo-zigbuild already handles. Needed because native-tls's
+      # `vendored` OpenSSL (see Cargo.toml) still needs a real C compiler to build
+      # from source for the target. Installed via pip — cargo-zigbuild ships
+      # prebuilt wheels there, no local compile needed.
+      - name: Install cargo-zigbuild
+        if: runner.os == 'Linux'
+        run: |
+          pip install --user cargo-zigbuild
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install cmake ninja
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary (zigbuild, Linux)
+        if: runner.os == 'Linux'
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }}
+
+      - name: Build release binary
+        if: runner.os != 'Linux'
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # Assets are published as raw binaries (not archives) — install.ps1, install.sh,
+      # and update.rs's self-update flow all download the manifest-referenced URL
+      # directly as the executable, with no unpack step.
+      - name: Package (unix)
+        if: matrix.kind != 'windows'
+        run: |
+          cp target/${{ matrix.target }}/release/tanuki ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
+
+      - name: Package (windows)
+        if: matrix.kind == 'windows'
+        shell: pwsh
+        run: Copy-Item target/${{ matrix.target }}/release/tanuki.exe ${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate manifest.json
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          version="${TAG#v}"
+          repo="${{ github.repository }}"
+          {
+            echo "{"
+            echo "  \"version\": \"${version}\","
+            echo "  \"notes\": \"Tanuki ${TAG}\","
+            echo "  \"announcement\": null,"
+            echo "  \"assets\": {"
+            first=1
+            for target in tanuki-windows-x86_64.exe tanuki-linux-x86_64 tanuki-linux-aarch64 tanuki-macos-x86_64 tanuki-macos-aarch64; do
+              key="${target#tanuki-}"
+              key="${key%.exe}"
+              file="artifacts/${target}"
+              sha256="$(sha256sum "$file" | cut -d' ' -f1)"
+              url="https://github.com/${repo}/releases/download/${TAG}/${target}"
+              if [ "$first" -eq 0 ]; then echo "    ,"; fi
+              first=0
+              echo "    \"${key}\": { \"url\": \"${url}\", \"sha256\": \"${sha256}\" }"
+            done
+            echo "  }"
+            echo "}"
+          } > artifacts/manifest.json
+          cat artifacts/manifest.json
+
+      - name: Create/update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "$TAG" \
+            --generate-notes \
+            --latest \
+            artifacts/tanuki-* artifacts/manifest.json || \
+          gh release upload "$TAG" artifacts/tanuki-* artifacts/manifest.json --repo "${{ github.repository }}" --clobber
