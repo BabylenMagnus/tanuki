@@ -53,7 +53,10 @@ pub(crate) struct PlatformCapabilities {
 pub(crate) const fn capabilities() -> PlatformCapabilities {
     PlatformCapabilities {
         live_handoff: cfg!(unix),
-        remote_attach: cfg!(unix),
+        // `--remote` (SSH) now has a Windows implementation too -- see
+        // `remote/unix.rs`'s module doc for the platform split. The other
+        // capabilities here are unrelated features still gated to Unix.
+        remote_attach: true,
         direct_terminal_attach: cfg!(unix),
         preserve_legacy_doubled_escape_input: cfg!(target_os = "macos"),
     }

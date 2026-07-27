@@ -1,8 +1,25 @@
 //! Remote thin-client launcher over SSH command stdio.
+//!
+//! Platform split: everything here that builds/parses SSH commands and
+//! remote install scripts targets a Unix-like *remote* (the install scripts
+//! assume `/bin/sh`, `$HOME`, etc.) regardless of the *local* platform this
+//! binary is running on -- SSH-ing into a Windows machine is a separate,
+//! unimplemented feature, not part of this module's scope. The only
+//! genuinely platform-specific pieces are the ones tied to the *local*
+//! machine's IPC primitives: the loopback socket that bridges the local
+//! `tanuki client` process to the SSH child ([`SshStdioBridge`] /
+//! [`bridge_connection`], Unix domain socket vs. Windows named pipe via
+//! `crate::ipc`), the managed ssh-config directory's Unix permission bits
+//! (`private_ssh_config_dir` / `write_managed_ssh_config`), and the
+//! `sun_path` byte-length fallback in `local_forward_socket_path`, which
+//! has no Windows named-pipe equivalent. `run_remote_client_bridge` (this
+//! machine acting as the *remote* side of someone else's `--remote`) is
+//! genuinely Unix-only, matching the remote-target scope note above.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, IsTerminal, Write as _};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -191,6 +208,7 @@ pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
     run_client_process(&local_socket, &reattach_command, remote.keybindings)
 }
 
+#[cfg(unix)]
 pub(crate) fn run_remote_client_bridge() -> io::Result<()> {
     ensure_remote_server_running()?;
 
@@ -216,6 +234,19 @@ pub(crate) fn run_remote_client_bridge() -> io::Result<()> {
     });
 
     copy_flush(&mut socket_to_stdout, &mut stdout).map(|_| ())
+}
+
+// This machine acting as the *remote* end of someone else's `--remote`
+// (invoked over SSH via `remote_bridge_command`'s `exec ... remote-client-bridge`)
+// is out of scope here -- the install/detection scripts throughout this
+// module already assume a Unix shell on the remote side unconditionally, so
+// supporting a Windows *target* would be a separate feature, not part of
+// porting `--remote` for a Windows *controller*.
+#[cfg(windows)]
+pub(crate) fn run_remote_client_bridge() -> io::Result<()> {
+    Err(io::Error::other(
+        "this machine cannot act as a `--remote` target (SSH-ing into Windows is not supported)",
+    ))
 }
 
 fn ensure_remote_server_running() -> io::Result<()> {
@@ -1712,6 +1743,7 @@ struct SshStdioBridge {
     thread: Option<JoinHandle<()>>,
 }
 
+#[cfg(unix)]
 impl SshStdioBridge {
     fn start(
         target: String,
@@ -1767,6 +1799,72 @@ impl SshStdioBridge {
     }
 }
 
+// Windows has no `UnixListener`/`UnixStream`; the local loopback endpoint
+// here goes through `crate::ipc`'s cross-platform local-socket abstraction
+// instead (Unix domain socket on Unix, named pipe on Windows -- already used
+// throughout the rest of this crate for the same local/thin-client IPC
+// pattern, see `server/client_accept.rs`). Kept as a separate `impl` block
+// rather than unifying the stream type, so the proven Unix path above stays
+// untouched.
+#[cfg(windows)]
+impl SshStdioBridge {
+    fn start(
+        target: String,
+        remote_tanuki: RemoteTanuki,
+        local_socket: PathBuf,
+        session_name: String,
+        ssh_options: Option<&ManagedSshOptions>,
+    ) -> io::Result<Self> {
+        use interprocess::local_socket::traits::{Listener as _, Stream as _};
+        use interprocess::local_socket::ListenerNonblockingMode;
+
+        let _ = std::fs::remove_file(&local_socket);
+        let listener = crate::ipc::bind_local_listener(&local_socket)?;
+        crate::ipc::restrict_socket_permissions(&local_socket, BRIDGE_SOCKET_PERMISSION_MODE)?;
+        listener.set_nonblocking(ListenerNonblockingMode::Accept)?;
+
+        let should_stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&should_stop);
+        let thread_ssh_options = ssh_options.cloned();
+        let thread = thread::spawn(move || {
+            while !thread_stop.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok(stream) => {
+                        if let Err(err) = stream.set_nonblocking(false) {
+                            eprintln!(
+                                "tanuki: remote bridge failed to prepare client socket: {err}"
+                            );
+                            continue;
+                        }
+                        if let Err(err) = bridge_connection(
+                            stream,
+                            &target,
+                            &remote_tanuki,
+                            &session_name,
+                            thread_ssh_options.as_ref(),
+                        ) {
+                            eprintln!("tanuki: remote bridge failed: {err}");
+                        }
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                        thread::sleep(BRIDGE_ACCEPT_POLL);
+                    }
+                    Err(err) => {
+                        eprintln!("tanuki: remote bridge listener failed: {err}");
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(Self {
+            local_socket,
+            should_stop,
+            thread: Some(thread),
+        })
+    }
+}
+
 impl Drop for SshStdioBridge {
     fn drop(&mut self) {
         self.should_stop.store(true, Ordering::Release);
@@ -1784,6 +1882,7 @@ impl Drop for SshStdioBridge {
 /// than a predictable file in the world-writable temp dir — stops a local user
 /// from pre-planting a symlink or world-writable file that tanuki would write
 /// and `ssh -F` would then read.
+#[cfg(unix)]
 fn private_ssh_config_dir() -> io::Result<PathBuf> {
     use std::os::unix::fs::DirBuilderExt;
 
@@ -1834,6 +1933,7 @@ fn ssh_config_quote(path: &str) -> String {
 /// first-value-wins rule keeps any `ServerAlive*` the user set there (including
 /// an explicit `0` to disable it). Tanuki's keepalive values apply only when
 /// the user has none.
+#[cfg(unix)]
 fn write_managed_ssh_config() -> io::Result<ManagedSshConfig> {
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -1872,6 +1972,22 @@ fn write_managed_ssh_config() -> io::Result<ManagedSshConfig> {
     })
 }
 
+/// `ControlMaster`/`ControlPath` connection sharing is a Unix-domain-socket
+/// feature of OpenSSH that Win32-OpenSSH (the client bundled with Windows)
+/// does not implement. Returning an error here is not a degraded path: the
+/// only caller (`RemoteSsh::new`) already treats a failed managed config as
+/// "fall back to plain ssh, one connection per command" via `.ok()` --
+/// exactly the existing, already-exercised fallback for e.g. a read-only
+/// temp dir on Unix. Windows always takes that fallback; it just loses the
+/// connection-reuse optimization, not functionality.
+#[cfg(windows)]
+fn write_managed_ssh_config() -> io::Result<ManagedSshConfig> {
+    Err(io::Error::other(
+        "managed ssh config (ControlMaster) is not supported by Windows OpenSSH",
+    ))
+}
+
+#[cfg(unix)]
 fn bridge_connection(
     stream: UnixStream,
     target: &str,
@@ -1910,6 +2026,72 @@ fn bridge_connection(
     let download = thread::spawn(move || {
         let _ = copy_flush(&mut child_stdout, &mut child_to_stream);
         let _ = child_to_stream.shutdown(std::net::Shutdown::Write);
+    });
+
+    let status = child.wait()?;
+    let _ = upload.join();
+    let _ = download.join();
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            format!("ssh bridge exited with {status}"),
+        ))
+    }
+}
+
+/// Same as the Unix `bridge_connection` above, but over a
+/// `crate::ipc::LocalStream` (named pipe) instead of a `UnixStream`. One
+/// behavioral difference: `interprocess`'s local-socket `Stream` has no
+/// `shutdown(Write)` equivalent, so the download side cannot half-close:
+/// it closes fully once `child_to_stream` drops at the end of this
+/// function, which still unblocks a peer waiting on EOF, but (unlike the
+/// Unix path) the connection cannot then continue being read from by
+/// another in-flight direction. Given each bridged connection is
+/// short-lived and one-shot per `tanuki client` invocation, this has no
+/// observed effect on the actual remote-attach flow.
+#[cfg(windows)]
+fn bridge_connection(
+    stream: crate::ipc::LocalStream,
+    target: &str,
+    remote_tanuki: &RemoteTanuki,
+    session_name: &str,
+    ssh_options: Option<&ManagedSshOptions>,
+) -> io::Result<()> {
+    use interprocess::TryClone as _;
+
+    let mut command = Command::new("ssh");
+    apply_managed_ssh_options(&mut command, ssh_options);
+    command
+        .arg("-T")
+        .arg(target)
+        .arg(remote_bridge_command(remote_tanuki, session_name));
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    let mut child = command
+        .spawn()
+        .map_err(|err| io::Error::new(err.kind(), format!("failed to start ssh bridge: {err}")))?;
+    let mut child_stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "ssh bridge stdin missing"))?;
+    let mut child_stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "ssh bridge stdout missing"))?;
+    let mut stream_to_child = stream.try_clone()?;
+    let mut child_to_stream = stream;
+
+    let upload = thread::spawn(move || {
+        let _ = copy_flush(&mut stream_to_child, &mut child_stdin);
+    });
+    let download = thread::spawn(move || {
+        let _ = copy_flush(&mut child_stdout, &mut child_to_stream);
     });
 
     let status = child.wait()?;
@@ -2004,12 +2186,21 @@ fn local_forward_socket_path(target: &str, session_name: &str) -> PathBuf {
     PathBuf::from("/tmp").join(short_name)
 }
 
+#[cfg(unix)]
 fn fits_unix_socket_path(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     // sun_path is byte-limited: 104 bytes on macOS, 108 on Linux. Reserve
     // 1 byte for the trailing NUL and use the smaller cap for portability.
     const MAX: usize = 103;
     path.as_os_str().as_bytes().len() <= MAX
+}
+
+/// Windows named pipes (`\\.\pipe\<name>`, see `crate::ipc::bind_local_listener`)
+/// have no `sun_path`-style byte-length ceiling, so `local_forward_socket_path`'s
+/// hashed-short-name fallback never needs to trigger here.
+#[cfg(windows)]
+fn fits_unix_socket_path(_path: &Path) -> bool {
+    true
 }
 
 fn short_socket_hash(target: &str, session: &str) -> String {
@@ -2042,6 +2233,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(unix)]
     fn bridge_socket_is_user_only() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -2070,6 +2262,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn managed_ssh_config_includes_user_config_then_fallback() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -3035,12 +3228,14 @@ mod tests {
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
     }
 
+    #[cfg(unix)]
     fn socket_path_byte_len(path: &Path) -> usize {
         use std::os::unix::ffi::OsStrExt;
         path.as_os_str().as_bytes().len()
     }
 
     #[test]
+    #[cfg(unix)]
     fn local_forward_socket_path_uses_readable_name_when_it_fits() {
         let _guard = remote_env_lock().lock().unwrap();
         // Short target + session leave plenty of room — keep the human-
@@ -3065,6 +3260,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn local_forward_socket_path_fits_in_sun_path() {
         let _guard = remote_env_lock().lock().unwrap();
         // Worst case for the readable form: macOS-style 49-char TMPDIR +
@@ -3082,6 +3278,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn local_forward_socket_path_falls_back_to_tmp_when_dir_is_long() {
         let _guard = remote_env_lock().lock().unwrap();
         // Force a TMPDIR long enough that even the hashed short name cannot

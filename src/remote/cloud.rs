@@ -67,6 +67,7 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -79,6 +80,22 @@ use tracing::{debug, warn};
 
 use crate::ipc::Transport;
 use crate::server::client_transport::{self, ServerEvent};
+
+use super::webrtc_p2p::{self, RemoteSignal};
+
+/// P2P negotiation window (Task 5): if a data channel hasn't opened within
+/// this long, the caller keeps using the Socket.IO byte-relay indefinitely
+/// -- there is no retry, negotiation is a one-shot best-effort upgrade per
+/// logical connection.
+const P2P_NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Extra (non-STUN) ICE server URLs, e.g. a `turn:` URL once Task 6's
+/// `coturn` deployment exists. Empty for now -- P2P only succeeds when a
+/// direct host/srflx path exists; symmetric-NAT sessions fall back to the
+/// Socket.IO relay until Task 6 lands.
+fn cloud_ice_servers() -> Vec<String> {
+    Vec::new()
+}
 
 /// How long `connect_viewer` waits for `term:attach:ack` / `term:attach:error`
 /// before giving up.
@@ -99,11 +116,21 @@ const HOST_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// permanently unregistered after a single rejected attempt.
 const HOST_HELLO_RETRY_DELAY: Duration = Duration::from_secs(5);
 
+/// Viewer-side reconnect backoff after an unexpected connection close (i.e.
+/// not a graceful `term:detached`). Doubles each failed attempt up to
+/// `VIEWER_RECONNECT_MAX_DELAY`. `rust_socketio` 0.6.0 has no built-in
+/// reconnect of its own -- `connect()` returns once and the crate's poll
+/// thread only keeps an *already open* connection alive -- so this is
+/// implemented entirely at this module's level, driven off the `"close"`
+/// event.
+const VIEWER_RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
+const VIEWER_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
+
 // ---------------------------------------------------------------------------
 // Legion device identity (`~/.legion/config.json`)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct LegionConfig {
     id: String,
     token: String,
@@ -250,7 +277,13 @@ struct CloudDuplexState {
 struct CloudDuplexInner {
     state: Mutex<CloudDuplexState>,
     ready: Condvar,
-    write_fn: Arc<WriteFn>,
+    /// Mutex (not a bare `Arc<WriteFn>`) so a successful P2P negotiation
+    /// (Task 5, `remote::webrtc_p2p`) can swap the write path from the
+    /// Socket.IO relay emit to the data-channel send, without needing a
+    /// new `CloudDuplex`/`Transport` variant. `push`/reads are unaffected
+    /// either way -- inbound bytes are handed to `push` regardless of
+    /// which transport they arrived over.
+    write_fn: Mutex<Arc<WriteFn>>,
     /// Sticky read timeout set via [`CloudDuplex::set_recv_timeout`],
     /// mirroring `SO_RCVTIMEO` semantics on a real socket: `None` blocks
     /// forever, `Some(d)` bounds every subsequent `read()` call until
@@ -290,7 +323,7 @@ impl CloudDuplex {
                     closed: false,
                 }),
                 ready: Condvar::new(),
-                write_fn,
+                write_fn: Mutex::new(write_fn),
                 read_timeout: Mutex::new(None),
             }),
         }
@@ -304,6 +337,29 @@ impl CloudDuplex {
             .read_timeout
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = timeout;
+    }
+
+    /// Swaps the write path, e.g. from the Socket.IO byte-relay emit to a
+    /// P2P data-channel send once `remote::webrtc_p2p` negotiation
+    /// succeeds. Safe to call concurrently with in-flight `write()` calls;
+    /// any write already past the lock acquisition finishes against
+    /// whichever `write_fn` it observed, in-flight or subsequent writes
+    /// after this call use the new one.
+    pub(crate) fn set_write_fn(&self, write_fn: Arc<WriteFn>) {
+        *self
+            .inner
+            .write_fn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = write_fn;
+    }
+
+    /// Called from the P2P data-channel's `on_message` callback (see
+    /// `remote::webrtc_p2p`) when the write path has been upgraded to P2P
+    /// -- feeds inbound bytes into the same buffer `push` from the
+    /// Socket.IO relay path uses, so callers never need to know which
+    /// transport actually delivered a given chunk.
+    pub(crate) fn push_p2p(&self, data: &[u8]) {
+        self.push(data);
     }
 
     /// Called from the Socket.IO event callback thread when a frame
@@ -393,7 +449,14 @@ impl Read for CloudDuplex {
 
 impl Write for CloudDuplex {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        (self.inner.write_fn)(buf)?;
+        let write_fn = Arc::clone(
+            &self
+                .inner
+                .write_fn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        write_fn(buf)?;
         Ok(buf.len())
     }
 
@@ -470,13 +533,27 @@ impl CloudHostTransport {
             Arc::new(Mutex::new(HashMap::new()));
         let client_id_allocator = Arc::new(client_id_allocator);
 
+        // One in-progress-or-active P2P negotiation per attached viewer
+        // (Task 5). Entries are inserted in `term:peer_attached` and
+        // removed in `term:peer_detached` -- negotiation itself runs on
+        // its own thread (`webrtc_p2p::spawn_negotiation`), this map only
+        // exists so the `term:webrtc_offer`/`term:webrtc_ice` handlers
+        // below know which viewer's negotiation a given signaling message
+        // belongs to.
+        let negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
         let attach_viewers = Arc::clone(&viewers);
         let attach_client_id_allocator = Arc::clone(&client_id_allocator);
         let attach_server_event_tx = server_event_tx.clone();
         let attach_should_quit = Arc::clone(&should_quit);
+        let attach_negotiations = Arc::clone(&negotiations);
 
         let detach_viewers = Arc::clone(&viewers);
+        let detach_negotiations = Arc::clone(&negotiations);
         let input_viewers = Arc::clone(&viewers);
+        let offer_negotiations = Arc::clone(&negotiations);
+        let ice_negotiations = Arc::clone(&negotiations);
 
         // Populated from the "open" callback and reused by the heartbeat
         // thread and the host_hello:error retry to re-emit term:host_hello
@@ -546,6 +623,88 @@ impl CloudHostTransport {
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .insert(viewer_sid.clone(), duplex.clone());
 
+                // Best-effort P2P upgrade (Task 5): the host is the
+                // answerer, since the viewer is the side that initiated
+                // `term:attach`. Failure/timeout leaves the Socket.IO
+                // relay path above as the permanent transport for this
+                // viewer -- no retry.
+                {
+                    let emit_answer: Arc<dyn Fn(&str) + Send + Sync> = {
+                        let socket = socket.clone();
+                        let viewer_sid = viewer_sid.clone();
+                        Arc::new(move |sdp: &str| {
+                            if let Err(err) = socket.emit(
+                                "term:webrtc_answer",
+                                json!({"viewer_sid": viewer_sid, "sdp": sdp}),
+                            ) {
+                                warn!(err = %err, "cloud host: failed to send term:webrtc_answer");
+                            }
+                        })
+                    };
+                    let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
+                        let socket = socket.clone();
+                        let viewer_sid = viewer_sid.clone();
+                        Arc::new(move |candidate: &str| {
+                            if let Err(err) = socket.emit(
+                                "term:webrtc_ice",
+                                json!({"viewer_sid": viewer_sid, "candidate": candidate}),
+                            ) {
+                                warn!(err = %err, "cloud host: failed to send term:webrtc_ice");
+                            }
+                        })
+                    };
+                    let emit_offer_unused: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_sdp: &str| {
+                        debug_assert!(false, "cloud host is always the P2P answerer, never emits an offer");
+                    });
+                    let on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync> = {
+                        let duplex = duplex.clone();
+                        let viewer_sid = viewer_sid.clone();
+                        Arc::new(move |write_fn| {
+                            duplex.set_write_fn(write_fn);
+                            debug!(viewer_sid = %viewer_sid, "cloud host: P2P data channel established, switched off relay");
+                        })
+                    };
+                    let on_data: Arc<dyn Fn(&[u8]) + Send + Sync> = {
+                        let duplex = duplex.clone();
+                        Arc::new(move |data: &[u8]| duplex.push_p2p(data))
+                    };
+                    // Task 7: report the negotiation outcome so the
+                    // backend can track % direct-P2P vs TURN-relay
+                    // sessions (pre-mortem Track Tiger #6).
+                    let on_outcome: Arc<dyn Fn(webrtc_p2p::NegotiationOutcome) + Send + Sync> = {
+                        let socket = socket.clone();
+                        let viewer_sid = viewer_sid.clone();
+                        Arc::new(move |outcome: webrtc_p2p::NegotiationOutcome| {
+                            if let Err(err) = socket.emit(
+                                "term:webrtc_stats",
+                                json!({
+                                    "viewer_sid": viewer_sid,
+                                    "established": outcome.established,
+                                    "candidate_type": outcome.best_local_candidate_type.unwrap_or("unknown"),
+                                }),
+                            ) {
+                                warn!(err = %err, "cloud host: failed to send term:webrtc_stats");
+                            }
+                        })
+                    };
+
+                    let remote_tx = webrtc_p2p::spawn_negotiation(
+                        false,
+                        cloud_ice_servers(),
+                        emit_offer_unused,
+                        emit_answer,
+                        emit_ice,
+                        on_channel_ready,
+                        on_data,
+                        on_outcome,
+                        P2P_NEGOTIATION_TIMEOUT,
+                    );
+                    attach_negotiations
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .insert(viewer_sid.clone(), remote_tx);
+                }
+
                 let client_id = (attach_client_id_allocator)();
                 let server_event_tx = attach_server_event_tx.clone();
                 let should_quit = attach_should_quit.clone();
@@ -571,6 +730,50 @@ impl CloudHostTransport {
                     .remove(&viewer_sid)
                 {
                     duplex.close();
+                }
+                // Dropping the sender lets `webrtc_p2p::spawn_negotiation`'s
+                // forwarding thread observe closure and exit if negotiation
+                // for this viewer was still in flight.
+                detach_negotiations
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&viewer_sid);
+            })
+            .on("term:webrtc_offer", move |payload, _socket| {
+                let Some(value) = payload_as_value(&payload) else {
+                    return;
+                };
+                let Some(viewer_sid) = value.get("viewer_sid").and_then(|v| v.as_str()) else {
+                    return;
+                };
+                let Some(sdp) = value.get("sdp").and_then(|v| v.as_str()) else {
+                    return;
+                };
+                let guard = offer_negotiations
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(tx) = guard.get(viewer_sid) {
+                    let _ = tx.send(RemoteSignal::Offer(sdp.to_owned()));
+                }
+            })
+            .on("term:webrtc_ice", move |payload, _socket| {
+                let Some(value) = payload_as_value(&payload) else {
+                    return;
+                };
+                let Some(viewer_sid) = value.get("viewer_sid").and_then(|v| v.as_str()) else {
+                    return;
+                };
+                let Some(candidate) = value.get("candidate") else {
+                    return;
+                };
+                let Ok(candidate_json) = serde_json::to_string(candidate) else {
+                    return;
+                };
+                let guard = ice_negotiations
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(tx) = guard.get(viewer_sid) {
+                    let _ = tx.send(RemoteSignal::IceCandidate(candidate_json));
                 }
             })
             .on("term:input", move |payload, _socket| {
@@ -644,7 +847,6 @@ type AttachResult = Result<(), String>;
 /// `Transport::Local(crate::ipc::connect_local_stream(...)?)`.
 pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
     let config = load_legion_config()?;
-    let auth = auth_payload(&config, "term-viewer");
     let target_token_id = target_token_id.to_owned();
 
     // The Socket.IO client handle needed to emit `term:input` at write-time
@@ -652,7 +854,10 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
     // available once `.connect()` returns below. Every `on(...)` callback
     // receives its own `RawClient` handle immediately though, so we grab a
     // copy of it from the very first callback that fires ("open") and stash
-    // it here for the write closure to use afterwards.
+    // it here for the write closure to use afterwards. On reconnect (see
+    // `viewer_reconnect_loop`) this same cell gets overwritten with the new
+    // client, so in-flight writes always target whichever connection is
+    // currently live.
     let client_cell: Arc<Mutex<Option<RawClient>>> = Arc::new(Mutex::new(None));
 
     let write_client_cell = Arc::clone(&client_cell);
@@ -671,13 +876,82 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
 
     let attach_state: Arc<(Mutex<Option<AttachResult>>, Condvar)> =
         Arc::new((Mutex::new(None), Condvar::new()));
+    // Set once `term:detached` is received (the host cleanly ended the
+    // session) so the `"close"` handler that follows it knows not to
+    // reconnect -- closing was intentional, not a dropped connection.
+    let detached = Arc::new(AtomicBool::new(false));
+    // Guards against spawning overlapping reconnect loops if `"close"`
+    // fires more than once for the same underlying disconnect.
+    let reconnecting = Arc::new(AtomicBool::new(false));
+
+    // Holds the currently-active P2P negotiation's signaling sender (Task
+    // 5), so the `term:webrtc_answer`/`term:webrtc_ice` handlers know
+    // where to forward incoming signaling messages. Re-populated on every
+    // successful attach (initial or reconnect) -- see the `term:attach:ack`
+    // handler in `connect_viewer_attempt`.
+    let p2p_signal_cell: Arc<Mutex<Option<std::sync::mpsc::Sender<RemoteSignal>>>> =
+        Arc::new(Mutex::new(None));
+
+    let client = connect_viewer_attempt(
+        &config,
+        target_token_id,
+        Arc::clone(&client_cell),
+        duplex.clone(),
+        Arc::clone(&attach_state),
+        Arc::clone(&detached),
+        Arc::clone(&reconnecting),
+        Arc::clone(&p2p_signal_cell),
+    )?;
+
+    // The connection is kept alive by the crate's own background poll
+    // thread (which holds its own client reference), not by this local
+    // binding, so it is fine to let `client` go out of scope once we are
+    // done using it here.
+    drop(client);
+
+    wait_for_attach_result(&attach_state)?;
+
+    Ok(Transport::Cloud(duplex))
+}
+
+/// Builds and connects one viewer-side Socket.IO client, wiring its
+/// callbacks against the shared state (`client_cell`/`duplex`/`attach_state`)
+/// so that both the very first connection attempt in [`connect_viewer`] and
+/// every subsequent reconnect attempt in [`viewer_reconnect_loop`] behave
+/// identically from the caller's (and the local terminal's) point of view.
+fn connect_viewer_attempt(
+    config: &LegionConfig,
+    target_token_id: String,
+    client_cell: Arc<Mutex<Option<RawClient>>>,
+    duplex: CloudDuplex,
+    attach_state: Arc<(Mutex<Option<AttachResult>>, Condvar)>,
+    detached: Arc<AtomicBool>,
+    reconnecting: Arc<AtomicBool>,
+    p2p_signal_cell: Arc<Mutex<Option<std::sync::mpsc::Sender<RemoteSignal>>>>,
+) -> io::Result<RawClient> {
+    let auth = auth_payload(config, "term-viewer");
 
     let open_client_cell = Arc::clone(&client_cell);
     let open_attach_state = Arc::clone(&attach_state);
     let ack_attach_state = Arc::clone(&attach_state);
+    let ack_duplex = duplex.clone();
+    let ack_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
     let error_attach_state = Arc::clone(&attach_state);
     let frame_duplex = duplex.clone();
     let detach_duplex = duplex.clone();
+    let detach_detached = Arc::clone(&detached);
+    let open_target_token_id = target_token_id.clone();
+    let ice_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
+    let answer_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
+
+    let close_config = config.clone();
+    let close_target_token_id = target_token_id;
+    let close_client_cell = Arc::clone(&client_cell);
+    let close_duplex = duplex;
+    let close_attach_state = Arc::clone(&attach_state);
+    let close_detached = Arc::clone(&detached);
+    let close_reconnecting = Arc::clone(&reconnecting);
+    let close_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
 
     let client = ClientBuilder::new(config.server_url.clone())
         .transport_type(TransportType::Websocket)
@@ -686,17 +960,90 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
             *open_client_cell
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(socket.clone());
-            if let Err(err) =
-                socket.emit("term:attach", json!({ "target_token_id": target_token_id }))
-            {
+            if let Err(err) = socket.emit(
+                "term:attach",
+                json!({ "target_token_id": open_target_token_id }),
+            ) {
                 signal_attach_result(
                     &open_attach_state,
                     Err(format!("failed to send term:attach: {err}")),
                 );
             }
         })
-        .on("term:attach:ack", move |_payload, _socket| {
+        .on("term:attach:ack", move |_payload, socket: RawClient| {
             signal_attach_result(&ack_attach_state, Ok(()));
+
+            // Best-effort P2P upgrade (Task 5): the viewer is always the
+            // offerer, since it's the side that just initiated
+            // `term:attach`. Failure/timeout leaves the Socket.IO relay
+            // path (already live via `term:attach:ack`) as the permanent
+            // transport for this attach -- no retry.
+            let emit_offer: Arc<dyn Fn(&str) + Send + Sync> = {
+                let socket = socket.clone();
+                Arc::new(move |sdp: &str| {
+                    if let Err(err) = socket.emit("term:webrtc_offer", json!({"sdp": sdp})) {
+                        warn!(err = %err, "cloud viewer: failed to send term:webrtc_offer");
+                    }
+                })
+            };
+            let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
+                let socket = socket.clone();
+                Arc::new(move |candidate: &str| {
+                    if let Err(err) =
+                        socket.emit("term:webrtc_ice", json!({"candidate": candidate}))
+                    {
+                        warn!(err = %err, "cloud viewer: failed to send term:webrtc_ice");
+                    }
+                })
+            };
+            let emit_answer_unused: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_sdp: &str| {
+                debug_assert!(false, "cloud viewer is always the P2P offerer, never emits an answer");
+            });
+            let on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync> = {
+                let duplex = ack_duplex.clone();
+                Arc::new(move |write_fn| {
+                    duplex.set_write_fn(write_fn);
+                    debug!("cloud viewer: P2P data channel established, switched off relay");
+                })
+            };
+            let on_data: Arc<dyn Fn(&[u8]) + Send + Sync> = {
+                let duplex = ack_duplex.clone();
+                Arc::new(move |data: &[u8]| duplex.push_p2p(data))
+            };
+            // Task 7: report the negotiation outcome so the backend can
+            // track % direct-P2P vs TURN-relay sessions (pre-mortem Track
+            // Tiger #6). No `viewer_sid` field needed here -- the server
+            // already knows this connection's own sid from the emitting
+            // socket itself.
+            let on_outcome: Arc<dyn Fn(webrtc_p2p::NegotiationOutcome) + Send + Sync> = {
+                let socket = socket.clone();
+                Arc::new(move |outcome: webrtc_p2p::NegotiationOutcome| {
+                    if let Err(err) = socket.emit(
+                        "term:webrtc_stats",
+                        json!({
+                            "established": outcome.established,
+                            "candidate_type": outcome.best_local_candidate_type.unwrap_or("unknown"),
+                        }),
+                    ) {
+                        warn!(err = %err, "cloud viewer: failed to send term:webrtc_stats");
+                    }
+                })
+            };
+
+            let remote_tx = webrtc_p2p::spawn_negotiation(
+                true,
+                cloud_ice_servers(),
+                emit_offer,
+                emit_answer_unused,
+                emit_ice,
+                on_channel_ready,
+                on_data,
+                on_outcome,
+                P2P_NEGOTIATION_TIMEOUT,
+            );
+            *ack_p2p_signal_cell
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(remote_tx);
         })
         .on("term:attach:error", move |payload, _socket| {
             let reason =
@@ -710,8 +1057,76 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
                 debug!("cloud viewer: term:frame with unparseable payload");
             }
         })
+        .on("term:webrtc_answer", move |payload, _socket| {
+            let Some(value) = payload_as_value(&payload) else {
+                return;
+            };
+            let Some(sdp) = value.get("sdp").and_then(|v| v.as_str()) else {
+                return;
+            };
+            let guard = answer_p2p_signal_cell
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(RemoteSignal::Answer(sdp.to_owned()));
+            }
+        })
+        .on("term:webrtc_ice", move |payload, _socket| {
+            let Some(value) = payload_as_value(&payload) else {
+                return;
+            };
+            let Some(candidate) = value.get("candidate") else {
+                return;
+            };
+            let Ok(candidate_json) = serde_json::to_string(candidate) else {
+                return;
+            };
+            let guard = ice_p2p_signal_cell
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(RemoteSignal::IceCandidate(candidate_json));
+            }
+        })
         .on("term:detached", move |_payload, _socket| {
+            // Host ended the session on purpose -- mark it so the "close"
+            // event that follows this one does not try to reconnect, then
+            // signal EOF to the local terminal exactly as before.
+            detach_detached.store(true, Ordering::SeqCst);
             detach_duplex.close();
+        })
+        .on("close", move |payload, _socket| {
+            if close_detached.load(Ordering::SeqCst) {
+                return;
+            }
+            if close_reconnecting.swap(true, Ordering::SeqCst) {
+                // A reconnect loop from a previous "close" is already running.
+                return;
+            }
+            warn!(
+                payload = ?payload,
+                "cloud viewer: connection closed unexpectedly, reconnecting"
+            );
+            let config = close_config.clone();
+            let target_token_id = close_target_token_id.clone();
+            let client_cell = Arc::clone(&close_client_cell);
+            let duplex = close_duplex.clone();
+            let attach_state = Arc::clone(&close_attach_state);
+            let detached = Arc::clone(&close_detached);
+            let reconnecting = Arc::clone(&close_reconnecting);
+            let p2p_signal_cell = Arc::clone(&close_p2p_signal_cell);
+            std::thread::spawn(move || {
+                viewer_reconnect_loop(
+                    config,
+                    target_token_id,
+                    client_cell,
+                    duplex,
+                    attach_state,
+                    detached,
+                    reconnecting,
+                    p2p_signal_cell,
+                );
+            });
         })
         .on("error", |payload, _socket| {
             warn!(payload = ?payload, "cloud viewer: socket.io error");
@@ -724,15 +1139,65 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
             )
         })?;
 
-    // The connection is kept alive by the crate's own background poll
-    // thread (which holds its own client reference), not by this local
-    // binding, so it is fine to let `client` go out of scope once we are
-    // done using it here.
-    drop(client);
+    Ok(client)
+}
 
-    wait_for_attach_result(&attach_state)?;
+/// Runs after an unexpected `"close"` (anything other than a graceful
+/// `term:detached`), retrying `connect_viewer_attempt` with exponential
+/// backoff until either a fresh connection re-attaches successfully or the
+/// duplex is closed from elsewhere (e.g. a `term:detached` that arrives
+/// while a retry is in flight). The local terminal never sees an EOF for a
+/// transient network blip -- reads just block a little longer while this
+/// loop is working, same as `CloudDuplex::read`'s existing wait behaviour.
+fn viewer_reconnect_loop(
+    config: LegionConfig,
+    target_token_id: String,
+    client_cell: Arc<Mutex<Option<RawClient>>>,
+    duplex: CloudDuplex,
+    attach_state: Arc<(Mutex<Option<AttachResult>>, Condvar)>,
+    detached: Arc<AtomicBool>,
+    reconnecting: Arc<AtomicBool>,
+    p2p_signal_cell: Arc<Mutex<Option<std::sync::mpsc::Sender<RemoteSignal>>>>,
+) {
+    let mut delay = VIEWER_RECONNECT_INITIAL_DELAY;
+    loop {
+        if detached.load(Ordering::SeqCst) {
+            reconnecting.store(false, Ordering::SeqCst);
+            return;
+        }
+        std::thread::sleep(delay);
 
-    Ok(Transport::Cloud(duplex))
+        let attempt = connect_viewer_attempt(
+            &config,
+            target_token_id.clone(),
+            Arc::clone(&client_cell),
+            duplex.clone(),
+            Arc::clone(&attach_state),
+            Arc::clone(&detached),
+            Arc::clone(&reconnecting),
+            Arc::clone(&p2p_signal_cell),
+        )
+        .and_then(|client| {
+            drop(client);
+            wait_for_attach_result(&attach_state)
+        });
+
+        match attempt {
+            Ok(()) => {
+                warn!("cloud viewer: reconnected after unexpected close");
+                reconnecting.store(false, Ordering::SeqCst);
+                return;
+            }
+            Err(err) => {
+                warn!(
+                    err = %err,
+                    delay = ?delay,
+                    "cloud viewer: reconnect attempt failed, retrying"
+                );
+                delay = (delay * 2).min(VIEWER_RECONNECT_MAX_DELAY);
+            }
+        }
+    }
 }
 
 fn signal_attach_result(state: &Arc<(Mutex<Option<AttachResult>>, Condvar)>, result: AttachResult) {

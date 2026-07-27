@@ -42,6 +42,11 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-width = "0.2"
 schemars = { version = "1.2.1", features = ["derive"] }
 rust_socketio = "0.6"
+# Tokio-native P2P data channel for the `--cloud` transport (Task 5,
+# spelflow-tanuki-terminal-stability-tasks.md). Pinned to the 0.17.x line
+# deliberately -- 0.20.0-rc.1 is a Sans-IO rewrite still in development and
+# not stable enough to depend on.
+webrtc = "=0.17.0"
 # rust_socketio pulls in native-tls unconditionally (no rustls option). On Linux/musl
 # targets native-tls links the system OpenSSL via pkg-config, which isn't available
 # (or isn't musl-compatible) on CI/cross-compile runners. Forcing the `vendored`
