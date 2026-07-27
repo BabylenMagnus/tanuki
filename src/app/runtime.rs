@@ -4,8 +4,8 @@ use crossterm::terminal;
 
 use super::{
     background_update_check_enabled, repeat_key_identity, App, Mode, ANIMATION_INTERVAL,
-    AUTO_UPDATE_CHECK_INTERVAL, GIT_REMOTE_STATUS_REFRESH_INTERVAL, MIN_RENDER_INTERVAL,
-    RESIZE_POLL_INTERVAL, SELECTION_AUTOSCROLL_INTERVAL,
+    AUTO_UPDATE_CHECK_INTERVAL, CONFIG_WATCH_POLL_INTERVAL, GIT_REMOTE_STATUS_REFRESH_INTERVAL,
+    MIN_RENDER_INTERVAL, RESIZE_POLL_INTERVAL, SELECTION_AUTOSCROLL_INTERVAL,
 };
 use crate::events::AppEvent;
 use crate::workspace::{GitStatusCacheEntry, Workspace, WorkspaceGitStatus};
@@ -228,6 +228,14 @@ impl App {
             resized = self.handle_resize_poll();
             changed |= resized;
             self.next_resize_poll = now + RESIZE_POLL_INTERVAL;
+        }
+
+        if now >= self.next_config_watch_poll {
+            if self.check_external_config_change() {
+                self.state.request_reload_config = true;
+                changed = true;
+            }
+            self.next_config_watch_poll = now + CONFIG_WATCH_POLL_INTERVAL;
         }
 
         if self
@@ -605,6 +613,7 @@ impl App {
 
         [
             include_resize_poll.then_some(self.next_resize_poll),
+            include_resize_poll.then_some(self.next_config_watch_poll),
             self.config_diagnostic_deadline,
             self.toast_deadline,
             self.state.next_pending_agent_notification_deadline(),

@@ -313,6 +313,9 @@ impl App {
                         SettingsAction::SaveSwitchAsciiInputSourceInPrefix(enabled) => {
                             self.save_switch_ascii_input_source_in_prefix(enabled)
                         }
+                        SettingsAction::SaveKeybind(setting, binding) => {
+                            self.save_keybind(setting.field_name(), &binding)
+                        }
                         SettingsAction::InstallRecommendedIntegrations => {
                             self.install_recommended_integrations()
                         }

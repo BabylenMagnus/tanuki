@@ -32,7 +32,28 @@ impl App {
             return false;
         }
 
+        // Record our own write's mtime so the external-change poll doesn't
+        // mistake this save for a hand-edit and reload a second time with
+        // a redundant "config reloaded" toast.
+        self.known_config_mtime = crate::config::config_mtime();
+
         true
+    }
+
+    /// Check whether `config.toml` changed on disk since we last knew about it
+    /// (either from loading it or from our own last write). Updates the known
+    /// mtime as a side effect so repeated polls don't refire on the same change.
+    pub(super) fn check_external_config_change(&mut self) -> bool {
+        let current = crate::config::config_mtime();
+        if current == self.known_config_mtime {
+            return false;
+        }
+        let previously_known = self.known_config_mtime.is_some();
+        self.known_config_mtime = current;
+        // Only reload if we previously had a known mtime — the very first
+        // poll after startup would otherwise always look like a "change"
+        // when the file didn't exist yet and then got created.
+        previously_known && current.is_some()
     }
 
     pub(super) fn mark_onboarding_complete(&mut self) {
@@ -107,6 +128,22 @@ impl App {
                 "experimental",
                 "switch_ascii_input_source_in_prefix",
                 enabled,
+            )
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
+    /// Write a single keybind action's binding into the `[keys]` table.
+    /// `action_id` must match a `KeysConfig` field name (e.g. `next_agent`).
+    /// `binding` is the raw binding string (e.g. `"prefix+tab"`, `"ctrl+alt+right"`).
+    pub(super) fn save_keybind(&mut self, action_id: &str, binding: &str) {
+        if self.update_config_file("keybind", |content| {
+            crate::config::upsert_section_value(
+                content,
+                "keys",
+                action_id,
+                &format!("\"{binding}\""),
             )
         }) {
             self.apply_config_from_disk(false);

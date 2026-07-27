@@ -172,6 +172,13 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+/// Last-modified time of `config.toml`, or `None` if it doesn't exist / can't be read.
+/// Used to detect edits made outside the app (hand-editing, syncing from another
+/// machine) so they can be picked up without a manual `reload_config`.
+pub fn config_mtime() -> Option<std::time::SystemTime> {
+    std::fs::metadata(config_path()).and_then(|meta| meta.modified()).ok()
+}
+
 pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
     if diagnostics.is_empty() {
         return None;

@@ -37,6 +37,10 @@ pub(crate) const HEADLESS_ANIMATION_INTERVAL: Duration = Duration::from_millis(1
 pub(crate) const HEADLESS_ANIMATION_TICK_STEP: u32 = 8;
 pub(crate) const SELECTION_AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(30);
 const RESIZE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// How often to check whether `config.toml` changed on disk from outside
+/// the app (hand-edited, synced from another machine, etc.) so the UI can
+/// pick it up without the user having to press `reload_config` manually.
+const CONFIG_WATCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const GIT_REMOTE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(1500);
 const AUTO_UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const PENDING_AGENT_RESUME_THEME_WAIT: Duration = Duration::from_millis(750);
@@ -120,6 +124,8 @@ pub struct App {
     pub(crate) last_sidebar_divider_click: Option<Instant>,
     pub(crate) last_pane_click: Option<PaneClickState>,
     pub(crate) next_resize_poll: Instant,
+    pub(crate) next_config_watch_poll: Instant,
+    pub(crate) known_config_mtime: Option<std::time::SystemTime>,
     pub(crate) next_animation_tick: Option<Instant>,
     pub(crate) next_auto_update_check: Option<Instant>,
     pub(crate) next_agent_manifest_update_check: Option<Instant>,
@@ -654,6 +660,7 @@ impl App {
                 list: state::SelectionListState::new(0),
                 original_palette: None,
                 original_theme: None,
+                keybind_capture: None,
             },
             integration_recommendations: crate::integration::integration_recommendations(),
             agent_manifest_summaries,
@@ -729,6 +736,8 @@ impl App {
             last_sidebar_divider_click: None,
             last_pane_click: None,
             next_resize_poll: Instant::now() + RESIZE_POLL_INTERVAL,
+            next_config_watch_poll: Instant::now() + CONFIG_WATCH_POLL_INTERVAL,
+            known_config_mtime: crate::config::config_mtime(),
             next_animation_tick: None,
             next_auto_update_check: version_check_enabled
                 .then_some(Instant::now() + AUTO_UPDATE_CHECK_INTERVAL),
@@ -4490,6 +4499,7 @@ mod tests {
         let now = Instant::now();
         app.session_save_deadline = Some(now + Duration::from_secs(2));
         app.next_resize_poll = now + Duration::from_secs(5);
+        app.next_config_watch_poll = now + Duration::from_secs(5);
         app.next_auto_update_check = Some(now + Duration::from_secs(6));
 
         assert_eq!(
@@ -4610,6 +4620,7 @@ mod tests {
         let mut app = test_app();
         let now = Instant::now();
         app.next_resize_poll = now + Duration::from_millis(300);
+        app.next_config_watch_poll = now + Duration::from_millis(300);
         app.selection_autoscroll_deadline = Some(now + Duration::from_millis(5));
         app.next_animation_tick = Some(now + Duration::from_millis(100));
         app.session_save_deadline = Some(now + Duration::from_millis(200));

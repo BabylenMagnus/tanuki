@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 
 use crate::{
     app::{
-        state::{AppState, ExperimentSetting, SettingsSection, THEME_NAMES},
+        state::{AppState, ExperimentSetting, KeybindSetting, SettingsSection, THEME_NAMES},
         App, Mode,
     },
     config::ToastDelivery,
@@ -19,6 +19,7 @@ pub(super) enum SettingsAction {
     SaveAgentBorderLabels(bool),
     SavePaneHistory(bool),
     SaveSwitchAsciiInputSourceInPrefix(bool),
+    SaveKeybind(KeybindSetting, String),
     InstallRecommendedIntegrations,
 }
 
@@ -52,6 +53,9 @@ impl App {
                 }
                 SettingsAction::SaveSwitchAsciiInputSourceInPrefix(enabled) => {
                     self.save_switch_ascii_input_source_in_prefix(enabled)
+                }
+                SettingsAction::SaveKeybind(setting, binding) => {
+                    self.save_keybind(setting.field_name(), &binding)
                 }
                 SettingsAction::InstallRecommendedIntegrations => {
                     self.install_recommended_integrations()
@@ -240,7 +244,7 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 state.settings.list.selected = toast_delivery_index(state.toast_delivery());
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Integrations;
+                state.settings.section = SettingsSection::Keybinds;
                 state.settings.list.selected = 0;
             }
             _ => {
@@ -251,6 +255,51 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 }
             }
         },
+        SettingsSection::Keybinds => {
+            if let Some(kind) = state.settings.keybind_capture {
+                if key.code == KeyCode::Esc && key.modifiers.is_empty() {
+                    state.settings.keybind_capture = None;
+                    return None;
+                }
+                let setting = KeybindSetting::ALL[state.settings.list.selected];
+                let combo = crate::config::format_key_combo((key.code, key.modifiers));
+                let binding = match kind {
+                    crate::app::state::KeybindCaptureKind::Direct => combo,
+                    crate::app::state::KeybindCaptureKind::Prefix => format!("prefix+{combo}"),
+                };
+                state.settings.keybind_capture = None;
+                return Some(SettingsAction::SaveKeybind(setting, binding));
+            }
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.settings.list.move_next(KeybindSetting::ALL.len())
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    state.settings.keybind_capture =
+                        Some(crate::app::state::KeybindCaptureKind::Direct);
+                }
+                KeyCode::Char('p') => {
+                    state.settings.keybind_capture =
+                        Some(crate::app::state::KeybindCaptureKind::Prefix);
+                }
+                KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                    state.settings.section = SettingsSection::PaneLabels;
+                    state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+                }
+                KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                    state.settings.section = SettingsSection::Integrations;
+                    state.settings.list.selected = 0;
+                }
+                _ => {
+                    if let Some(super::modal::ModalAction::Close) =
+                        super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS)
+                    {
+                        cancel_settings(state);
+                    }
+                }
+            }
+        }
         SettingsSection::Experiments => match key.code {
             KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
             KeyCode::Down | KeyCode::Char('j') => {
@@ -280,8 +329,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 return Some(SettingsAction::InstallRecommendedIntegrations);
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::PaneLabels;
-                state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+                state.settings.section = SettingsSection::Keybinds;
+                state.settings.list.selected = 0;
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                 state.settings.section = SettingsSection::Experiments;
@@ -312,9 +361,11 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
         SettingsSection::Sound => usize::from(!state.sound_enabled()),
         SettingsSection::Toast => toast_delivery_index(state.toast_delivery()),
         SettingsSection::PaneLabels => usize::from(!state.agent_border_labels_enabled()),
+        SettingsSection::Keybinds => 0,
         SettingsSection::Experiments => 0,
         SettingsSection::Integrations => 0,
     };
+    state.settings.keybind_capture = None;
     state.mode = Mode::Settings;
 }
 
@@ -407,6 +458,20 @@ impl AppState {
                     None
                 }
             }
+            SettingsSection::Keybinds => {
+                let list_y = area.y + 3;
+                let max_visible = area.height.saturating_sub(3) as usize;
+                let scroll = if self.settings.list.selected >= max_visible {
+                    self.settings.list.selected - max_visible + 1
+                } else {
+                    0
+                };
+                if row < list_y {
+                    return None;
+                }
+                let idx = scroll + (row - list_y) as usize;
+                (idx < KeybindSetting::ALL.len()).then_some(idx)
+            }
             SettingsSection::Experiments => {
                 let list_y = area.y + 3;
                 if row >= list_y && row < list_y + ExperimentSetting::ALL.len() as u16 {
@@ -431,9 +496,11 @@ impl AppState {
                         SettingsSection::PaneLabels => {
                             usize::from(!self.agent_border_labels_enabled())
                         }
+                        SettingsSection::Keybinds => 0,
                         SettingsSection::Experiments => 0,
                         SettingsSection::Integrations => 0,
                     });
+                    self.settings.keybind_capture = None;
                     return None;
                 }
                 if let Some(idx) = self.settings_list_index_at(mouse.column, mouse.row) {
@@ -455,6 +522,7 @@ impl AppState {
                             let enabled = idx == 0;
                             Some(SettingsAction::SaveAgentBorderLabels(enabled))
                         }
+                        SettingsSection::Keybinds => None,
                         SettingsSection::Experiments => experiment_toggle_action(self, idx),
                         SettingsSection::Integrations => None,
                     };
@@ -590,6 +658,12 @@ mod tests {
             &mut state,
             KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
         );
+        assert_eq!(state.settings.section, SettingsSection::Keybinds);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
+        );
         assert_eq!(state.settings.section, SettingsSection::Integrations);
 
         update_settings_state(
@@ -620,7 +694,102 @@ mod tests {
             &mut state,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
         );
+        assert_eq!(state.settings.section, SettingsSection::Keybinds);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
+        );
         assert_eq!(state.settings.section, SettingsSection::PaneLabels);
+    }
+
+    #[test]
+    fn settings_keybinds_capture_saves_direct_chord_binding() {
+        let mut state = state_with_workspaces(&["test"]);
+        open_settings_at(&mut state, SettingsSection::Keybinds);
+        assert_eq!(state.settings.list.selected, 0);
+        assert_eq!(state.settings.keybind_capture, None);
+
+        let enter_capture = update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+        assert_eq!(enter_capture, None);
+        assert_eq!(
+            state.settings.keybind_capture,
+            Some(crate::app::state::KeybindCaptureKind::Direct)
+        );
+
+        let action = update_settings_state(
+            &mut state,
+            KeyEvent::new(
+                KeyCode::Right,
+                KeyModifiers::CONTROL | KeyModifiers::ALT,
+            ),
+        );
+
+        assert_eq!(
+            action,
+            Some(SettingsAction::SaveKeybind(
+                crate::app::state::KeybindSetting::PreviousAgent,
+                "ctrl+alt+right".to_string()
+            ))
+        );
+        assert_eq!(state.settings.keybind_capture, None);
+    }
+
+    #[test]
+    fn settings_keybinds_capture_prefix_saves_prefix_prefixed_binding() {
+        let mut state = state_with_workspaces(&["test"]);
+        open_settings_at(&mut state, SettingsSection::Keybinds);
+
+        let enter_capture = update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()),
+        );
+        assert_eq!(enter_capture, None);
+        assert_eq!(
+            state.settings.keybind_capture,
+            Some(crate::app::state::KeybindCaptureKind::Prefix)
+        );
+
+        let action = update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()),
+        );
+
+        assert_eq!(
+            action,
+            Some(SettingsAction::SaveKeybind(
+                crate::app::state::KeybindSetting::PreviousAgent,
+                "prefix+n".to_string()
+            ))
+        );
+        assert_eq!(state.settings.keybind_capture, None);
+    }
+
+    #[test]
+    fn settings_keybinds_capture_esc_cancels_without_saving() {
+        let mut state = state_with_workspaces(&["test"]);
+        open_settings_at(&mut state, SettingsSection::Keybinds);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+        assert_eq!(
+            state.settings.keybind_capture,
+            Some(crate::app::state::KeybindCaptureKind::Direct)
+        );
+
+        let action = update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+
+        assert_eq!(action, None);
+        assert_eq!(state.settings.keybind_capture, None);
+        assert_eq!(state.mode, Mode::Settings);
     }
 
     #[test]

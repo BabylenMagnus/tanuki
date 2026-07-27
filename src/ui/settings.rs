@@ -12,7 +12,7 @@ use super::widgets::{
 };
 use crate::{
     app::{
-        state::{ExperimentSetting, Palette},
+        state::{ExperimentSetting, KeybindSetting, Palette},
         AppState,
     },
     config::ToastDelivery,
@@ -148,6 +148,9 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 app.agent_border_labels_enabled(),
                 app.settings.list.selected,
             );
+        }
+        SettingsSection::Keybinds => {
+            render_settings_keybinds(app, frame, content_area);
         }
         SettingsSection::Experiments => {
             render_settings_experiments(app, frame, content_area);
@@ -445,6 +448,67 @@ fn render_settings_experiments(app: &AppState, frame: &mut Frame, area: Rect) {
             row,
         );
     }
+}
+
+fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
+    use crate::app::state::KeybindCaptureKind;
+
+    let p = &app.palette;
+    let [desc_area, _, list_area] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas::<3>(area);
+
+    let description = match app.settings.keybind_capture {
+        Some(KeybindCaptureKind::Direct) => "press a key combo to bind it, or esc to cancel",
+        Some(KeybindCaptureKind::Prefix) => {
+            "press a key combo to bind it after the leader key, or esc to cancel"
+        }
+        None => {
+            "no default binding — pick your own; enter = direct chord, p = prefix+ binding"
+        }
+    };
+    super::widgets::render_modal_description(
+        frame,
+        desc_area,
+        description,
+        Style::default().fg(p.overlay1),
+    );
+
+    let items: Vec<ListItem> = KeybindSetting::ALL
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(idx, setting)| {
+            let binding_label = setting
+                .current_binding(&app.keybinds)
+                .unwrap_or_else(|| "unset".to_string());
+            let value = if app.settings.list.selected == idx && app.settings.keybind_capture.is_some() {
+                "press a key…".to_string()
+            } else {
+                binding_label
+            };
+            ListItem::new(Line::from(vec![
+                Span::raw(format!(" {:<24}", setting.label())),
+                Span::styled(value, Style::default().fg(p.accent)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .highlight_style(
+            Style::default()
+                .bg(p.surface0)
+                .fg(p.text)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(" ▸ ")
+        .style(Style::default().fg(p.subtext0));
+
+    let mut list_state = ListState::default().with_selected(Some(app.settings.list.selected));
+    frame.render_stateful_widget(list, list_area, &mut list_state);
 }
 
 #[cfg(test)]
