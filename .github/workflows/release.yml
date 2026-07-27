@@ -85,7 +85,37 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      # `dtolnay/rust-toolchain` on ubuntu-latest intermittently fails to
+      # install the rustfmt/clippy components declared in
+      # `rust-toolchain.toml` against a fresh channel, with rustup reporting
+      # a false "detected conflict: bin/cargo-fmt" against the runner's
+      # preinstalled default toolchain and rolling back the whole install.
+      # Observed on both the x86_64 and aarch64 Linux jobs across separate
+      # runs (never on macOS/Windows), so this is retried a few times rather
+      # than solved by pinning a workaround to one target.
       - name: Install Rust
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -eu
+          for attempt in 1 2 3 4 5; do
+            if rustup toolchain install "${RUST_TOOLCHAIN_VERSION}" --profile default \
+                --component clippy --component rustfmt --target "${TARGET}"; then
+              rustup default "${RUST_TOOLCHAIN_VERSION}"
+              rustup target add --toolchain "${RUST_TOOLCHAIN_VERSION}" "${TARGET}"
+              exit 0
+            fi
+            echo "::warning::rustup toolchain install failed (attempt ${attempt}/5), retrying in 5s"
+            sleep 5
+          done
+          echo "::error::rustup toolchain install failed after 5 attempts"
+          exit 1
+        env:
+          RUST_TOOLCHAIN_VERSION: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          TARGET: ${{ matrix.target }}
+
+      - name: Install Rust
+        if: runner.os != 'Linux'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
