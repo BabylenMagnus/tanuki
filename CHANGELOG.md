@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.1.3] - 2026-07-27
+
+### Fixed
+- Cloud relay no longer hangs forever when a viewer attaches to a host registration that has gone stale (host process died without a clean disconnect). The backend now TTLs the host registration and the host refreshes it with a heartbeat; if a host_hello is rejected because a prior registration hasn't expired yet, the host retries instead of giving up silently.
+- The cloud transport now honors read timeouts. Previously `Transport::Cloud`'s recv-timeout was a no-op, so any handshake that didn't complete (e.g. because of the stale-host issue above) hung indefinitely instead of failing with a clear error.
+
 ## [0.1.2] - 2026-07-27
 
 ### Fixed
