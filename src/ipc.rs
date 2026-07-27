@@ -73,9 +73,10 @@ impl Transport {
     pub(crate) fn set_recv_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
         match self {
             Transport::Local(stream) => stream.set_recv_timeout(timeout),
-            // See `set_nonblocking` above: no-op by design for the cloud
-            // transport.
-            Transport::Cloud(_) => Ok(()),
+            Transport::Cloud(duplex) => {
+                duplex.set_recv_timeout(timeout);
+                Ok(())
+            }
         }
     }
 }

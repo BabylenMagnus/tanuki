@@ -84,6 +84,21 @@ use crate::server::client_transport::{self, ServerEvent};
 /// before giving up.
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How often `CloudHostTransport` re-sends `term:host_hello` while hosting,
+/// to refresh the TTL'd `term:host_sid:{token}` registration on the backend
+/// (`tanuki_api/app/socket_handlers/term_relay.py`, `_HOST_TTL_SECONDS`).
+/// Must stay comfortably below that TTL so a couple of missed heartbeats
+/// (network hiccup) don't expire a still-live registration.
+const HOST_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+
+/// How long to wait before retrying `term:host_hello` after it was rejected
+/// with `host_already_active`. The rejection means the backend still has a
+/// (possibly stale) registration for this device token; retrying gives a
+/// genuinely dead previous host's entry time to expire (see
+/// `HOST_HEARTBEAT_INTERVAL` / backend TTL) instead of leaving this host
+/// permanently unregistered after a single rejected attempt.
+const HOST_HELLO_RETRY_DELAY: Duration = Duration::from_secs(5);
+
 // ---------------------------------------------------------------------------
 // Legion device identity (`~/.legion/config.json`)
 // ---------------------------------------------------------------------------
@@ -236,6 +251,15 @@ struct CloudDuplexInner {
     state: Mutex<CloudDuplexState>,
     ready: Condvar,
     write_fn: Arc<WriteFn>,
+    /// Sticky read timeout set via [`CloudDuplex::set_recv_timeout`],
+    /// mirroring `SO_RCVTIMEO` semantics on a real socket: `None` blocks
+    /// forever, `Some(d)` bounds every subsequent `read()` call until
+    /// changed again. Without this, a stuck relay (e.g. a `term:frame`
+    /// that never arrives because the server routed `term:peer_attached`
+    /// to a dead host sid) hangs the client forever with no error --
+    /// exactly the failure mode this exists to turn into a clear
+    /// `TimedOut` instead.
+    read_timeout: Mutex<Option<Duration>>,
 }
 
 /// A duplex byte stream backed by a Socket.IO relay connection instead of a
@@ -267,8 +291,19 @@ impl CloudDuplex {
                 }),
                 ready: Condvar::new(),
                 write_fn,
+                read_timeout: Mutex::new(None),
             }),
         }
+    }
+
+    /// Sets (or clears, with `None`) the sticky read timeout applied to
+    /// every subsequent `read()` call. See [`CloudDuplexInner::read_timeout`].
+    pub(crate) fn set_recv_timeout(&self, timeout: Option<Duration>) {
+        *self
+            .inner
+            .read_timeout
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = timeout;
     }
 
     /// Called from the Socket.IO event callback thread when a frame
@@ -303,6 +338,13 @@ impl Read for CloudDuplex {
         if buf.is_empty() {
             return Ok(0);
         }
+        let timeout = *self
+            .inner
+            .read_timeout
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let deadline = timeout.map(|d| std::time::Instant::now() + d);
+
         let mut state = self.lock_state();
         loop {
             if !state.buffer.is_empty() {
@@ -315,11 +357,36 @@ impl Read for CloudDuplex {
             if state.closed {
                 return Ok(0);
             }
-            state = self
-                .inner
-                .ready
-                .wait(state)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+            state = match deadline {
+                None => self
+                    .inner
+                    .ready
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                Some(deadline) => {
+                    let now = std::time::Instant::now();
+                    if now >= deadline {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "cloud relay: read timed out",
+                        ));
+                    }
+                    let (next_state, wait_result) = self
+                        .inner
+                        .ready
+                        .wait_timeout(state, deadline - now)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if wait_result.timed_out() && next_state.buffer.is_empty() && !next_state.closed
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "cloud relay: read timed out",
+                        ));
+                    }
+                    next_state
+                }
+            };
         }
     }
 }
@@ -411,10 +478,21 @@ impl CloudHostTransport {
         let detach_viewers = Arc::clone(&viewers);
         let input_viewers = Arc::clone(&viewers);
 
+        // Populated from the "open" callback and reused by the heartbeat
+        // thread and the host_hello:error retry to re-emit term:host_hello
+        // without needing a fresh RawClient handle each time.
+        let host_client_cell: Arc<Mutex<Option<RawClient>>> = Arc::new(Mutex::new(None));
+        let open_host_client_cell = Arc::clone(&host_client_cell);
+        let retry_host_client_cell = Arc::clone(&host_client_cell);
+        let heartbeat_host_client_cell = Arc::clone(&host_client_cell);
+
         let client = ClientBuilder::new(config.server_url.clone())
             .transport_type(TransportType::Websocket)
             .auth(auth)
-            .on("open", |_payload, socket: RawClient| {
+            .on("open", move |_payload, socket: RawClient| {
+                *open_host_client_cell
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(socket.clone());
                 if let Err(err) = socket.emit("term:host_hello", json!({})) {
                     warn!(err = %err, "cloud host: failed to send term:host_hello");
                 }
@@ -422,10 +500,26 @@ impl CloudHostTransport {
             .on("term:host_hello:ack", |_payload, _socket| {
                 debug!("cloud host: registered with relay server");
             })
-            .on("term:host_hello:error", |payload, _socket| {
+            .on("term:host_hello:error", move |payload, _socket| {
                 let reason =
                     extract_str_field(&payload, "reason").unwrap_or_else(|| "unknown".to_owned());
-                warn!(reason = %reason, "cloud host: term:host_hello rejected");
+                warn!(
+                    reason = %reason,
+                    "cloud host: term:host_hello rejected, retrying in {:?}",
+                    HOST_HELLO_RETRY_DELAY
+                );
+                let host_client_cell = Arc::clone(&retry_host_client_cell);
+                std::thread::spawn(move || {
+                    std::thread::sleep(HOST_HELLO_RETRY_DELAY);
+                    let guard = host_client_cell
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if let Some(client) = guard.as_ref() {
+                        if let Err(err) = client.emit("term:host_hello", json!({})) {
+                            warn!(err = %err, "cloud host: failed to retry term:host_hello");
+                        }
+                    }
+                });
             })
             .on("term:peer_attached", move |payload, socket: RawClient| {
                 let Some(viewer_sid) = extract_str_field(&payload, "viewer_sid") else {
@@ -503,6 +597,24 @@ impl CloudHostTransport {
                     format!("cloud host: connect failed: {err}"),
                 )
             })?;
+
+        // Periodically re-send term:host_hello so the backend's TTL'd
+        // registration (`term:host_sid:{token}`, see term_relay.py) never
+        // expires while this host is genuinely still alive. Runs for the
+        // lifetime of the process, same lifecycle as the client/viewer
+        // connections themselves.
+        std::thread::spawn(move || loop {
+            std::thread::sleep(HOST_HEARTBEAT_INTERVAL);
+            let guard = heartbeat_host_client_cell
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(client) = guard.as_ref() else {
+                continue;
+            };
+            if let Err(err) = client.emit("term:host_hello", json!({})) {
+                warn!(err = %err, "cloud host: failed to send term:host_hello heartbeat");
+            }
+        });
 
         Ok(Self { client, viewers })
     }
