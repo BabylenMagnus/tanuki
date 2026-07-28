@@ -79,3 +79,10 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# Native Windows self-update (tanuki update, src/platform/windows_install.rs):
+# junction creates/reads/deletes NTFS directory junctions for the
+# versioned-release-dir layout without hand-rolling FSCTL_SET_REPARSE_POINT.
+junction = "1.2.0"
+# winreg is already resolved transitively (via vendor/portable-pty's Windows
+# deps); promoted to a direct dependency to read/write HKCU\Environment\Path.
+winreg = "0.10.1"

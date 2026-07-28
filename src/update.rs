@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::env;
-#[cfg(not(windows))]
 use std::fs;
 #[cfg(not(windows))]
 use std::io;
@@ -631,46 +630,46 @@ fn install_downloaded_update(mut update: DownloadedUpdate) -> Result<(), String>
     Ok(())
 }
 
+/// Downloads a release asset to a temp file and verifies its checksum,
+/// without touching the release/junction tree -- decoupled from
+/// `crate::platform::windows_install::install_windows_update` so the
+/// download step can fail independently of install-layout logic, and so
+/// install-layout logic can be tested without a network dependency.
+///
+/// Never spawns `powershell.exe`: uses the same `curl`-based house pattern
+/// as the non-Windows `download_update()` above. This is the replacement for
+/// the old `install_windows_update_with_installer`, which shelled out to
+/// `powershell -ExecutionPolicy Bypass -Command "irm ... | iex"` -- a
+/// pattern Windows Defender's real-time protection blocks as a malware
+/// download-cradle signature.
 #[cfg(windows)]
-fn install_windows_update_with_installer(channel: UpdateChannel) -> Result<(), String> {
-    let status = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "irm https://raw.githubusercontent.com/BabylenMagnus/tanuki/master/website/install.ps1 | iex",
-        ])
-        .env("TANUKI_CHANNEL", channel.as_str())
-        // Drop any inherited PSModulePath. When tanuki is launched from
-        // PowerShell 7, its Core module paths come first and Windows
-        // PowerShell 5.1 (this `powershell`) fails to autoload cmdlets like
-        // Get-FileHash. Removing it lets 5.1 compute its own default path.
-        // See PowerShell/PowerShell#8635.
-        .env_remove("PSModulePath")
+fn download_windows_update(release: &ReleaseInfo) -> Result<PathBuf, String> {
+    let tmp_dir = env::temp_dir();
+    let tmp_path = tmp_dir.join(format!(".tanuki-update-{}.tmp", std::process::id()));
+
+    let status = crate::noninteractive_process::curl_command()
+        .args(["-sfL", "--max-time", "120", "-o"])
+        .arg(&tmp_path)
+        .arg(&release.download_url)
         .status()
-        .map_err(|err| format!("failed to run Windows installer: {err}"))?;
+        .map_err(|e| format!("download failed: {e}"))?;
 
     if !status.success() {
-        return Err(format!("Windows installer failed with status {status}"));
+        let _ = fs::remove_file(&tmp_path);
+        return Err("download failed".into());
     }
 
-    Ok(())
-}
-
-#[cfg(windows)]
-fn windows_installed_tanuki_exe_path() -> Result<PathBuf, String> {
-    if let Some(install_dir) = env::var_os("TANUKI_INSTALL_DIR").filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(install_dir).join("tanuki.exe"));
+    if let Some(expected) = &release.sha256 {
+        if let Err(e) = crate::checksum::verify_sha256(&tmp_path, expected) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(format!(
+                "downloaded update checksum verification failed: {e}"
+            ));
+        }
+        tracing::info!(sha256 = %expected, "downloaded update checksum verified");
     }
 
-    let local_app_data = env::var_os("LOCALAPPDATA")
-        .ok_or("LOCALAPPDATA is not set; cannot locate Tanuki install")?;
-    Ok(PathBuf::from(local_app_data)
-        .join("Programs")
-        .join("Tanuki")
-        .join("bin")
-        .join("tanuki.exe"))
+    Ok(tmp_path)
 }
 
 // ---------------------------------------------------------------------------
@@ -2012,17 +2011,16 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
 
     #[cfg(windows)]
     {
-        let _ = options;
+        let _ = options; // live_handoff remains a no-op on Windows -- unchanged, out of scope here
 
-        eprintln!(
-            "installing {} with the Windows installer...",
-            release.label()
-        );
-        if let Some(sha256) = &release.sha256 {
-            tracing::debug!(sha256 = %sha256, "selected Windows update asset has checksum");
-        }
-        install_windows_update_with_installer(channel)?;
-        let updated_exe = windows_installed_tanuki_exe_path()?;
+        eprintln!("downloading {}...", release.label());
+        let downloaded_path = download_windows_update(&release)?;
+        eprintln!("installing {}...", release.label());
+        let updated_exe = crate::platform::windows_install::install_windows_update(
+            &downloaded_path,
+            release.label(),
+        )?;
+        let _ = fs::remove_file(&downloaded_path);
         eprintln!("installed {}", release.label());
         print_outdated_integration_notice_with_updated_binary(&updated_exe);
         eprintln!(
