@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.5] - 2026-07-29
+
+### Fixed
+- `tanuki update` on Windows no longer shells out to `powershell -ExecutionPolicy Bypass -Command "irm ... | iex"` to reinstall itself. That exact command line was being blocked by Windows Defender's real-time protection as a malware download-cradle pattern, making `tanuki update` fail with "Access is denied" for every Windows user. The update now downloads and installs natively in Rust (same versioned-release-dir + junction + PATH layout as `install.ps1`), never spawning PowerShell.
+
 ## [0.1.3] - 2026-07-27
 
 ### Fixed

@@ -1633,6 +1633,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cfc352a66ba903c23239ef51e809508b6fc2b0f90e3476ac7a9ff47e863ae95"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kasuari"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3406,7 +3416,7 @@ dependencies = [
 
 [[package]]
 name = "tanuki"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -3416,6 +3426,7 @@ dependencies = [
  "crossterm",
  "ctrlc",
  "interprocess",
+ "junction",
  "libc",
  "native-tls",
  "png",
@@ -3435,6 +3446,7 @@ dependencies = [
  "unicode-width",
  "webrtc",
  "windows-sys 0.61.2",
+ "winreg",
 ]
 
 [[package]]
@@ -4200,9 +4212,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc"
-version = "0.17.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26beccdc865a8f932cd5138cfcdea3d071423bbaae0123e0333cccd7d6c4c0eb"
+checksum = "baaacdf9d96224d7b6e2872ba065578f38775f7634367e3ac2cc87c7271da433"
 dependencies = [
  "arc-swap",
  "async-trait",
