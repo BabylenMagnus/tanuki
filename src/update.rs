@@ -1819,7 +1819,11 @@ fn preview_channel_rejection_for_exe_path(path: &Path) -> Option<&'static str> {
     }
 }
 
-#[cfg(unix)]
+// Cross-platform on purpose (plain path-string matching, no Unix-only
+// syscalls): called from `remote::unix` for the `local() == remote target`
+// seed-check, which is now reachable on Windows too since Task 3 ported
+// `--remote` there (remote targets themselves are still Unix-only, so this
+// branch is a no-op at runtime on Windows -- it just needs to compile).
 pub(crate) fn is_package_manager_managed_exe_path(path: &Path) -> bool {
     is_homebrew_managed_exe_path_following_links(path)
         || is_mise_managed_exe_path_following_links(path)

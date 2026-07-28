@@ -604,6 +604,11 @@ impl CloudHostTransport {
                     return;
                 };
 
+                // Cloned before `socket` is moved into `write_fn` below --
+                // reused by the P2P negotiation block further down, which
+                // needs its own handle to emit signaling events.
+                let p2p_socket = socket.clone();
+
                 let emit_viewer_sid = viewer_sid.clone();
                 let write_fn: Arc<WriteFn> = Arc::new(move |data: &[u8]| -> io::Result<()> {
                     socket
@@ -630,7 +635,7 @@ impl CloudHostTransport {
                 // viewer -- no retry.
                 {
                     let emit_answer: Arc<dyn Fn(&str) + Send + Sync> = {
-                        let socket = socket.clone();
+                        let socket = p2p_socket.clone();
                         let viewer_sid = viewer_sid.clone();
                         Arc::new(move |sdp: &str| {
                             if let Err(err) = socket.emit(
@@ -642,7 +647,7 @@ impl CloudHostTransport {
                         })
                     };
                     let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
-                        let socket = socket.clone();
+                        let socket = p2p_socket.clone();
                         let viewer_sid = viewer_sid.clone();
                         Arc::new(move |candidate: &str| {
                             if let Err(err) = socket.emit(
@@ -664,7 +669,7 @@ impl CloudHostTransport {
                             debug!(viewer_sid = %viewer_sid, "cloud host: P2P data channel established, switched off relay");
                         })
                     };
-                    let on_data: Arc<dyn Fn(&[u8]) + Send + Sync> = {
+                    let on_data: webrtc_p2p::DataCallback = {
                         let duplex = duplex.clone();
                         Arc::new(move |data: &[u8]| duplex.push_p2p(data))
                     };
@@ -672,7 +677,7 @@ impl CloudHostTransport {
                     // backend can track % direct-P2P vs TURN-relay
                     // sessions (pre-mortem Track Tiger #6).
                     let on_outcome: Arc<dyn Fn(webrtc_p2p::NegotiationOutcome) + Send + Sync> = {
-                        let socket = socket.clone();
+                        let socket = p2p_socket.clone();
                         let viewer_sid = viewer_sid.clone();
                         Arc::new(move |outcome: webrtc_p2p::NegotiationOutcome| {
                             if let Err(err) = socket.emit(
@@ -928,7 +933,7 @@ fn connect_viewer_attempt(
     detached: Arc<AtomicBool>,
     reconnecting: Arc<AtomicBool>,
     p2p_signal_cell: Arc<Mutex<Option<std::sync::mpsc::Sender<RemoteSignal>>>>,
-) -> io::Result<RawClient> {
+) -> io::Result<rust_socketio::client::Client> {
     let auth = auth_payload(config, "term-viewer");
 
     let open_client_cell = Arc::clone(&client_cell);
@@ -1006,7 +1011,7 @@ fn connect_viewer_attempt(
                     debug!("cloud viewer: P2P data channel established, switched off relay");
                 })
             };
-            let on_data: Arc<dyn Fn(&[u8]) + Send + Sync> = {
+            let on_data: webrtc_p2p::DataCallback = {
                 let duplex = ack_duplex.clone();
                 Arc::new(move |data: &[u8]| duplex.push_p2p(data))
             };

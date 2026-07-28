@@ -58,7 +58,6 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::peer_connection::RTCPeerConnection;
 
 /// A signaling message received over the existing Socket.IO channel and
 /// forwarded into an in-progress negotiation.
@@ -72,6 +71,9 @@ pub(crate) enum RemoteSignal {
 }
 
 type WriteFn = dyn Fn(&[u8]) -> io::Result<()> + Send + Sync;
+
+/// Callback invoked for every inbound data-channel message.
+pub(crate) type DataCallback = Arc<dyn Fn(&[u8]) + Send + Sync>;
 
 /// Reported once per negotiation attempt (Task 7,
 /// `spelflow-tanuki-terminal-stability-tasks.md`) so the caller can relay
@@ -136,7 +138,7 @@ pub(crate) fn spawn_negotiation(
     emit_answer: Arc<dyn Fn(&str) + Send + Sync>,
     emit_ice: Arc<dyn Fn(&str) + Send + Sync>,
     on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync>,
-    on_data: Arc<dyn Fn(&[u8]) + Send + Sync>,
+    on_data: DataCallback,
     on_outcome: Arc<dyn Fn(NegotiationOutcome) + Send + Sync>,
     timeout: Duration,
 ) -> std::sync::mpsc::Sender<RemoteSignal> {
@@ -233,7 +235,7 @@ async fn run_negotiation(
     emit_ice: Arc<dyn Fn(&str) + Send + Sync>,
     mut remote_rx: tokio_mpsc::UnboundedReceiver<RemoteSignal>,
     on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync>,
-    on_data: Arc<dyn Fn(&[u8]) + Send + Sync>,
+    on_data: DataCallback,
     best_candidate: Arc<Mutex<Option<(u8, &'static str)>>>,
 ) -> Result<(), String> {
     let mut media_engine = MediaEngine::default();
@@ -412,32 +414,31 @@ async fn run_negotiation(
         }
     };
 
-    tokio::select! {
-        data_channel = ready_rx => {
-            // Keep the signaling loop and peer connection alive for the
-            // lifetime of the session by handing them off to a background
-            // task instead of dropping them here.
-            tokio::spawn(signaling_loop);
-            let data_channel = data_channel.map_err(|_| "data channel never became ready".to_owned())?;
-            let write_fn = make_write_fn(data_channel);
-            (on_channel_ready)(write_fn);
-            // Keep `peer_connection` alive for the process lifetime by
-            // leaking the Arc's strong count into the spawned send loop
-            // (it already holds a clone via `make_write_fn`'s captured
-            // channel task); this task's own `peer_connection` clone can
-            // now be dropped safely.
-            drop(peer_connection);
-            Ok(())
-        }
-        _ = signaling_loop => {
-            Err("signaling channel closed before data channel opened".to_owned())
-        }
-    }
+    // Runs for the lifetime of the negotiation (answer/ICE application) --
+    // spawned unconditionally rather than raced against `ready_rx` in a
+    // `select!`, since a `select!` would need to both poll this future
+    // *and* potentially move it into `tokio::spawn` from the other
+    // branch's body, which the borrow checker rejects (a future can't be
+    // polled and moved-out-of at the same time). The outer
+    // `tokio::time::timeout` in `spawn_negotiation` still bounds how long
+    // this whole function waits below.
+    tokio::spawn(signaling_loop);
+
+    let data_channel = ready_rx
+        .await
+        .map_err(|_| "data channel never became ready".to_owned())?;
+    let write_fn = make_write_fn(data_channel);
+    (on_channel_ready)(write_fn);
+    // Keep `peer_connection` alive for the process lifetime by relying on
+    // the Arc clone already captured inside `signaling_loop`'s spawned
+    // task; this function's own local binding can be dropped safely.
+    drop(peer_connection);
+    Ok(())
 }
 
 fn wire_data_channel(
     data_channel: Arc<RTCDataChannel>,
-    on_data: Arc<dyn Fn(&[u8]) + Send + Sync>,
+    on_data: DataCallback,
     ready_tx: oneshot::Sender<Arc<RTCDataChannel>>,
 ) {
     let mut ready_tx = Some(ready_tx);

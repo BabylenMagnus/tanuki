@@ -58,7 +58,9 @@ mod agent_resume;
 mod api;
 mod app;
 mod build_info;
-#[cfg(not(windows))]
+// Cross-platform on purpose: `sha2`/`std::fs` only, no Unix-only syscalls.
+// Used by `remote::unix`'s install-source verification, reachable on
+// Windows too since Task 3 ported `--remote` there.
 mod checksum;
 mod cli;
 mod client;

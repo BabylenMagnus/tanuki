@@ -40,6 +40,7 @@ const CURRENT_PROTOCOL: u32 = crate::protocol::PROTOCOL_VERSION;
 const STABLE_UPDATE_MANIFEST_URL: &str = "https://tanuki.example/latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://tanuki.example/preview.json";
 const REMOTE_BINARY_ENV_VAR: &str = "TANUKI_REMOTE_BINARY";
+#[cfg(unix)]
 const SSH_CONTROL_SOCKET_NAME: &str = "ctl";
 pub(crate) const REATTACH_COMMAND_ENV_VAR: &str = "TANUKI_REATTACH_COMMAND";
 
@@ -249,6 +250,7 @@ pub(crate) fn run_remote_client_bridge() -> io::Result<()> {
     ))
 }
 
+#[cfg(unix)]
 fn ensure_remote_server_running() -> io::Result<()> {
     let socket_path = crate::server::socket_paths::client_socket_path();
     if crate::server::autodetect::is_server_listening() {
@@ -1922,6 +1924,7 @@ fn private_ssh_config_dir() -> io::Result<PathBuf> {
 /// glob metacharacters) is treated as one literal token instead of being split
 /// or expanded by ssh — otherwise the user's config might not be Included and
 /// tanuki's fallback would wrongly take effect.
+#[cfg(unix)]
 fn ssh_config_quote(path: &str) -> String {
     format!("\"{path}\"")
 }
@@ -2322,6 +2325,7 @@ mod tests {
         drop(managed_config);
     }
 
+    #[cfg(unix)]
     #[test]
     fn ssh_config_quote_wraps_path_with_spaces() {
         assert_eq!(
