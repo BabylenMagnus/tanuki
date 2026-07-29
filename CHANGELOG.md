@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.7] - 2026-07-30
+
 ### Changed
 - Update version to 0.1.6 and modify asset links in latest.json
 
