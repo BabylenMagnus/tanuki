@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.8] - 2026-07-30
+
+### Fixed
+- Workspace and tab switches now force a full redraw regardless of which code path triggered them (keybinding, navigator, remote API, worktree action), fixing a scattered "staircase" redraw that could appear when switching workspaces or tabs.
+
 ## [0.1.7] - 2026-07-30
 
 ### Changed
