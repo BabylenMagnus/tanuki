@@ -221,8 +221,8 @@ function rewriteRelativeDocPaths(content, extraDepth) {
 }
 
 function setGeneratedEditUrl(content, editUrl) {
-  if (!content.startsWith('---\n') || /^editUrl:/m.test(content)) return content;
-  return content.replace(/^---\n/, `---\neditUrl: ${editUrl}\n`);
+  if (!/^---\r?\n/.test(content) || /^editUrl:/m.test(content)) return content;
+  return content.replace(/^---\r?\n/, (match) => `${match}editUrl: ${editUrl}\n`);
 }
 
 function insertPreviewNotice(content, relativePath) {
@@ -235,7 +235,7 @@ function insertPreviewNotice(content, relativePath) {
     relativePath === 'index.mdx'
       ? content.replace('title: Herdr documentation', 'title: Herdr next documentation')
       : content;
-  const frontmatter = indexPrefix.match(/^---\n[\s\S]*?\n---\n/);
+  const frontmatter = indexPrefix.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
   if (!frontmatter) {
     return insertNoticeAfterImports(indexPrefix, notice);
   }
@@ -244,7 +244,7 @@ function insertPreviewNotice(content, relativePath) {
 }
 
 function insertNoticeAfterImports(content, notice) {
-  const imports = content.match(/^(\s*import .+?;\n)+\s*/);
+  const imports = content.match(/^(\s*import .+?;\r?\n)+\s*/);
   if (!imports) {
     return `${notice}${content}`;
   }

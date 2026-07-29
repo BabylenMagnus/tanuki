@@ -173,6 +173,13 @@ When updating libghostty-vt, check every active patch in `vendor/libghostty-vt.p
 
 ## Docs
 
+**2026-07-29: the `website/` docs site is out of scope for now.** It is not built, checked, or touched
+by automated releases (`deploy.py`'s `tanuki_terminal` auto-release skips `just release`/
+`just release-docs-check` entirely and does a Rust-binary-only release instead — see
+`Z:\Coding\Tanuki\deploy.py`'s `release_tanuki_terminal`). A human running `just release <version>` by
+hand still gets the full website-inclusive ritual described below. Do not spend effort keeping
+`website/`/`docs/` in sync as a side effect of unrelated feature work until this is picked back up.
+
 Stable public docs live in `website/src/content/docs/`. They are the currently released herdr.dev docs. Do not document unreleased behavior there during normal feature or fix work.
 
 Unreleased docs live in `docs/next/website/src/content/docs/`. Update those when a user-facing change needs docs before the next release. `docs/next/README.md` and `docs/next/CHANGELOG.md` stage root README and changelog changes.
