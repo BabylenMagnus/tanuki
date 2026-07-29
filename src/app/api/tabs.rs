@@ -131,7 +131,22 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&target.tab_id) else {
             return tab_not_found(id, &target.tab_id);
         };
+        let tab_changed = self.state.active != Some(ws_idx)
+            || self
+                .state
+                .workspaces
+                .get(ws_idx)
+                .is_some_and(|ws| ws.active_tab_index() != tab_idx);
         self.state.switch_workspace_tab(ws_idx, tab_idx);
+        if tab_changed {
+            // A tab switch replaces most or all of the visible pane content, so a
+            // diff-based update against the previous frame emits many scattered
+            // cursor-addressed writes. Forcing a full redraw (same as
+            // OuterFocusGained) makes the synchronized-output-wrapped frame a
+            // single atomic full-screen paint instead, avoiding the staircase
+            // redraw that diffing a large-area change produces.
+            self.request_full_redraw();
+        }
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
 
         encode_success(id, ResponseResult::TabInfo { tab })

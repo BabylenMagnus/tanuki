@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use crate::{
@@ -246,6 +246,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                 state.settings.section = SettingsSection::Keybinds;
                 state.settings.list.selected = 0;
+                state.settings.keybind_search.clear();
+                state.settings.keybind_search_active = false;
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -261,7 +263,11 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                     state.settings.keybind_capture = None;
                     return None;
                 }
-                let setting = KeybindSetting::ALL[state.settings.list.selected];
+                let filtered = KeybindSetting::filtered(&state.settings.keybind_search);
+                let Some(setting) = filtered.get(state.settings.list.selected).copied() else {
+                    state.settings.keybind_capture = None;
+                    return None;
+                };
                 let combo = crate::config::format_key_combo((key.code, key.modifiers));
                 let binding = match kind {
                     crate::app::state::KeybindCaptureKind::Direct => combo,
@@ -270,26 +276,55 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 state.settings.keybind_capture = None;
                 return Some(SettingsAction::SaveKeybind(setting, binding));
             }
+
+            if state.settings.keybind_search_active {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Enter => {
+                        state.settings.keybind_search_active = false;
+                    }
+                    KeyCode::Backspace => {
+                        state.settings.keybind_search.pop();
+                        let len = KeybindSetting::filtered(&state.settings.keybind_search).len();
+                        state.settings.list.selected =
+                            state.settings.list.selected.min(len.saturating_sub(1));
+                    }
+                    KeyCode::Char(c)
+                        if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+                    {
+                        state.settings.keybind_search.push(c);
+                        let len = KeybindSetting::filtered(&state.settings.keybind_search).len();
+                        state.settings.list.selected =
+                            state.settings.list.selected.min(len.saturating_sub(1));
+                    }
+                    _ => {}
+                }
+                return None;
+            }
+
+            let filtered_len = KeybindSetting::filtered(&state.settings.keybind_search).len();
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
-                KeyCode::Down | KeyCode::Char('j') => {
-                    state.settings.list.move_next(KeybindSetting::ALL.len())
+                KeyCode::Down | KeyCode::Char('j') => state.settings.list.move_next(filtered_len),
+                KeyCode::Char('/') => {
+                    state.settings.keybind_search_active = true;
                 }
-                KeyCode::Enter | KeyCode::Char(' ') => {
+                KeyCode::Enter | KeyCode::Char(' ') if filtered_len > 0 => {
                     state.settings.keybind_capture =
                         Some(crate::app::state::KeybindCaptureKind::Direct);
                 }
-                KeyCode::Char('p') => {
+                KeyCode::Char('p') if filtered_len > 0 => {
                     state.settings.keybind_capture =
                         Some(crate::app::state::KeybindCaptureKind::Prefix);
                 }
                 KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                     state.settings.section = SettingsSection::PaneLabels;
                     state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+                    state.settings.keybind_search.clear();
                 }
                 KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                     state.settings.section = SettingsSection::Integrations;
                     state.settings.list.selected = 0;
+                    state.settings.keybind_search.clear();
                 }
                 _ => {
                     if let Some(super::modal::ModalAction::Close) =
@@ -331,6 +366,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                 state.settings.section = SettingsSection::Keybinds;
                 state.settings.list.selected = 0;
+                state.settings.keybind_search.clear();
+                state.settings.keybind_search_active = false;
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                 state.settings.section = SettingsSection::Experiments;
@@ -366,6 +403,8 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
         SettingsSection::Integrations => 0,
     };
     state.settings.keybind_capture = None;
+    state.settings.keybind_search.clear();
+    state.settings.keybind_search_active = false;
     state.mode = Mode::Settings;
 }
 
@@ -470,7 +509,7 @@ impl AppState {
                     return None;
                 }
                 let idx = scroll + (row - list_y) as usize;
-                (idx < KeybindSetting::ALL.len()).then_some(idx)
+                (idx < KeybindSetting::filtered(&self.settings.keybind_search).len()).then_some(idx)
             }
             SettingsSection::Experiments => {
                 let list_y = area.y + 3;
@@ -501,6 +540,10 @@ impl AppState {
                         SettingsSection::Integrations => 0,
                     });
                     self.settings.keybind_capture = None;
+                    if section != SettingsSection::Keybinds {
+                        self.settings.keybind_search.clear();
+                        self.settings.keybind_search_active = false;
+                    }
                     return None;
                 }
                 if let Some(idx) = self.settings_list_index_at(mouse.column, mouse.row) {

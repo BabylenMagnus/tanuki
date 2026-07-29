@@ -1,151 +1,103 @@
 ---
-title: Install Herdr
-description: Install, update, and verify Herdr on Linux, macOS, and Windows beta.
+title: Install Tanuki
+description: Install, update, and verify Tanuki on Linux, macOS, and Windows.
 ---
 
-Herdr ships stable binaries for Linux and macOS. Native Windows support is preview-only beta.
+Tanuki publishes prebuilt binaries for Linux, macOS, and Windows with every release
+([releases](https://github.com/BabylenMagnus/tanuki/releases)). There is no Homebrew, mise, or Nix
+package yet — use the install script, a manual download, or build from source.
 
 ## Install
 
 On Linux or macOS, run:
 
 ```bash
-curl -fsSL https://herdr.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/BabylenMagnus/tanuki/master/website/install.sh | sh
 ```
 
-On Windows preview beta, install the preview channel:
+On Windows (PowerShell):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/BabylenMagnus/tanuki/master/website/install.ps1 | iex"
 ```
 
-The installer downloads the right release binary for your platform and places it on your PATH. Herdr defaults to preview on Windows without changing your config. The installer uses versioned install folders and updates a `current` junction, so updates do not need to overwrite a running `herdr.exe`.
+The installer downloads the release binary matching your platform and puts it on your `PATH`. Set
+`TANUKI_INSTALL_DIR` (or `-InstallDir` on Windows) to install somewhere other than the default.
 
-## Install with Homebrew
+## Manual download
 
-If you already use Homebrew:
+You can also download a binary directly from [GitHub releases](https://github.com/BabylenMagnus/tanuki/releases).
 
-```bash
-brew install herdr
-```
-
-## Install with mise
-
-If you already use mise:
-
-```bash
-mise use -g herdr
-```
-
-If mise reports `herdr not found in mise tool registry`, update mise and retry. Older mise versions predate the Herdr registry entry; `mise use -g github:ogulcancelik/herdr` works as a temporary fallback.
-
-## Install with Nix
-
-If you already use Nix, Herdr provides a flake that builds Herdr from source:
-
-```bash
-nix run github:ogulcancelik/herdr/v0.x.y
-nix build github:ogulcancelik/herdr/v0.x.y
-nix profile install github:ogulcancelik/herdr/v0.x.y
-```
-
-Replace `v0.x.y` with the latest release tag. You can omit the tag to track `master`, but release tags are recommended for normal installs.
-
-The flake also exposes a development shell:
-
-```bash
-nix develop github:ogulcancelik/herdr
-```
-
-Update through the same Nix workflow you used to install Herdr. For a profile install, list your profile entries and upgrade the Herdr entry:
-
-```bash
-nix profile list
-nix profile upgrade <index-or-name>
-```
-
-If Herdr is an input in your own flake, update that input and rebuild your system, Home Manager, or development environment:
-
-```bash
-nix flake update herdr
-```
-
-## Download manually
-
-You can also download a binary from [GitHub releases](https://github.com/ogulcancelik/herdr/releases).
-
-Choose the asset that matches your system:
+Pick the asset that matches your system:
 
 | System | Asset |
 | --- | --- |
-| Linux x86_64 | `herdr-linux-x86_64` |
-| Linux aarch64 | `herdr-linux-aarch64` |
-| macOS Intel | `herdr-macos-x86_64` |
-| macOS Apple silicon | `herdr-macos-aarch64` |
+| Linux x86_64 | `tanuki-linux-x86_64` |
+| Linux aarch64 | `tanuki-linux-aarch64` |
+| macOS Intel | `tanuki-macos-x86_64` |
+| macOS Apple silicon | `tanuki-macos-aarch64` |
+| Windows x86_64 | `tanuki-windows-x86_64.exe` |
 
-On Linux or macOS, make it executable and move it somewhere on your PATH.
+On Linux or macOS, make it executable and move it somewhere on your `PATH`:
 
 ```bash
-chmod +x herdr-linux-x86_64
-mv herdr-linux-x86_64 ~/.local/bin/herdr
+chmod +x tanuki-linux-x86_64
+mv tanuki-linux-x86_64 ~/.local/bin/tanuki
 ```
 
-### Windows beta downloads
+## Build from source
 
-Windows binaries are published only on preview releases while native Windows support is in beta. Use the preview installer above for normal testing, or download the Windows asset from a preview GitHub prerelease:
+- [Rust toolchain](https://rustup.rs/) matching the version pinned in [`rust-toolchain.toml`](https://github.com/BabylenMagnus/tanuki/blob/master/rust-toolchain.toml)
+- `git`
 
-| System | Asset |
-| --- | --- |
-| Windows x86_64 beta | `herdr-windows-x86_64.exe` |
+```bash
+git clone https://github.com/BabylenMagnus/tanuki
+cd tanuki
+cargo build --release
+```
+
+The resulting binary is `target/release/tanuki` (`.exe` on Windows). Copy or symlink it onto your `PATH`.
 
 ## Verify
 
-Start Herdr:
+Start Tanuki:
 
 ```bash
-herdr
+tanuki
 ```
 
-If your shell cannot find `herdr`, restart the terminal or check that the install directory is on your PATH.
+If your shell cannot find `tanuki`, restart the terminal or check that the install directory is on your `PATH`.
 
 ## Update
 
-Herdr checks for new releases and notifies you in the app. You can update manually:
+Tanuki checks for new releases and notifies you in-app. You can also update manually:
 
 ```bash
-herdr update
+tanuki update
 ```
 
-`herdr update` is for installs managed by Herdr's own installer. Homebrew, mise, and Nix installs are updated through those package managers instead.
+`tanuki update` downloads and installs the latest release. Tanuki tracks a stable update channel by
+default; a preview channel exists in the CLI (`tanuki channel set preview`) but no preview builds are
+published yet, so it currently falls back to the stable manifest.
 
-On Linux and macOS, Herdr uses the stable update channel by default. To opt into preview builds from `master`, set the channel:
+If an update changes Tanuki's client/server protocol, Tanuki asks whether to stop the old server after
+installing — stop it to use the new version. For the default session, run `tanuki server stop` then
+`tanuki` again; for a named session, run `tanuki session stop <name>` then `tanuki session attach <name>`.
+
+To opt a compatible running session into experimental live server handoff:
 
 ```bash
-herdr channel set preview
+tanuki update --handoff
 ```
 
-Switch Linux and macOS direct installs back to stable the same way:
+## Development builds
 
 ```bash
-herdr channel set stable
+just test        # unit tests
+just check       # formatting, tests, and maintenance checks
 ```
 
-For direct installs, changing channels also checks that channel and installs its latest binary. If that update fails, run `herdr update` to retry from the configured channel.
+## Platform support
 
-Preview builds are manually published GitHub prereleases from the current development branch. They are useful when you want fixes before the next stable release, but they can regress. Homebrew, mise, and Nix installs do not use the preview channel.
-
-Windows beta builds are preview-only for now. `herdr channel set stable` is rejected on Windows until stable Windows releases are available.
-
-By default, `herdr update` installs the new binary and leaves compatible running sessions alone. If an update changes Herdr's client/server protocol, Herdr asks whether to stop the old server after installing. Stop the old server to use the new version. Stopping exits pane processes. For the default session, run `herdr server stop`, then run `herdr` again. For a named session, run `herdr session stop <name>`, then run `herdr session attach <name>` again.
-
-To opt into experimental live server handoff for supported running sessions, run:
-
-```bash
-herdr update --handoff
-```
-
-Live handoff does not apply to Homebrew, mise, or Nix package-manager updates. For those installs, update with the package manager, then restart that Herdr session when you are ready to use the new server. If a running session still uses the old server, stop it with `herdr server stop` or `herdr session stop <name>`, then run Herdr again.
-
-## Requirements
-
-Stable Herdr releases support Linux and macOS. Native Windows builds are preview-only beta releases; see [Windows beta](/docs/windows-beta/) for supported workflows and known limitations.
+Tanuki builds and ships release binaries for Linux, macOS, and Windows from the same release pipeline —
+Windows is a regular supported platform, not a separate preview track.

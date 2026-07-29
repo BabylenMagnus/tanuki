@@ -99,11 +99,6 @@ pub(super) fn open_global_menu(state: &mut AppState) {
     state.mode = Mode::GlobalMenu;
 }
 
-pub(super) fn open_keybind_help(state: &mut AppState) {
-    state.keybind_help.scroll = 0;
-    state.mode = Mode::KeybindHelp;
-}
-
 fn open_update_release_notes(state: &mut AppState) {
     let Some(notes) = crate::release_notes::load_latest() else {
         return;
@@ -133,7 +128,9 @@ pub(super) fn apply_global_menu_action(state: &mut AppState, action: GlobalMenuA
             request_detach(state);
         }
         GlobalMenuAction::WhatsNew => open_update_release_notes(state),
-        GlobalMenuAction::Keybinds => open_keybind_help(state),
+        GlobalMenuAction::Keybinds => {
+            super::settings::open_settings_at(state, crate::app::state::SettingsSection::Keybinds)
+        }
         GlobalMenuAction::ReloadConfig => {
             state.request_reload_config = true;
             leave_modal(state);
@@ -282,19 +279,6 @@ pub(crate) fn insert_navigator_search_text(
     state.navigator.state_filter = None;
     state.navigator.query.push_str(text);
     state.select_first_navigator_match_from(terminal_runtimes);
-}
-
-pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: KeyEvent) {
-    match key.code {
-        KeyCode::Up | KeyCode::Char('k') => state.scroll_keybind_help(-1),
-        KeyCode::Down | KeyCode::Char('j') => state.scroll_keybind_help(1),
-        KeyCode::PageUp => state.scroll_keybind_help(-8),
-        KeyCode::PageDown => state.scroll_keybind_help(8),
-        KeyCode::Home => state.keybind_help.scroll = 0,
-        KeyCode::End => state.keybind_help.scroll = state.keybind_help_max_scroll(),
-        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => leave_modal(state),
-        _ => {}
-    }
 }
 
 pub(super) fn open_rename_workspace(

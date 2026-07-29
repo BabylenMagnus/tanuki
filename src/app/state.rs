@@ -809,7 +809,6 @@ pub enum Mode {
     ContextMenu,
     Settings,
     GlobalMenu,
-    KeybindHelp,
     Navigator,
 }
 
@@ -835,7 +834,6 @@ impl Mode {
                 | Mode::ConfirmRemoveWorktree
                 | Mode::ContextMenu
                 | Mode::GlobalMenu
-                | Mode::KeybindHelp
         )
     }
 }
@@ -1258,6 +1256,21 @@ impl KeybindSetting {
             Self::ToggleSidebar => keybinds.toggle_sidebar.label(),
         }
     }
+
+    /// `KeybindSetting::ALL` narrowed to actions whose label matches a
+    /// case-insensitive substring search. An empty query matches everything
+    /// (so clearing the search text is equivalent to no filter at all).
+    pub(crate) fn filtered(query: &str) -> Vec<Self> {
+        if query.is_empty() {
+            return Self::ALL.to_vec();
+        }
+        let query = query.to_lowercase();
+        Self::ALL
+            .iter()
+            .copied()
+            .filter(|setting| setting.label().to_lowercase().contains(&query))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1385,6 +1398,13 @@ pub struct SettingsState {
     /// become the new binding for the selected action; the variant says
     /// whether it'll be saved as a direct chord or a `prefix+` binding.
     pub keybind_capture: Option<KeybindCaptureKind>,
+    /// Current filter text for the Keybinds tab's `/`-triggered search.
+    /// Empty means no filter is applied.
+    pub keybind_search: String,
+    /// Whether the Keybinds tab is currently capturing text into
+    /// `keybind_search` (as opposed to `keybind_search` holding a filter
+    /// left over from a previous search that's no longer being edited).
+    pub keybind_search_active: bool,
 }
 
 /// Which shape the next captured keypress in the Keybinds tab should take.
@@ -1426,9 +1446,6 @@ pub(crate) enum DragTarget {
         grab_row_offset: u16,
     },
     ProductAnnouncementScrollbar {
-        grab_row_offset: u16,
-    },
-    KeybindHelpScrollbar {
         grab_row_offset: u16,
     },
     SidebarDivider,
@@ -1641,10 +1658,6 @@ pub struct ProductAnnouncementState {
     pub preview: bool,
 }
 
-pub struct KeybindHelpState {
-    pub scroll: u16,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarWidthSource {
     ConfigDefault,
@@ -1708,7 +1721,6 @@ pub struct AppState {
     pub name_input_replace_on_type: bool,
     pub release_notes: Option<ReleaseNotesState>,
     pub product_announcement: Option<ProductAnnouncementState>,
-    pub keybind_help: KeybindHelpState,
     pub navigator: NavigatorState,
     pub copy_mode: Option<CopyModeState>,
     pub workspace_scroll: usize,
@@ -2078,7 +2090,6 @@ impl AppState {
             name_input_replace_on_type: false,
             release_notes: None,
             product_announcement: None,
-            keybind_help: KeybindHelpState { scroll: 0 },
             navigator: NavigatorState::default(),
             copy_mode: None,
             workspace_scroll: 0,
@@ -2185,6 +2196,8 @@ impl AppState {
                 original_palette: None,
                 original_theme: None,
                 keybind_capture: None,
+                keybind_search: String::new(),
+                keybind_search_active: false,
             },
             integration_recommendations: Vec::new(),
             agent_manifest_summaries: Vec::new(),

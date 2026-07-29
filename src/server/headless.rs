@@ -7122,7 +7122,8 @@ next_tab = ""
     #[test]
     fn semantic_client_escape_closes_keybind_help() {
         let mut server = test_headless_server();
-        server.app.state.mode = crate::app::Mode::KeybindHelp;
+        server.app.state.mode = crate::app::Mode::Settings;
+        server.app.state.settings.section = crate::app::state::SettingsSection::Keybinds;
         server.clients.insert(
             1,
             ClientConnection::new(
@@ -7149,40 +7150,6 @@ next_tab = ""
         }));
 
         assert_eq!(server.app.state.mode, crate::app::Mode::Navigate);
-    }
-
-    #[test]
-    fn semantic_client_down_scrolls_keybind_help() {
-        let mut server = test_headless_server();
-        server.app.state.mode = crate::app::Mode::KeybindHelp;
-        server.clients.insert(
-            1,
-            ClientConnection::new(
-                (100, 30),
-                crate::kitty_graphics::HostCellSize::default(),
-                crate::terminal_theme::TerminalTheme::default(),
-                Some(true),
-                1,
-                RenderEncoding::SemanticFrame,
-                None,
-            ),
-        );
-        server.foreground_client_id = Some(1);
-        server.sync_foreground_client_state();
-        server.resize_shared_runtime_to_effective_size();
-
-        assert!(server.app.state.keybind_help_max_scroll() > 0);
-        assert!(server.handle_server_event(ServerEvent::ClientInputEvents {
-            client_id: 1,
-            events: vec![crate::protocol::ClientInputEvent::Key {
-                code: crate::protocol::ClientKeyCode::Down,
-                modifiers: 0,
-                kind: crate::protocol::ClientKeyKind::Press,
-            }],
-        }));
-
-        assert_eq!(server.app.state.mode, crate::app::Mode::KeybindHelp);
-        assert_eq!(server.app.state.keybind_help.scroll, 1);
     }
 
     #[tokio::test]

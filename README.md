@@ -1,55 +1,67 @@
-# tanuki
+# herdr
 
 
 <p align="center">
-  <img src="assets/logo.png" alt="tanuki" width="100" />
+  <img src="assets/logo.png" alt="herdr" width="100" />
 </p>
 
 <p align="center">
-  <a href="https://tanukicode.ru">tanukicode.ru</a> · <a href="#install">install</a> · <a href="docs/next/website/src/content/docs/quick-start.mdx">quick start</a> · <a href="docs/next/website/src/content/docs">docs</a>
+  <a href="https://herdr.dev">herdr.dev</a> · <a href="#install">install</a> · <a href="https://herdr.dev/docs/quick-start/">quick start</a> · <a href="https://herdr.dev/docs/">docs</a> · <a href="#sponsors">sponsors</a>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-666666?labelColor=333333" alt="Apache 2.0 license" /></a>
-  <a href="https://github.com/BabylenMagnus/tanuki/stargazers"><img src="https://img.shields.io/github/stars/BabylenMagnus/tanuki?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/ogulcancelik/herdr/releases"><img src="https://img.shields.io/github/downloads/ogulcancelik/herdr/total?labelColor=333333&color=666666" alt="total GitHub release downloads" /></a>
+  <a href="https://github.com/ogulcancelik/herdr/stargazers"><img src="https://img.shields.io/github/stars/ogulcancelik/herdr?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/ogulcancelik/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/ogulcancelik/herdr?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
+  <a href="https://formulae.brew.sh/formula/herdr"><img src="https://img.shields.io/homebrew/v/herdr?label=homebrew&labelColor=333333&color=666666" alt="Homebrew version" /></a>
+  <a href="https://x.com/herdrdev"><img src="https://img.shields.io/badge/follow-%40herdrdev-000000?logo=x&logoColor=white" alt="follow @herdrdev on X" /></a>
 </p>
 
 ---
+
+https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 
 **agent multiplexer that lives in your terminal.**
 
 - **every agent at a glance** — blocked, working, done. real terminal views, not a wrapped interpretation.
 - **detach, agents keep running** — reattach from any terminal, or over ssh. sessions survive restarts.
-- **cloud relay built in** — attach to your sessions from the Tanuki web platform, from any browser, on top of your own local agent.
-- **agents can use tanuki too** — a pure socket api: agents spawn panes, read output, wait on each other.
+- **agents can use herdr too** — a pure socket api: agents spawn panes, read output, wait on each other. [agent skill →](https://herdr.dev/docs/agent-skill/)
 - **keyboard and mouse, both first-class** — tmux-style prefix keys *and* click, drag, split. pick per moment, not per tool.
+- **plugins** — extend panes and workflows. [browse the marketplace →](https://herdr.dev/plugins/)
 - **one rust binary, no electron** — runs in whatever terminal you already use.
 
 ---
 
 ## install
 
-Tanuki is not on a package manager yet — build it from source:
-
 ```bash
-git clone https://github.com/BabylenMagnus/tanuki
-cd tanuki
-cargo build --release
+curl -fsSL https://herdr.dev/install.sh | sh
 ```
 
-The binary is at `target/release/tanuki`. Put it on your `PATH`, then start it where the work lives:
+or `brew install herdr` · `mise use -g herdr` · windows beta: `powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"` · [binaries](https://github.com/ogulcancelik/herdr/releases)
+
+then start it where the work lives:
 
 ```bash
-tanuki
+herdr
 ```
 
-run your agents, split panes, walk away. `ctrl+b q` detaches, `tanuki` reattaches.
-
-Prebuilt binaries and a one-line installer will follow once release CI is wired up for this repository — see [`docs/next/website/src/content/docs/install.mdx`](docs/next/website/src/content/docs/install.mdx) for the fuller install reference (currently mid-rebrand from the upstream project).
+run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches. [quick start →](https://herdr.dev/docs/quick-start/)
 
 ## docs
 
-Docs live under [`docs/next/website/src/content/docs`](docs/next/website/src/content/docs): quick start, concepts, supported agents, keyboard, configuration, session state, remote, integrations, socket api.
+everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
+
+## sponsors
+
+herdr is built full-time, in the open. sponsoring directly funds development, stability, and the path to a real agent runtime.
+
+### gold
+
+<a href="https://terminaltrove.com/"><img src="assets/sponsors/terminal-trove.png" alt="Terminal Trove" width="200" /></a>
+
+[**→ become a sponsor**](https://github.com/sponsors/ogulcancelik) · enterprise / partnership: hey@herdr.dev · see [SPONSORS.md](./SPONSORS.md) for tiers. thank you 🐑
 
 ## agent instructions
 
@@ -58,8 +70,8 @@ if you are an ai agent helping with this repository, read [`AGENTS.md`](./AGENTS
 ## development
 
 ```bash
-git clone https://github.com/BabylenMagnus/tanuki
-cd tanuki
+git clone https://github.com/ogulcancelik/herdr
+cd herdr
 cargo build --release
 
 just test        # unit tests
@@ -68,4 +80,4 @@ just check       # formatting, tests, and maintenance checks
 
 ## license
 
-Tanuki is licensed under the [Apache License 2.0](LICENSE). It is a derivative work based on [Herdr](https://github.com/ogulcancelik/herdr) — see [NOTICE](./NOTICE) for attribution and the nature of modifications.
+Herdr is licensed under the [Apache License 2.0](LICENSE).

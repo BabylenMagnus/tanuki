@@ -389,7 +389,10 @@ impl App {
                 self.last_pane_via_api();
                 leave_navigate_mode(&mut self.state);
             }
-            NavigateAction::Help => super::modal::open_keybind_help(&mut self.state),
+            NavigateAction::Help => super::settings::open_settings_at(
+                &mut self.state,
+                crate::app::state::SettingsSection::Keybinds,
+            ),
             NavigateAction::Settings => super::settings::open_settings(&mut self.state),
             NavigateAction::ReloadConfig => {
                 self.runtime_server_reload_config("tui.server.reload_config");
@@ -1702,7 +1705,10 @@ pub(super) fn execute_navigate_action_in_context(
             state.last_pane();
             leave_navigate_mode(state);
         }
-        NavigateAction::Help => super::modal::open_keybind_help(state),
+        NavigateAction::Help => super::settings::open_settings_at(
+            state,
+            crate::app::state::SettingsSection::Keybinds,
+        ),
         NavigateAction::Settings => super::settings::open_settings(state),
         NavigateAction::ReloadConfig => {
             state.request_reload_config = true;
@@ -2913,7 +2919,11 @@ navigate_pane_down = "ctrl+j"
         )
         .await;
 
-        assert_eq!(app.state.mode, Mode::KeybindHelp);
+        assert_eq!(app.state.mode, Mode::Settings);
+        assert_eq!(
+            app.state.settings.section,
+            crate::app::state::SettingsSection::Keybinds
+        );
     }
 
     #[test]
@@ -2931,7 +2941,11 @@ navigate_pane_down = "ctrl+j"
             &mut state,
             KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::KeybindHelp);
+        assert_eq!(state.mode, Mode::Settings);
+        assert_eq!(
+            state.settings.section,
+            crate::app::state::SettingsSection::Keybinds
+        );
     }
 
     #[test]
@@ -3313,7 +3327,11 @@ navigate_pane_down = "ctrl+j"
             KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
         );
 
-        assert_eq!(state.mode, Mode::KeybindHelp);
+        assert_eq!(state.mode, Mode::Settings);
+        assert_eq!(
+            state.settings.section,
+            crate::app::state::SettingsSection::Keybinds
+        );
     }
 
     #[test]

@@ -242,6 +242,10 @@ just release 0.x.y
 
 Before stable release, run `/pre-release-audit`, finalize `docs/next`, and let `just release-docs-check` validate the staged docs and website build. `just release` prepares the changelog and release commit, tags it, and pushes the tag. GitHub Actions builds binaries, creates the GitHub release, closes released issues, snapshots and promotes the tagged docs, and updates `website/latest.json`.
 
+Always cut releases through `just release <version>`, not a raw `git tag` + push. `release-docs-check` is what actually enforces that `CHANGELOG.md` has a real `## [<version>]` section before the tag goes out — skipping it is how a release ships with no changelog entry.
+
+`.github/scripts/generate_release_manifest.py` (called from the `publish` job in `.github/workflows/release.yml`) extracts that exact `## [<version>]` section from `CHANGELOG.md` and puts it in `manifest.json`'s `notes` field. This is the only source of the in-app "What's New" text (`notes_body` in `tanuki_terminal/src/update.rs`, rendered by `src/ui/release_notes.rs`). If a version has no matching `CHANGELOG.md` section, the release still publishes, but "What's New" falls back to a generic `Tanuki vX.Y.Z` placeholder instead of real notes — so every released version needs its own dated `## [X.Y.Z] - YYYY-MM-DD` entry with real content, not just a version bump.
+
 The release workflows must publish these four assets:
 
 - `herdr-linux-x86_64`

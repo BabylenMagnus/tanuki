@@ -322,6 +322,35 @@ impl From<protocol::FramingError> for ClientError {
     }
 }
 
+/// The exact reason string the server sends (`src/server/headless.rs`,
+/// `initiate_shutdown`/`complete_shutdown`) when it is tearing itself down
+/// gracefully -- e.g. because it's the stale server left behind by a
+/// `tanuki update`, being replaced by a freshly spawned one. A `tanuki`
+/// invocation that races this window is not a real failure; the caller
+/// should wait for the replacement server and retry rather than bailing out
+/// with a scary error.
+const SHUTDOWN_IN_PROGRESS_REASON: &str = "server is shutting down";
+
+fn is_shutdown_race_reason(err: &ClientError) -> bool {
+    matches!(
+        err,
+        ClientError::ServerShutdown { reason: Some(reason) } if reason == SHUTDOWN_IN_PROGRESS_REASON
+    )
+}
+
+/// Whether an `io::Error` returned by the plain local auto-detect launch
+/// (`run_client`) represents a transient race with a server that is in the
+/// middle of restarting (rather than a real, persistent failure). Used by
+/// `crate::server::autodetect::auto_detect_launch` to decide whether to
+/// retry instead of surfacing the error immediately.
+pub(crate) fn is_transient_relaunch_race(err: &io::Error) -> bool {
+    match err.get_ref().and_then(|e| e.downcast_ref::<ClientError>()) {
+        Some(ClientError::ConnectionFailed(_)) => true,
+        Some(err @ ClientError::ServerShutdown { .. }) => is_shutdown_race_reason(err),
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Terminal setup / restore
 // ---------------------------------------------------------------------------
@@ -1155,6 +1184,13 @@ fn run_client_with_mode(
 
     crate::logging::startup("client");
 
+    // The plain `tanuki` auto-detect launch (no direct terminal attach, no
+    // cloud target) is the only path where the caller (`run_client`) is set
+    // up to retry through a brief server restart race -- see
+    // `is_transient_relaunch_race`. Attach/cloud paths keep today's
+    // print-and-exit behavior unchanged.
+    let is_plain_local_launch = attach_request.is_none() && cloud_target.is_none();
+
     // Try to connect to the server: either a cloud-relayed session on
     // another of the caller's own paired devices, or the local client
     // socket (the common case).
@@ -1174,8 +1210,11 @@ fn run_client_with_mode(
         match crate::ipc::connect_local_stream(&socket_path) {
             Ok(s) => Transport::Local(s),
             Err(err) => {
-                // Server unreachable — show clear error and exit.
                 let client_err = ClientError::ConnectionFailed(err);
+                if is_plain_local_launch {
+                    return Err(io::Error::other(client_err));
+                }
+                // Server unreachable — show clear error and exit.
                 eprintln!("tanuki: {client_err}");
                 std::process::exit(1);
             }
@@ -1274,18 +1313,27 @@ fn run_client_with_mode(
     drop(terminal_guard);
 
     if let Err(err) = result {
-        eprintln!("tanuki: {err}");
-        rt.shutdown_timeout(Duration::from_millis(100));
-        crate::logging::shutdown("client");
-
         if matches!(
             err,
             ClientError::ServerShutdown {
-                reason: Some(reason)
+                reason: Some(ref reason)
             } if reason == "detached"
         ) {
+            eprintln!("tanuki: {err}");
+            rt.shutdown_timeout(Duration::from_millis(100));
+            crate::logging::shutdown("client");
             return Ok(());
         }
+
+        if is_plain_local_launch && is_shutdown_race_reason(&err) {
+            rt.shutdown_timeout(Duration::from_millis(100));
+            crate::logging::shutdown("client");
+            return Err(io::Error::other(err));
+        }
+
+        eprintln!("tanuki: {err}");
+        rt.shutdown_timeout(Duration::from_millis(100));
+        crate::logging::shutdown("client");
 
         std::process::exit(1);
     }

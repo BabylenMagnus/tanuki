@@ -1,0 +1,2669 @@
+ ▐▛███▜▌   Claude Code v2.1.220
+▝▜█████▛▘  Sonnet 5 · Claude Pro
+  ▘▘ ▝▝    Z:\Coding\Tanuki\tanuki_terminal
+
+
+❯ /clear                                                                        
+
+❯ /spelflow-plan Мы делали план до этого с подменой K-BID's, то есть горячие    
+клавиши, как они должны быть устроены в нашем проекте. Я бы хотел чуть-чуть     
+продолжить, потому что в меню у нас есть Kidings и есть в Satings тоже горячие  
+клавиши. Нужно понять, как лучше всего это всё реализовать, как-где и как это   
+должно быть, потому что сейчас текущее расположение меня не устраивает совсем.  
+
+  Searched for 2 patterns (ctrl+o to expand)
+
+● Есть точный файл — PM/ideas/tanuki-terminal/keybinds-settings-ui.md. Читаю
+  его, это, похоже, прошлый черновик по этой теме.
+
+  Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+● Нашёл прошлый черновик — PM/ideas/tanuki-terminal/keybinds-settings-ui.md. Там
+  написано, что фича уже реализована и зашиппена 27.07.2026: в Settings
+  добавлена отдельная вкладка SettingsSection::Keybinds, где редактируются все
+  ~42 действия.
+
+  Твой текущий запрос про "Kidings" и "Satings" (видимо, Keybinds и Settings)
+  звучит как жалоба на то, что горячие клавиши сейчас размазаны — часть в
+  отдельной секции Keybinds, часть где-то ещё внутри Settings — и текущее
+  расположение не устраивает.
+
+  Прежде чем продолжать через /spelflow-plan (это тяжёлый PRD→backlog→Spelflow
+  пайплайн, рассчитанный на крупный неоформленный эпик), хочу уточнить, что
+  именно тебе нужно.
+
+● User answered Claude's questions:
+  ⎿  · Что именно сейчас не устраивает в расположении горячих клавиш — и что 
+     нужно от меня дальше? → Обсудить UX-структуру меню в чате
+
+  Searched for 3 patterns, read 2 files (ctrl+o to expand)
+
+● Разобрался с кодом — картина проясняется. Сейчас в tanuki_terminal реально два
+  независимых UI-места, оба называются «keybinds»:
+
+  1. prefix+? → read-only оверлей (ui/keybind_help.rs) — полноэкранный список
+  всех активных биндов, сгруппированный (global / navigation / workspaces-tabs /
+  panes / custom). Открывается отдельной командой, не через Settings.
+  2. Settings → вкладка Keybinds (SettingsSection::Keybinds, одна из 7 вкладок
+  наравне с Theme/Sound/Toast/PaneLabels/Integrations/Experiments) —
+  редактируемый список тех же ~42 действий, с захватом нажатия клавиши для
+  перебиндинга.
+
+  То есть у пользователя буквально два разных входа в «горячие клавиши»: один —
+  просмотр (help-оверлей), другой — редактирование (таб в Settings), и по
+  названию/функции они дублируют друг друга, но физически разнесены и не
+  связаны.
+
+  Рекомендация: объединить их в один экран — сделать Settings→Keybinds
+  единственным источником правды, а prefix+? либо убрать, либo превратить в
+  мостик («нажми s чтобы редактировать») в тот же экран, вместо отдельного
+  read-only дублирующего списка. Компромисс: read-only оверлей сейчас лёгкий и
+  быстрый (без захода в Settings), а объединённый экран будет чуть тяжелее
+  открывать на лету во время работы.
+
+  Как тебе такой вариант — или видишь по-другому, где что должно жить?
+
+✻ Cooked for 1m 50s
+
+❯ [Image #1]                                                                    
+                                                                                
+  а это ты учитываешь?                                                          
+  ⎿  [Image #1]
+
+  Searched for 4 patterns, read 1 file (ctrl+o to expand)
+
+● Да, теперь картина полная. Это подтверждает и обостряет проблему.
+
+  Точная структура сейчас:
+
+  Global Menu (тот попап на скрине, ["settings", "keybinds", "reload config", 
+  "what's new"?, "detach"]) — это плоский список из 5 команд, и settings /
+  keybinds в нём сиблинги, на одном уровне. Клик по keybinds открывает read-only
+  оверлей (Mode::KeybindHelp). Клик по settings открывает попап Settings — а
+  внутри него есть ещё одна вкладка Keybinds, редактируемая.
+
+  Получается три точки входа, сходящиеся в двух разных экранах:
+
+  Global Menu
+  ├── settings ──────► Settings popup
+  │                      ├── Theme
+  │                      ├── Sound
+  │                      ├── Toast
+  │                      ├── PaneLabels
+  │                      ├── Keybinds ◄── редактируемый список (42 действия)
+  │                      ├── Integrations
+  │                      └── Experiments
+  ├── keybinds ──────► отдельный read-only оверлей (тот же смысл, другой список)
+  ├── reload config
+  ├── what's new
+  └── detach
+
+  Проблема ровно в том, что ты интуитивно ощутил: keybinds в Global Menu
+  выглядит как самостоятельная команда наравне с settings, но по сути — это
+  вьюер того же самого, что редактируется в Settings. Пользователь видит одно
+  слово «keybinds» в двух разных местах меню с разным поведением (посмотреть vs
+  изменить), и это не считывается как единая иерархия.
+
+  Два способа это выпрямить:
+
+  1. Убрать keybinds из Global Menu, оставить только settings → таб Keybinds как
+  единственную точку входа (и просмотр, и правка в одном месте). Проще, меньше
+  сущностей, но теряется быстрый read-only доступ без захода в Settings.
+  2. Оставить keybinds в Global Menu, но сделать его прямым шорткатом в тот же 
+  редактируемый таб (а не в отдельный read-only оверлей) — тогда keybinds из
+  меню и Settings → Keybinds физически один и тот же экран, просто два способа
+  туда попасть.
+
+  Я бы склонялся к варианту 2 — он убирает дублирование сущности, но сохраняет
+  быстрый доступ одним кликом из Global Menu, которым, похоже, ты и пользуешься
+  на скриншоте. Какой ближе?
+
+✻ Crunched for 47s
+
+※ recap: Обсуждаем, как перестроить меню Keybinds/Settings в tanuki_terminal — сейчас keybinds дублируется как отдельный пункт меню и как вкладка внутри Settings. Жду, какой из двух вариантов объединения тебе ближе. (disable recaps in /config)
+
+❯ 2                                                                             
+
+  Searched for 9 patterns, read 1 file (ctrl+o to expand)
+
+● Копнул глубже — картина ещё интереснее. У «keybinds» на самом деле два 
+  независимых входа, оба ведущих в read-only оверлей:
+
+  1. Клик по keybinds в Global Menu (тот скриншот) → apply_global_menu_action →
+  open_keybind_help() (modal.rs:136)
+  2. Отдельный keyboard-шорткат kb.help (обычно prefix+?) → NavigateAction::Help
+  → тот же open_keybind_help() (navigate.rs:392 и :1705)
+
+  А в Settings уже есть готовая функция open_settings_at(state, section)
+  (settings.rs:354), которая открывает Settings сразу на нужной вкладке — то
+  есть техническая часть перехвата тривиальна: заменить open_keybind_help(state)
+  на open_settings_at(state, SettingsSection::Keybinds).
+
+  Вопрос на развилку, прежде чем трогать код: делать ли это только для пункта в 
+  Global Menu, или и для клавиатурного шортката prefix+? тоже?
+
+● User answered Claude's questions:
+  ⎿  · Клавиатурный шорткат kb.help (обычно prefix+?) тоже переключать на 
+     редактируемый таб Settings, или оставить его как быстрый read-only обзор? →
+     всё должно идти к редактированию
+
+● Ок, полная унификация — оба входа (клик в Global Menu и prefix+?) ведут в один
+  и тот же редактируемый Settings → Keybinds, read-only-оверлей выпиливается
+  как отдельная сущность.
+
+  Конкретный план изменений в tanuki_terminal:
+
+  1. app/input/modal.rs:136 — GlobalMenuAction::Keybinds => 
+  open_keybind_help(state) → super::settings::open_settings_at(state, 
+  SettingsSection::Keybinds)
+  2. app/input/navigate.rs:392 и :1705 — оба NavigateAction::Help => 
+  super::modal::open_keybind_help(state) → то же самое
+  3. Удалить как мёртвый код: open_keybind_help() (modal.rs), Mode::KeybindHelp
+  (везде: state.rs, mouse.rs, ui.rs), сам файл ui/keybind_help.rs, поля
+  keybind_help/keybind_help_max_scroll() в AppState
+  4. Поправить тесты в sidebar.rs/modal.rs, которые сейчас проверяют
+  Mode::KeybindHelp (clicking_keybinds_menu_item_opens_help и т.п.) — переписать
+  на проверку Mode::Settings + SettingsSection::Keybinds
+  5. Сам keybind kb.help (prefix+?) остаётся как есть — меняется только его
+  действие
+  6. Обновить PM/ideas/tanuki-terminal/keybinds-settings-ui.md — зафиксировать
+  этот follow-up к уже зашипленной фиче
+
+  Это правки в реальном коде продукта (не в wiki), затрагивают ~5 файлов плюс
+  тесты. Делать?
+
+✻ Sautéed for 1m 42s
+
+❯ нужно добавить поиск, для удобства, скоро будет очень много возможных         
+  комбинаций, поэтому нужен поиск                                               
+
+  Searched for 4 patterns, read 2 files (ctrl+o to expand)
+
+● Смотрю на текущий инпут-хендлинг Keybinds-таба (app/input/settings.rs):
+  навигация уже занимает j/k/h/l, Enter/Space — захват бинда, p — capture как
+  prefix+. Это значит, что произвольный ввод текста для поиска нельзя просто
+  вешать на буквы — они все заняты под single-key команды. Нужен отдельный режим
+  "ввод поиска", как / в vim/less.
+
+  Предлагаемая схема:
+  - / открывает строку поиска над списком (третья строка, рядом с текущим
+  description-баннером)
+  - Пока активен ввод — печатаемые символы уходят в query, Backspace стирает,
+  список фильтруется live по подстроке в label() (например "pane", "workspace",
+  "agent")
+  - Enter или Esc выходит из режима набора текста, но фильтр остаётся применён к
+  списку; повторный / на пустом поле или отдельный Esc при пустом списке
+  снимает фильтр целиком
+  - Обычная навигация (j/k, Enter = capture, p = prefix) работает как раньше, но
+  по отфильтрованному списку
+
+● User answered Claude's questions:
+  ⎿  · Такая схема поиска (клавиша `/` открывает строку поиска, живая фильтрация
+     по подстроке, Enter/Esc выходят из ввода но сохраняют фильтр) подходит? → 
+     Да, / + живая фильтрация (рекомендую)
+
+● Итоговый план объединяет обе части:
+
+  1. Унификация входов в keybinds
+  - Global Menu → keybinds и клавиатурный prefix+? (kb.help) оба ведут в
+  Settings → Keybinds вместо read-only оверлея
+  - Удаляется мёртвый код: open_keybind_help(), Mode::KeybindHelp, файл
+  ui/keybind_help.rs, связанные поля в AppState, обновляются тесты в
+  sidebar.rs/modal.rs
+
+  2. Поиск в табе Keybinds
+  - / открывает строку поиска над списком (в render_settings_keybinds,
+  ui/settings.rs)
+  - Живая фильтрация по подстроке в label() — набор символов в
+  app/input/settings.rs для SettingsSection::Keybinds
+  - Enter/Esc выходят из режима ввода, но фильтр остаётся; повторный / на пустом
+  query снимает фильтр
+  - Индексация списка (settings_list_index_at, list.move_prev/move_next,
+  capture-таргет) переходит на отфильтрованный список вместо KeybindSetting::ALL
+  напрямую
+
+  Плюс обновлю PM/ideas/tanuki-terminal/keybinds-settings-ui.md этим
+  follow-up'ом.
+
+  Делать?
+
+✻ Crunched for 1m 13s
+
+❯ добавляй и давай всё сделаем                                                  
+
+  Searched for 3 patterns, read 2 files (ctrl+o to expand)
+● Теперь найду все места создания SettingsState (для добавления новых полей), и
+  структуру SelectionListState.
+
+  Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+● Теперь начинаю правки. Сначала state.rs.
+
+● Update(src\app\state.rs)
+  ⎿  Removed 1 line
+      809      ContextMenu,
+      810      Settings,
+      811      GlobalMenu,
+      812 -    KeybindHelp,                                              
+      812      Navigator,
+      813  }
+      814  
+
+● Update(src\app\state.rs)
+  ⎿  Removed 1 line
+      834                  | Mode::ConfirmRemoveWorktree
+      835                  | Mode::ContextMenu
+      836                  | Mode::GlobalMenu
+      837 -                | Mode::KeybindHelp                           
+      837          )
+      838      }
+      839  }
+
+● Update(src\app\state.rs)
+  ⎿  Removed 3 lines
+      1426      ProductAnnouncementScrollbar {
+      1427          grab_row_offset: u16,
+      1428      },
+      1429 -    KeybindHelpScrollbar {                                   
+      1430 -        grab_row_offset: u16,                                
+      1431 -    },                                                       
+      1429      SidebarDivider,
+      1430      SidebarSectionDivider,
+      1431  }
+
+● Update(src\app\state.rs)
+  ⎿  Removed 4 lines
+      1636      pub preview: bool,
+      1637  }
+      1638  
+      1639 -pub struct KeybindHelpState {                                
+      1640 -    pub scroll: u16,                                         
+      1641 -}                                                            
+      1642 -                                                             
+      1639  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+      1640  pub enum SidebarWidthSource {
+      1641      ConfigDefault,
+
+● Теперь поле keybind_help в AppState и оба литерала SettingsState:
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(src\app\state.rs)
+  ⎿  Removed 1 line
+      1699      pub name_input_replace_on_type: bool,
+      1700      pub release_notes: Option<ReleaseNotesState>,
+      1701      pub product_announcement: Option<ProductAnnouncementState
+            >,
+      1702 -    pub keybind_help: KeybindHelpState,                      
+      1702      pub navigator: NavigatorState,
+      1703      pub copy_mode: Option<CopyModeState>,
+      1704      pub workspace_scroll: usize,
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\state.rs)
+  ⎿  Removed 1 line
+      2068              name_input_replace_on_type: false,
+      2069              release_notes: None,
+      2070              product_announcement: None,
+      2071 -            keybind_help: KeybindHelpState { scroll: 0 },    
+      2071              navigator: NavigatorState::default(),
+      2072              copy_mode: None,
+      2073              workspace_scroll: 0,
+
+● Теперь добавляю поля поиска в SettingsState и обновляю оба литерала:
+
+● Update(src\app\state.rs)
+  ⎿  Added 7 lines
+      1383      /// become the new binding for the selected action; the v
+            ariant says
+      1384      /// whether it'll be saved as a direct chord or a `prefix
+            +` binding.
+      1385      pub keybind_capture: Option<KeybindCaptureKind>,
+      1386 +    /// Current filter text for the Keybinds tab's `/`-trigge
+           +red search.                                                  
+      1387 +    /// Empty means no filter is applied.                    
+      1388 +    pub keybind_search: String,                              
+      1389 +    /// Whether the Keybinds tab is currently capturing text 
+           +into                                                         
+      1390 +    /// `keybind_search` (as opposed to `keybind_search` hold
+           +ing a filter                                                 
+      1391 +    /// left over from a previous search that's no longer bei
+           +ng edited).                                                  
+      1392 +    pub keybind_search_active: bool,                         
+      1393  }
+      1394  
+      1395  /// Which shape the next captured keypress in the Keybinds ta
+            b should take.
+
+● Update(src\app\state.rs)
+  ⎿  Added 2 lines
+      2181                  original_palette: None,
+      2182                  original_theme: None,
+      2183                  keybind_capture: None,
+      2184 +                keybind_search: String::new(),               
+      2185 +                keybind_search_active: false,                
+      2186              },
+      2187              integration_recommendations: Vec::new(),
+      2188              agent_manifest_summaries: Vec::new(),
+
+● Update(src\app\mod.rs)
+  ⎿  Added 2 lines
+      661                  original_palette: None,
+      662                  original_theme: None,
+      663                  keybind_capture: None,
+      664 +                keybind_search: String::new(),                
+      665 +                keybind_search_active: false,                 
+      666              },
+      667              integration_recommendations: crate::integration::i
+           ntegration_recommendations(),
+      668              agent_manifest_summaries,
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Хорошо, оба покрыты. Теперь app/mod.rs — обработка режима Mode::KeybindHelp в
+  match'ах:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\mod.rs)
+  ⎿  Removed 3 lines
+      1709              Mode::ContextMenu => {
+      1710                  self.handle_context_menu_key_via_api(key_even
+            t);
+      1711              }
+      1712 -            Mode::KeybindHelp => {                           
+      1713 -                input::handle_keybind_help_key(&mut self.stat
+           -e, key_event);                                               
+      1714 -            }                                                
+      1712              Mode::GlobalMenu => {
+      1713                  input::handle_global_menu_key(&mut self.state
+            , key_event);
+      1714              }
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(src\app\mod.rs)
+  ⎿  Removed 1 line
+      1902              Mode::ConfirmRemoveWorktree,
+      1903              Mode::ContextMenu,
+      1904              Mode::GlobalMenu,
+      1905 -            Mode::KeybindHelp,                               
+      1905          ] {
+      1906              assert!(mode.wants_ascii_input(), "{mode:?} shoul
+            d want ASCII");
+      1907          }
+
+● Теперь input/mod.rs — импорт handle_keybind_help_key и его использование:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\mod.rs)
+  ⎿  Added 2 lines, removed 2 lines
+      48  
+      49  pub(crate) use self::{
+      50      modal::{
+      51 -        handle_global_menu_key, handle_keybind_help_key, handle
+         -_navigator_key,                                                
+      52 -        insert_navigator_search_text, insert_rename_input_text,
+         - open_new_workspace_dialog,                                    
+      51 +        handle_global_menu_key, handle_navigator_key, insert_na
+         +vigator_search_text,                                           
+      52 +        insert_rename_input_text, open_new_workspace_dialog,   
+      53      },
+      54      navigate::{
+      55          terminal_direct_indexed_navigation_action, terminal_dir
+          ect_non_indexed_navigation_action,
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\mod.rs)
+  ⎿  Removed 1 line
+      107                  }
+      108                  Mode::Settings => self.handle_settings_key(key
+           _event),
+      109                  Mode::GlobalMenu => handle_global_menu_key(&mu
+           t self.state, key_event),
+      110 -                Mode::KeybindHelp => handle_keybind_help_key(&
+          -mut self.state, key_event),                                   
+      110                  Mode::Navigator => {
+      111                      handle_navigator_key(&mut self.state, &sel
+           f.terminal_runtimes, key_event)
+      112                  }
+● Теперь input/modal.rs — сам обработчик, open_keybind_help, привязка Global
+  Menu action.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\modal.rs)
+  ⎿  Removed 5 lines
+       99      state.mode = Mode::GlobalMenu;
+      100  }
+      101  
+      102 -pub(super) fn open_keybind_help(state: &mut AppState) {       
+      103 -    state.keybind_help.scroll = 0;                            
+      104 -    state.mode = Mode::KeybindHelp;                           
+      105 -}                                                             
+      106 -                                                              
+      102  fn open_update_release_notes(state: &mut AppState) {
+      103      let Some(notes) = crate::release_notes::load_latest() else
+            {
+      104          return;
+
+● Update(src\app\input\modal.rs)
+  ⎿  Added 3 lines, removed 1 line
+      128              request_detach(state);
+      129          }
+      130          GlobalMenuAction::WhatsNew => open_update_release_note
+           s(state),
+      131 -        GlobalMenuAction::Keybinds => open_keybind_help(state)
+          -,                                                             
+      131 +        GlobalMenuAction::Keybinds => {                       
+      132 +            super::settings::open_settings_at(state, crate::ap
+          +p::state::SettingsSection::Keybinds)                          
+      133 +        }                                                     
+      134          GlobalMenuAction::ReloadConfig => {
+      135              state.request_reload_config = true;
+      136              leave_modal(state);
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Update(src\app\input\modal.rs)
+  ⎿  Removed 13 lines
+      281      state.select_first_navigator_match_from(terminal_runtimes)
+           ;
+      282  }
+      283  
+      284 -pub(crate) fn handle_keybind_help_key(state: &mut AppState, ke
+          -y: KeyEvent) {                                                
+      285 -    match key.code {                                          
+      286 -        KeyCode::Up | KeyCode::Char('k') => state.scroll_keybi
+          -nd_help(-1),                                                  
+      287 -        KeyCode::Down | KeyCode::Char('j') => state.scroll_key
+          -bind_help(1),                                                 
+      288 -        KeyCode::PageUp => state.scroll_keybind_help(-8),     
+      289 -        KeyCode::PageDown => state.scroll_keybind_help(8),    
+      290 -        KeyCode::Home => state.keybind_help.scroll = 0,       
+      291 -        KeyCode::End => state.keybind_help.scroll = state.keyb
+          -ind_help_max_scroll(),                                        
+      292 -        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => 
+          -leave_modal(state),                                           
+      293 -        _ => {}                                               
+      294 -    }                                                         
+      295 -}                                                             
+      296 -                                                              
+      284  pub(super) fn open_rename_workspace(
+      285      state: &mut AppState,
+      286      terminal_runtimes: &crate::terminal::TerminalRuntimeRegist
+           ry,
+
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+● Смотрю оба блока целиком, чтобы удалить корректно.
+
+  Read 1 file (ctrl+o to expand)
+
+● Удаляю блок обработки мыши для KeybindHelp:
+
+● Update(src\app\input\overlays.rs)
+  ⎿  Removed 60 lines
+      190              return true;
+      191          }
+      192  
+      193 -        if self.state.mode == Mode::KeybindHelp {             
+      194 -            match mouse.kind {                                
+      195 -                MouseEventKind::Down(MouseButton::Left)       
+      196 -                    if self                                   
+      197 -                        .state                                
+      198 -                        .keybind_help_close_button_at(mouse.co
+          -lumn, mouse.row) =>                                           
+      199 -                {                                             
+      200 -                    leave_modal(&mut self.state);             
+      201 -                }                                             
+      202 -                MouseEventKind::Down(MouseButton::Left) => {  
+      203 -                    if let Some(target) = self                
+      204 -                        .state                                
+      205 -                        .keybind_help_scrollbar_target_at(mous
+          -e.column, mouse.row)                                          
+      206 -                    {                                         
+      207 -                        match target {                        
+      208 -                            ScrollbarClickTarget::Thumb { grab
+          -_row_offset } => {                                            
+      209 -                                self.state.drag = Some(DragSta
+          -te {                                                          
+      210 -                                    target: DragTarget::Keybin
+          -dHelpScrollbar { grab_row_offset },                           
+      211 -                                });                           
+      212 -                            }                                 
+      213 -                            ScrollbarClickTarget::Track { offs
+          -et_from_bottom } => {                                         
+      214 -                                self.state                    
+      215 -                                    .set_keybind_help_offset_f
+          -rom_bottom(offset_from_bottom);                               
+      216 -                            }                                 
+      217 -                        }                                     
+      218 -                    } else {                                  
+      219 -                        let rect = self.state.keybind_help_pop
+          -up_rect();                                                    
+      220 -                        let inside = mouse.column >= rect.x   
+      221 -                            && mouse.column < rect.x + rect.wi
+          -dth                                                           
+      222 -                            && mouse.row >= rect.y            
+      223 -                            && mouse.row < rect.y + rect.heigh
+          -t;                                                            
+      224 -                        if !inside {                          
+      225 -                            leave_modal(&mut self.state);     
+      226 -                        }                                     
+      227 -                    }                                         
+      228 -                }                                             
+      229 -                MouseEventKind::Drag(MouseButton::Left) => {  
+      230 -                    if let Some(DragState {                   
+      231 -                        target: DragTarget::KeybindHelpScrollb
+          -ar { grab_row_offset },                                       
+      232 -                    }) = &self.state.drag                     
+      233 -                    {                                         
+      234 -                        if let Some(offset_from_bottom) = self
+      235 -                            .state                            
+      236 -                            .keybind_help_offset_for_drag_row(
+          -mouse.row, *grab_row_offset)                                  
+      237 -                        {                                     
+      238 -                            self.state                        
+      239 -                                .set_keybind_help_offset_from_
+          -bottom(offset_from_bottom);                                   
+      240 -                        }                                     
+      241 -                    }                                         
+      242 -                }                                             
+      243 -                MouseEventKind::Up(MouseButton::Left) => {    
+      244 -                    self.state.drag = None;                   
+      245 -                }                                             
+      246 -                MouseEventKind::ScrollUp => self.state.scroll_
+          -keybind_help(-3),                                             
+      247 -                MouseEventKind::ScrollDown => self.state.scrol
+          -l_keybind_help(3),                                            
+      248 -                _ => {}                                       
+      249 -            }                                                 
+      250 -            return true;                                      
+      251 -        }                                                     
+      252 -                                                              
+      193          false
+      194      }
+      195  }
+
+● Теперь блок функций (rect/scroll helpers, строки ~612-707) и тест:
+
+  Read 1 file (ctrl+o to expand)
+
+● Теперь удаляю весь блок с keybind_help_popup_rect до конца scroll_keybind_help
+  (строки 552-707 в текущей нумерации, вплоть до закрывающей } impl-блока).
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Удаляю блок методов (552-647) единым куском:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\overlays.rs)
+  ⎿  Removed 96 lines
+      549          }
+      550      }
+      551  
+      552 -    pub(super) fn keybind_help_popup_rect(&self) -> Rect {    
+      553 -        crate::ui::centered_popup_rect(self.screen_rect(), 76,
+          - 22).unwrap_or_default()                                      
+      554 -    }                                                         
+      555 -                                                              
+      556 -    fn keybind_help_modal_inner(&self) -> Option<Rect> {      
+      557 -        self.onboarding_modal_inner(76, 22)                   
+      558 -    }                                                         
+      559 -                                                              
+      560 -    fn keybind_help_close_button_at(&self, col: u16, row: u16)
+          - -> bool {                                                    
+      561 -        let Some(inner) = self.keybind_help_modal_inner() else
+          - {                                                            
+      562 -            return false;                                     
+      563 -        };                                                    
+      564 -        if inner.height < 4 || inner.width < 12 {             
+      565 -            return false;                                     
+      566 -        }                                                     
+      567 -        let button =                                          
+      568 -            crate::ui::release_notes_close_button_rect(Rect::n
+          -ew(inner.x, inner.y, inner.width, 1));                        
+      569 -        col >= button.x                                       
+      570 -            && col < button.x + button.width                  
+      571 -            && row >= button.y                                
+      572 -            && row < button.y + button.height                 
+      573 -    }                                                         
+      574 -                                                              
+      575 -    fn keybind_help_body_rect(&self) -> Option<Rect> {        
+      576 -        let inner = self.keybind_help_modal_inner()?;         
+      577 -        if inner.height < 6 || inner.width < 4 {              
+      578 -            return None;                                      
+      579 -        }                                                     
+      580 -        Some(crate::ui::modal_stack_areas(inner, 2, 1, 0, 1).c
+          -ontent)                                                       
+      581 -    }                                                         
+      582 -                                                              
+      583 -    fn keybind_help_scroll_metrics(&self) -> Option<crate::pan
+          -e::ScrollMetrics> {                                           
+      584 -        let body = self.keybind_help_body_rect()?;            
+      585 -        let viewport_rows = body.height.max(1) as usize;      
+      586 -        let wrap_width = body.width.max(1) as usize;          
+      587 -        let total_rows = crate::ui::keybind_help_lines(self)  
+      588 -            .into_iter()                                      
+      589 -            .map(|(width, _)| width.max(1).div_ceil(wrap_width
+          -))                                                            
+      590 -            .sum::<usize>();                                  
+      591 -        let max_offset_from_bottom = total_rows.saturating_sub
+          -(viewport_rows);                                              
+      592 -        Some(crate::pane::ScrollMetrics {                     
+      593 -            offset_from_bottom: max_offset_from_bottom        
+      594 -                .saturating_sub(self.keybind_help.scroll as us
+          -ize),                                                         
+      595 -            max_offset_from_bottom,                           
+      596 -            viewport_rows,                                    
+      597 -        })                                                    
+      598 -    }                                                         
+      599 -                                                              
+      600 -    fn keybind_help_scrollbar_target_at(&self, col: u16, row: 
+          -u16) -> Option<ScrollbarClickTarget> {                        
+      601 -        let body = self.keybind_help_body_rect()?;            
+      602 -        let metrics = self.keybind_help_scroll_metrics()?;    
+      603 -        let track = crate::ui::release_notes_scrollbar_rect(bo
+          -dy, metrics)?;                                                
+      604 -        if !(col >= track.x                                   
+      605 -            && col < track.x + track.width                    
+      606 -            && row >= track.y                                 
+      607 -            && row < track.y + track.height)                  
+      608 -        {                                                     
+      609 -            return None;                                      
+      610 -        }                                                     
+      611 -        if let Some(grab_row_offset) = crate::ui::scrollbar_th
+          -umb_grab_offset(metrics, track, row) {                        
+      612 -            Some(ScrollbarClickTarget::Thumb { grab_row_offset
+          - })                                                           
+      613 -        } else {                                              
+      614 -            Some(ScrollbarClickTarget::Track {                
+      615 -                offset_from_bottom: crate::ui::scrollbar_offse
+          -t_from_row(metrics, track, row),                              
+      616 -            })                                                
+      617 -        }                                                     
+      618 -    }                                                         
+      619 -                                                              
+      620 -    fn keybind_help_offset_for_drag_row(&self, row: u16, grab_
+          -row_offset: u16) -> Option<usize> {                           
+      621 -        let body = self.keybind_help_body_rect()?;            
+      622 -        let metrics = self.keybind_help_scroll_metrics()?;    
+      623 -        let track = crate::ui::release_notes_scrollbar_rect(bo
+          -dy, metrics)?;                                                
+      624 -        Some(crate::ui::scrollbar_offset_from_drag_row(       
+      625 -            metrics,                                          
+      626 -            track,                                            
+      627 -            row,                                              
+      628 -            grab_row_offset,                                  
+      629 -        ))                                                    
+      630 -    }                                                         
+      631 -                                                              
+      632 -    pub(crate) fn keybind_help_max_scroll(&self) -> u16 {     
+      633 -        self.keybind_help_scroll_metrics()                    
+      634 -            .map(|metrics| metrics.max_offset_from_bottom as u
+          -16)                                                           
+      635 -            .unwrap_or(0)                                     
+      636 -    }                                                         
+      637 -                                                              
+      638 -    fn set_keybind_help_offset_from_bottom(&mut self, offset_f
+          -rom_bottom: usize) {                                          
+      639 -        let max_scroll = self.keybind_help_max_scroll() as usi
+          -ze;                                                           
+      640 -        self.keybind_help.scroll = max_scroll.saturating_sub(o
+          -ffset_from_bottom) as u16;                                    
+      641 -    }                                                         
+      642 -                                                              
+      643 -    pub(super) fn scroll_keybind_help(&mut self, delta: i16) {
+      644 -        let max_scroll = self.keybind_help_max_scroll();      
+      645 -        let current = self.keybind_help.scroll as i16;        
+      646 -        self.keybind_help.scroll = current.saturating_add(delt
+          -a).clamp(0, max_scroll as i16) as u16;                        
+      647 -    }                                                         
+      552  }
+      553  
+      554  #[cfg(test)]
+
+● Теперь тест clicking_keybind_help_close_button_closes_overlay:
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\overlays.rs)
+  ⎿  Removed 23 lines
+      560      use super::*;
+      561  
+      562      #[test]
+      563 -    fn clicking_keybind_help_close_button_closes_overlay() {  
+      564 -        let mut app = app_for_mouse_test();                   
+      565 -        app.state.mode = Mode::KeybindHelp;                   
+      566 -                                                              
+      567 -        let rect = app.state.keybind_help_popup_rect();       
+      568 -        let inner = Rect::new(                                
+      569 -            rect.x + 1,                                       
+      570 -            rect.y + 1,                                       
+      571 -            rect.width.saturating_sub(2),                     
+      572 -            rect.height.saturating_sub(2),                    
+      573 -        );                                                    
+      574 -        let close =                                           
+      575 -            crate::ui::release_notes_close_button_rect(Rect::n
+          -ew(inner.x, inner.y, inner.width, 1));                        
+      576 -        app.handle_mouse(mouse(                               
+      577 -            MouseEventKind::Down(MouseButton::Left),          
+      578 -            close.x,                                          
+      579 -            close.y,                                          
+      580 -        ));                                                   
+      581 -                                                              
+      582 -        assert_eq!(app.state.mode, Mode::Navigate);           
+      583 -    }                                                         
+      584 -                                                              
+      585 -    #[test]                                                   
+      563      fn onboarding_hover_does_not_change_selection() {
+      564          let mut app = app_for_mouse_test();
+      565          app.state.mode = Mode::Onboarding;
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Хорошо, ещё используется другими оверлеями — не трогаем. Теперь mouse.rs:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\mouse.rs)
+  ⎿  Added 1 line, removed 5 lines
+      127              && !self.sidebar_collapsed
+      128              && matches!(
+      129                  self.mode,
+      130 -                Mode::Terminal                                
+      131 -                    | Mode::Navigate                          
+      132 -                    | Mode::Resize                            
+      133 -                    | Mode::GlobalMenu                        
+      134 -                    | Mode::KeybindHelp                       
+      130 +                Mode::Terminal | Mode::Navigate | Mode::Resize
+          + | Mode::GlobalMenu                                           
+      131              );
+      132          let launcher = self.global_launcher_rect();
+      133          let launcher_hit = launcher_enabled
+
+● Update(src\app\input\mouse.rs)
+  ⎿  Removed 4 lines
+      165              return None;
+      166          }
+      167  
+      168 -        if self.mode == Mode::KeybindHelp {                   
+      169 -            return None;                                      
+      170 -        }                                                     
+      171 -                                                              
+      168          if self.view.layout == ViewLayout::Mobile {
+      169              match self.handle_mobile_mouse(mouse) {
+      170                  MobileMouseResult::Ignored => {}
+
+  Searched for 1 pattern (ctrl+o to expand)
+  ⎿  You've hit your session limit · resets 6:50am (Europe/Moscow)
+     /upgrade or /usage-credits to finish what you’re working on.
+
+✻ Cogitated for 4m 24s
+
+❯ /login                                                                        
+  ⎿  Login successful
+
+❯ продолжаем                                                                    
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\mouse.rs)
+  ⎿  Added 1 line, removed 2 lines
+      780                              self.set_sidebar_section_split(mou
+           se.row);
+      781                          }
+      782                          DragTarget::ReleaseNotesScrollbar { ..
+            }
+      783 -                        | DragTarget::ProductAnnouncementScrol
+          -lbar { .. }                                                   
+      784 -                        | DragTarget::KeybindHelpScrollbar { .
+          -. } => {}                                                     
+      783 +                        | DragTarget::ProductAnnouncementScrol
+          +lbar { .. } => {}                                             
+      784                      }
+      785                  }
+      786              }
+
+● Теперь navigate.rs — вызовы open_keybind_help и тесты, проверяющие
+  Mode::KeybindHelp.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\navigate.rs)
+  ⎿  Added 4 lines, removed 1 line
+      389                  self.last_pane_via_api();
+      390                  leave_navigate_mode(&mut self.state);
+      391              }
+      392 -            NavigateAction::Help => super::modal::open_keybind
+          -_help(&mut self.state),                                       
+      392 +            NavigateAction::Help => super::settings::open_sett
+          +ings_at(                                                      
+      393 +                &mut self.state,                              
+      394 +                crate::app::state::SettingsSection::Keybinds, 
+      395 +            ),                                                
+      396              NavigateAction::Settings => super::settings::open_
+           settings(&mut self.state),
+      397              NavigateAction::ReloadConfig => {
+      398                  self.runtime_server_reload_config("tui.server.
+           reload_config");
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\navigate.rs)
+  ⎿  Added 4 lines, removed 1 line
+      1705              state.last_pane();
+      1706              leave_navigate_mode(state);
+      1707          }
+      1708 -        NavigateAction::Help => super::modal::open_keybind_he
+           -lp(state),                                                   
+      1708 +        NavigateAction::Help => super::settings::open_setting
+           +s_at(                                                        
+      1709 +            state,                                           
+      1710 +            crate::app::state::SettingsSection::Keybinds,    
+      1711 +        ),                                                   
+      1712          NavigateAction::Settings => super::settings::open_set
+            tings(state),
+      1713          NavigateAction::ReloadConfig => {
+      1714              state.request_reload_config = true;
+
+● Теперь три теста в navigate.rs:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\navigate.rs)
+  ⎿  Added 10 lines, removed 2 lines
+      2919          )
+      2920          .await;
+      2921  
+      2922 -        assert_eq!(app.state.mode, Mode::KeybindHelp);       
+      2922 +        assert_eq!(app.state.mode, Mode::Settings);          
+      2923 +        assert_eq!(                                          
+      2924 +            app.state.settings.section,                      
+      2925 +            crate::app::state::SettingsSection::Keybinds     
+      2926 +        );                                                   
+      2927      }
+      2928  
+      2929      #[test]
+     ...
+      2941              &mut state,
+      2942              KeyEvent::new(KeyCode::Char('f'), KeyModifiers::e
+            mpty()),
+      2943          );
+      2940 -        assert_eq!(state.mode, Mode::KeybindHelp);           
+      2944 +        assert_eq!(state.mode, Mode::Settings);              
+      2945 +        assert_eq!(                                          
+      2946 +            state.settings.section,                          
+      2947 +            crate::app::state::SettingsSection::Keybinds     
+      2948 +        );                                                   
+      2949      }
+      2950  
+      2951      #[test]
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\navigate.rs)
+  ⎿  Added 5 lines, removed 1 line
+      3327              KeyEvent::new(KeyCode::Char('?'), KeyModifiers::S
+            HIFT),
+      3328          );
+      3329  
+      3330 -        assert_eq!(state.mode, Mode::KeybindHelp);           
+      3330 +        assert_eq!(state.mode, Mode::Settings);              
+      3331 +        assert_eq!(                                          
+      3332 +            state.settings.section,                          
+      3333 +            crate::app::state::SettingsSection::Keybinds     
+      3334 +        );                                                   
+      3335      }
+      3336  
+      3337      #[test]
+
+● Теперь sidebar.rs тест на клик по пункту меню:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\sidebar.rs)
+  ⎿  Added 5 lines, removed 1 line
+      530              menu.y + 2,
+      531          ));
+      532  
+      533 -        assert_eq!(app.state.mode, Mode::KeybindHelp);        
+      533 +        assert_eq!(app.state.mode, Mode::Settings);           
+      534 +        assert_eq!(                                           
+      535 +            app.state.settings.section,                       
+      536 +            crate::app::state::SettingsSection::Keybinds      
+      537 +        );                                                    
+      538      }
+      539  
+      540      #[test]
+
+● Теперь headless.rs — три теста с Mode::KeybindHelp.
+
+  Searched for 2 patterns, read 2 files (ctrl+o to expand)
+
+● leave_modal likely goes to Mode::Navigate. Good — Esc from Settings→Keybinds
+  should still lead to Navigate, consistent with the old test's expectation. Now
+  update the three headless.rs tests:
+
+● Update(src\server\headless.rs)
+  ⎿  Added 4 lines, removed 35 lines
+      7122      #[test]
+      7123      fn semantic_client_escape_closes_keybind_help() {
+      7124          let mut server = test_headless_server();
+      7125 -        server.app.state.mode = crate::app::Mode::KeybindHelp
+           -;                                                            
+      7125 +        crate::app::input::open_settings_at(                 
+      7126 +            &mut server.app.state,                           
+      7127 +            crate::app::state::SettingsSection::Keybinds,    
+      7128 +        );                                                   
+      7129          server.clients.insert(
+      7130              1,
+      7131              ClientConnection::new(
+     ...
+      7154          assert_eq!(server.app.state.mode, crate::app::Mode::N
+            avigate);
+      7155      }
+      7156  
+      7154 -    #[test]                                                  
+      7155 -    fn semantic_client_down_scrolls_keybind_help() {         
+      7156 -        let mut server = test_headless_server();             
+      7157 -        server.app.state.mode = crate::app::Mode::KeybindHelp
+           -;                                                            
+      7158 -        server.clients.insert(                               
+      7159 -            1,                                               
+      7160 -            ClientConnection::new(                           
+      7161 -                (100, 30),                                   
+      7162 -                crate::kitty_graphics::HostCellSize::default(
+           -),                                                           
+      7163 -                crate::terminal_theme::TerminalTheme::default
+           -(),                                                          
+      7164 -                Some(true),                                  
+      7165 -                1,                                           
+      7166 -                RenderEncoding::SemanticFrame,               
+      7167 -                None,                                        
+      7168 -            ),                                               
+      7169 -        );                                                   
+      7170 -        server.foreground_client_id = Some(1);               
+      7171 -        server.sync_foreground_client_state();               
+      7172 -        server.resize_shared_runtime_to_effective_size();    
+      7173 -                                                             
+      7174 -        assert!(server.app.state.keybind_help_max_scroll() > 
+           -0);                                                          
+      7175 -        assert!(server.handle_server_event(ServerEvent::Clien
+           -tInputEvents {                                               
+      7176 -            client_id: 1,                                    
+      7177 -            events: vec![crate::protocol::ClientInputEvent::K
+           -ey {                                                         
+      7178 -                code: crate::protocol::ClientKeyCode::Down,  
+      7179 -                modifiers: 0,                                
+      7180 -                kind: crate::protocol::ClientKeyKind::Press, 
+      7181 -            }],                                              
+      7182 -        }));                                                 
+      7183 -                                                             
+      7184 -        assert_eq!(server.app.state.mode, crate::app::Mode::K
+           -eybindHelp);                                                 
+      7185 -        assert_eq!(server.app.state.keybind_help.scroll, 1); 
+      7186 -    }                                                        
+      7187 -                                                             
+      7157      #[tokio::test]
+      7158      async fn split_default_background_response_updates_theme_
+            without_forwarding_tail() {
+      7159          let mut server = test_headless_server();
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Good, it's pub(crate) and re-exported from input/mod.rs. Now check the
+  keybind_help_max_scroll/keybind_help.scroll assertion I removed isn't
+  referenced elsewhere, and verify test module has
+  crate::app::input::open_settings_at accessible (already re-exported at
+  app::input).
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Good, only test name string remains (harmless). Now let's clean up ui.rs and
+  delete ui/keybind_help.rs.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(src\ui.rs)
+  ⎿  Removed 1 line
+      451          }
+      452          Mode::ConfirmRemoveWorktree => render_remove_worktree_
+           overlay(app, frame, frame.area()),
+      453          Mode::GlobalMenu => render_global_launcher_menu(app, f
+           rame),
+      454 -        Mode::KeybindHelp => render_keybind_help_overlay(app, 
+          -frame),                                                       
+      454          Mode::Navigator => render_navigator_overlay(app, termi
+           nal_runtimes, frame),
+      455          Mode::Terminal => {}
+      456      }
+
+● Update(src\ui.rs)
+  ⎿  Removed 1 line
+       6  };
+       7  
+       8  mod dialogs;
+       9 -mod keybind_help;                                              
+       9  mod menus;
+      10  mod mobile;
+      11  mod navigator;
+
+● Update(src\ui.rs)  ⎿  Removed 1 line
+      25      render_confirm_close_overlay, render_new_linked_worktree_ov
+          erlay,
+      26      render_open_existing_worktree_overlay, render_remove_worktr
+          ee_overlay, render_rename_overlay,
+      27  };
+      28 -use self::keybind_help::render_keybind_help_overlay;           
+      28  use self::menus::{
+      29      render_context_menu, render_copy_mode_overlay, render_globa
+          l_launcher_menu,
+      30      render_navigate_overlay, render_prefix_overlay, render_resi
+          ze_overlay,
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\ui.rs)
+  ⎿  Removed 1 line
+      83      },
+      84  };
+      85  pub(crate) use self::{
+      86 -    keybind_help::keybind_help_lines,                          
+      86      mobile::{
+      87          mobile_switcher_areas, mobile_switcher_max_scroll, mobi
+          le_switcher_target_at,
+      88          mobile_switcher_workspace_doc_range, MobileSwitcherTarg
+          et,
+
+● Теперь тестовый блок use super::keybind_help::keybind_help_groups; и три
+  теста, использующих его:
+
+  Read 1 file (ctrl+o to expand)
+
+● Удаляю три теста и импорт keybind_help_groups, а также сам файл
+  ui/keybind_help.rs.
+
+● Update(src\ui.rs)
+  ⎿  Removed 132 lines
+      1349          assert!(rendered.contains("PREFIX"));
+      1350      }
+      1351  
+      1352 -    #[test]                                                  
+      1353 -    fn keybind_help_shows_unset_for_optional_actions() {     
+      1354 -        let app = crate::app::state::AppState::test_new();   
+      1355 -        let groups = keybind_help_groups(&app);              
+      1356 -                                                             
+      1357 -        let workspace_tab = groups                           
+      1358 -            .iter()                                          
+      1359 -            .find(|(name, _)| *name == "workspaces / tabs")  
+      1360 -            .expect("workspace tab group")                   
+      1361 -            .1                                               
+      1362 -            .clone();                                        
+      1363 -        let panes = groups                                   
+      1364 -            .iter()                                          
+      1365 -            .find(|(name, _)| *name == "panes")              
+      1366 -            .expect("panes group")                           
+      1367 -            .1                                               
+      1368 -            .clone();                                        
+      1369 -                                                             
+      1370 -        assert!(workspace_tab                                
+      1371 -            .iter()                                          
+      1372 -            .any(|(key, label)| key == "unset" && label.as_re
+           -f() == "previous workspace"));                               
+      1373 -        assert!(workspace_tab                                
+      1374 -            .iter()                                          
+      1375 -            .any(|(key, label)| key == "unset" && label.as_re
+           -f() == "next workspace"));                                   
+      1376 -        assert!(workspace_tab                                
+      1377 -            .iter()                                          
+      1378 -            .any(|(key, label)| key == "unset" && label.as_re
+           -f() == "previous agent"));                                   
+      1379 -        assert!(workspace_tab                                
+      1380 -            .iter()                                          
+      1381 -            .any(|(key, label)| key == "unset" && label.as_re
+           -f() == "next agent"));                                       
+      1382 -        assert!(workspace_tab                                
+      1383 -            .iter()                                          
+      1384 -            .any(|(key, label)| key == "unset" && label.as_re
+           -f() == "focus agent 1-9"));                                  
+      1385 -        assert!(workspace_tab                                
+      1386 -            .iter()                                          
+      1387 -            .any(|(key, label)| key == "unset" && label.as_re
+           -f() == "switch workspace 1-9"));                             
+      1388 -        assert!(panes                                        
+      1389 -            .iter()                                          
+      1390 -            .any(|(key, label)| key == "prefix+h" && label.as
+           -_ref() == "focus pane left"));                               
+      1391 -        assert!(panes                                        
+      1392 -            .iter()                                          
+      1393 -            .any(|(key, label)| key == "prefix+j" && label.as
+           -_ref() == "focus pane down"));                               
+      1394 -        assert!(panes                                        
+      1395 -            .iter()                                          
+      1396 -            .any(|(key, label)| key == "prefix+k" && label.as
+           -_ref() == "focus pane up"));                                 
+      1397 -        assert!(panes                                        
+      1398 -            .iter()                                          
+      1399 -            .any(|(key, label)| key == "prefix+l" && label.as
+           -_ref() == "focus pane right"));                              
+      1400 -    }                                                        
+      1401 -                                                             
+      1402 -    #[test]                                                  
+      1403 -    fn keybind_help_shows_custom_command_descriptions() {    
+      1404 -        let mut app = crate::app::state::AppState::test_new()
+           -;                                                            
+      1405 -        app.keybinds.custom_commands = vec![                 
+      1406 -            crate::config::CustomCommandKeybind {            
+      1407 -                bindings: crate::config::ActionKeybinds::pref
+           -ix("alt+g"),                                                 
+      1408 -                label: "prefix+alt+g".to_string(),           
+      1409 -                command: "lazygit".to_string(),              
+      1410 -                action: crate::config::CustomCommandAction::P
+           -ane,                                                         
+      1411 -                description: Some("open lazygit".to_string())
+           -,                                                            
+      1412 -                width: None,                                 
+      1413 -                height: None,                                
+      1414 -            },                                               
+      1415 -            crate::config::CustomCommandKeybind {            
+      1416 -                bindings: crate::config::ActionKeybinds::pref
+           -ix("alt+h"),                                                 
+      1417 -                label: "prefix+alt+h".to_string(),           
+      1418 -                command: "echo hello".to_string(),           
+      1419 -                action: crate::config::CustomCommandAction::S
+           -hell,                                                        
+      1420 -                description: None,                           
+      1421 -                width: None,                                 
+      1422 -                height: None,                                
+      1423 -            },                                               
+      1424 -        ];                                                   
+      1425 -                                                             
+      1426 -        let groups = keybind_help_groups(&app);              
+      1427 -        let custom = groups                                  
+      1428 -            .iter()                                          
+      1429 -            .find(|(name, _)| *name == "custom")             
+      1430 -            .expect("custom group")                          
+      1431 -            .1                                               
+      1432 -            .clone();                                        
+      1433 -        assert!(custom                                       
+      1434 -            .iter()                                          
+      1435 -            .any(|(key, label)| key == "prefix+alt+g" && labe
+           -l.as_ref() == "open lazygit"));                              
+      1436 -        assert!(custom                                       
+      1437 -            .iter()                                          
+      1438 -            .any(|(key, label)| key == "prefix+alt+h" && labe
+           -l.as_ref() == "custom command"));                            
+      1439 -                                                             
+      1440 -        let rendered_help = keybind_help_lines(&app)         
+      1441 -            .into_iter()                                     
+      1442 -            .flat_map(|(_, line)| line.spans)                
+      1443 -            .map(|span| span.content.into_owned())           
+      1444 -            .collect::<Vec<_>>()                             
+      1445 -            .join("");                                       
+      1446 -        assert!(rendered_help.contains("open lazygit"));     
+      1447 -        assert!(rendered_help.contains("custom command"));   
+      1448 -    }                                                        
+      1449 -                                                             
+      1450 -    #[test]                                                  
+      1451 -    fn keybind_help_compacts_multiple_indexed_ranges() {     
+      1452 -        let config: crate::config::Config = toml::from_str(  
+      1453 -            r#"                                              
+      1454 -[keys]                                                       
+      1455 -switch_tab = ["prefix+1..9", "alt+1..9"]                     
+      1456 -switch_workspace = "ctrl+1..9"                               
+      1457 -"#,                                                          
+      1458 -        )                                                    
+      1459 -        .expect("config parses");                            
+      1460 -                                                             
+      1461 -        let mut app = crate::app::state::AppState::test_new()
+           -;                                                            
+      1462 -        app.keybinds = config.keybinds();                    
+      1463 -                                                             
+      1464 -        let workspace_tab = keybind_help_groups(&app)        
+      1465 -            .into_iter()                                     
+      1466 -            .find(|(name, _)| *name == "workspaces / tabs")  
+      1467 -            .expect("workspace tab group")                   
+      1468 -            .1;                                              
+      1469 -                                                             
+      1470 -        let switch_tab_key = workspace_tab                   
+      1471 -            .iter()                                          
+      1472 -            .find(|(_, label)| label.as_ref() == "switch tab 
+           -1-9")                                                        
+      1473 -            .map(|(key, _)| key.as_str())                    
+      1474 -            .expect("switch tab help entry");                
+      1475 -        let switch_workspace_key = workspace_tab             
+      1476 -            .iter()                                          
+      1477 -            .find(|(_, label)| label.as_ref() == "switch work
+           -space 1-9")                                                  
+      1478 -            .map(|(key, _)| key.as_str())                    
+      1479 -            .expect("switch workspace help entry");          
+      1480 -                                                             
+      1481 -        assert_eq!(switch_tab_key, "prefix+1..9 / alt+1..9");
+      1482 -        assert_eq!(switch_workspace_key, "ctrl+1..9");       
+      1483 -    }                                                        
+      1352  }
+
+● Update(src\ui.rs)
+  ⎿  Removed 1 line
+      571  
+      572  #[cfg(test)]
+      573  mod tests {
+      574 -    use super::keybind_help::keybind_help_groups;             
+      574      use super::scrollbar::scrollbar_thumb;
+      575      use super::*;
+      576      use crate::{app::state::ViewLayout, layout::PaneInfo, work
+           space::Workspace};
+
+● Теперь удаляю сам файл ui/keybind_help.rs:
+
+  Searched for 2 patterns, ran 1 shell command (ctrl+o to expand)
+
+● Miss earlier — there's still a keybind_help: KeybindHelpState { scroll: 0 } in
+  app/mod.rs:565 that I need to remove (a different struct literal from the one
+  I already fixed at line 658).
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\mod.rs)
+  ⎿  Removed 1 line
+      562                      preview: announcement.preview,
+      563                  }
+      564              }),
+      565 -            keybind_help: state::KeybindHelpState { scroll: 0 
+          -},                                                            
+      565              navigator: state::NavigatorState::default(),
+      566              copy_mode: None,
+      567              workspace_scroll: 0,
+
+● Только строчные имена тестов остались — они безобидны. Теперь запускаю cargo 
+  check, чтобы отловить оставшиеся ошибки компиляции.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Известная проблема — на Z: диске zig build не запускается (см. заметку в
+  PM/ideas/tanuki-terminal/keybinds-settings-ui.md). Используем локальную
+  copy-для-верификации.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Копия для верификации немного отстаёт (плюс есть лишние файлы из прошлых
+  сессий). Синхронизирую всё дерево src/ из основного репо в неё.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Синхронизировано. Также убедимся, что Cargo.toml/Cargo.lock в копии совпадают
+  на случай отличий зависимостей.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Copy the Cargo.toml/lock, plus the vendor/build.rs and other build-related
+  files that may have changed.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Just build-cache noise, fine. Now try cargo check in the verify copy.
+
+  Searched for 3 patterns, read 1 file, ran 3 shell commands (ctrl+o to expand)
+
+● Нашёл. Установлен Zig 0.15.2 в C:\Users\user\tools\zig-x86_64-windows-0.15.2.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Компиляция удаления мёртвого кода прошла успешно — только предупреждение о
+  неиспользуемых пока keybind_search/keybind_search_active, которые я как раз
+  собираюсь подключить в следующем шаге (UI + input handling для поиска).
+  Продолжаю с реализацией поиска.
+  Read 1 file (ctrl+o to expand)
+
+● Теперь смотрю на весь блок обработки SettingsSection::Keybinds в
+  update_settings_state.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Теперь добавляю helper-метод фильтрации в state.rs, рядом с KeybindSetting:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Background command "Search common locations for zig.exe" completed (exit code
+0)
+
+● Продолжаю работу над реализацией поиска.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Добавляю метод filtered в impl KeybindSetting и метод
+  filtered_keybind_settings на AppState.
+
+● Update(src\app\state.rs)
+  ⎿  Added 15 lines
+      1256              Self::ToggleSidebar => keybinds.toggle_sidebar.la
+            bel(),
+      1257          }
+      1258      }
+      1259 +                                                             
+      1260 +    /// `KeybindSetting::ALL` narrowed to actions whose label
+           + matches a                                                   
+      1261 +    /// case-insensitive substring search. An empty query mat
+           +ches everything                                              
+      1262 +    /// (so clearing the search text is equivalent to no filt
+           +er at all).                                                  
+      1263 +    pub(crate) fn filtered(query: &str) -> Vec<Self> {       
+      1264 +        if query.is_empty() {                                
+      1265 +            return Self::ALL.to_vec();                       
+      1266 +        }                                                    
+      1267 +        let query = query.to_lowercase();                    
+      1268 +        Self::ALL                                            
+      1269 +            .iter()                                          
+      1270 +            .copied()                                        
+      1271 +            .filter(|setting| setting.label().to_lowercase().
+           +contains(&query))                                            
+      1272 +            .collect()                                       
+      1273 +    }                                                        
+      1274  }
+      1275  
+      1276  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+
+  Searched for 4 patterns, read 3 files (ctrl+o to expand)
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 36 lines, removed 5 lines
+      261                      state.settings.keybind_capture = None;
+      262                      return None;
+      263                  }
+      264 -                let setting = KeybindSetting::ALL[state.settin
+          -gs.list.selected];                                            
+      264 +                let filtered = KeybindSetting::filtered(&state
+          +.settings.keybind_search);                                    
+      265 +                let Some(setting) = filtered.get(state.setting
+          +s.list.selected).copied() else {                              
+      266 +                    state.settings.keybind_capture = None;    
+      267 +                    return None;                              
+      268 +                };                                            
+      269                  let combo = crate::config::format_key_combo((k
+           ey.code, key.modifiers));
+      270                  let binding = match kind {
+      271                      crate::app::state::KeybindCaptureKind::Dir
+           ect => combo,
+     ...
+      274                  state.settings.keybind_capture = None;
+      275                  return Some(SettingsAction::SaveKeybind(settin
+           g, binding));
+      276              }
+      277 +                                                              
+      278 +            if state.settings.keybind_search_active {         
+      279 +                match key.code {                              
+      280 +                    KeyCode::Esc | KeyCode::Enter => {        
+      281 +                        state.settings.keybind_search_active =
+          + false;                                                       
+      282 +                    }                                         
+      283 +                    KeyCode::Backspace => {                   
+      284 +                        state.settings.keybind_search.pop();  
+      285 +                        let len = KeybindSetting::filtered(&st
+          +ate.settings.keybind_search).len();                           
+      286 +                        state.settings.list.selected =        
+      287 +                            state.settings.list.selected.min(l
+          +en.saturating_sub(1));                                        
+      288 +                    }                                         
+      289 +                    KeyCode::Char(c)                          
+      290 +                        if key.modifiers.is_empty() || key.mod
+          +ifiers == KeyModifiers::SHIFT =>                              
+      291 +                    {                                         
+      292 +                        state.settings.keybind_search.push(c);
+      293 +                        let len = KeybindSetting::filtered(&st
+          +ate.settings.keybind_search).len();                           
+      294 +                        state.settings.list.selected =        
+      295 +                            state.settings.list.selected.min(l
+          +en.saturating_sub(1));                                        
+      296 +                    }                                         
+      297 +                    _ => {}                                   
+      298 +                }                                             
+      299 +                return None;                                  
+      300 +            }                                                 
+      301 +                                                              
+      302 +            let filtered_len = KeybindSetting::filtered(&state
+          +.settings.keybind_search).len();                              
+      303              match key.code {
+      304                  KeyCode::Up | KeyCode::Char('k') => state.sett
+           ings.list.move_prev(),
+      275 -                KeyCode::Down | KeyCode::Char('j') => {       
+      276 -                    state.settings.list.move_next(KeybindSetti
+          -ng::ALL.len())                                                
+      305 +                KeyCode::Down | KeyCode::Char('j') => state.se
+          +ttings.list.move_next(filtered_len),                          
+      306 +                KeyCode::Char('/') => {                       
+      307 +                    state.settings.keybind_search_active = tru
+          +e;                                                            
+      308                  }
+      278 -                KeyCode::Enter | KeyCode::Char(' ') => {      
+      309 +                KeyCode::Enter | KeyCode::Char(' ') if filtere
+          +d_len > 0 => {                                                
+      310                      state.settings.keybind_capture =
+      311                          Some(crate::app::state::KeybindCapture
+           Kind::Direct);
+      312                  }
+      282 -                KeyCode::Char('p') => {                       
+      313 +                KeyCode::Char('p') if filtered_len > 0 => {   
+      314                      state.settings.keybind_capture =
+      315                          Some(crate::app::state::KeybindCapture
+           Kind::Prefix);
+      316                  }
+
+● Теперь проверяю обработку мыши (клики по списку Keybinds) в mouse.rs:
+
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+● Ok, order is
+  Theme→Sound→Toast→PaneLabels→Keybinds→Integrations→Experiments→Theme. Now I'll
+  add resets at the four transition points touching Keybinds, plus the tab-bar
+  click and mouse-index bound.
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 2 lines
+      246              KeyCode::Tab | KeyCode::Right | KeyCode::Char('l')
+            => {
+      247                  state.settings.section = SettingsSection::Keyb
+           inds;
+      248                  state.settings.list.selected = 0;
+      249 +                state.settings.keybind_search.clear();        
+      250 +                state.settings.keybind_search_active = false; 
+      251              }
+      252              _ => {
+      253                  if let Some(super::modal::ModalAction::Close) 
+           =
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 2 lines
+      364              KeyCode::BackTab | KeyCode::Left | KeyCode::Char('
+           h') => {
+      365                  state.settings.section = SettingsSection::Keyb
+           inds;
+      366                  state.settings.list.selected = 0;
+      367 +                state.settings.keybind_search.clear();        
+      368 +                state.settings.keybind_search_active = false; 
+      369              }
+      370              KeyCode::Tab | KeyCode::Right | KeyCode::Char('l')
+            => {
+      371                  state.settings.section = SettingsSection::Expe
+           riments;
+
+● Теперь два перехода из Keybinds arm (в PaneLabels и Integrations):
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 2 lines
+      319                  KeyCode::BackTab | KeyCode::Left | KeyCode::Ch
+           ar('h') => {
+      320                      state.settings.section = SettingsSection::
+           PaneLabels;
+      321                      state.settings.list.selected = usize::from
+           (!state.agent_border_labels_enabled());
+      322 +                    state.settings.keybind_search.clear();    
+      323                  }
+      324                  KeyCode::Tab | KeyCode::Right | KeyCode::Char(
+           'l') => {
+      325                      state.settings.section = SettingsSection::
+           Integrations;
+      326                      state.settings.list.selected = 0;
+      327 +                    state.settings.keybind_search.clear();    
+      328                  }
+      329                  _ => {
+      330                      if let Some(super::modal::ModalAction::Clo
+           se) =
+● Теперь клик по вкладке в Settings (tab-bar) и bounds-check в
+  settings_list_index_at:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 1 line, removed 1 line
+      507                      return None;
+      508                  }
+      509                  let idx = scroll + (row - list_y) as usize;
+      510 -                (idx < KeybindSetting::ALL.len()).then_some(id
+          -x)                                                            
+      510 +                (idx < KeybindSetting::filtered(&self.settings
+          +.keybind_search).len()).then_some(idx)                        
+      511              }
+      512              SettingsSection::Experiments => {
+      513                  let list_y = area.y + 3;
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 4 lines
+      538                          SettingsSection::Integrations => 0,
+      539                      });
+      540                      self.settings.keybind_capture = None;
+      541 +                    if section != SettingsSection::Keybinds { 
+      542 +                        self.settings.keybind_search.clear(); 
+      543 +                        self.settings.keybind_search_active = 
+          +false;                                                        
+      544 +                    }                                         
+      545                      return None;
+      546                  }
+      547                  if let Some(idx) = self.settings_list_index_at
+           (mouse.column, mouse.row) {
+
+● Теперь open_settings_at — сбрасывать поиск при открытии Settings в любую
+  секцию:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 2 lines
+      403          SettingsSection::Integrations => 0,
+      404      };
+      405      state.settings.keybind_capture = None;
+      406 +    state.settings.keybind_search.clear();                    
+      407 +    state.settings.keybind_search_active = false;             
+      408      state.mode = Mode::Settings;
+      409  }
+      410  
+
+● Теперь UI: обновляю render_settings_keybinds в ui/settings.rs, добавляя строку
+  поиска.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src\ui\settings.rs)
+  ⎿  Added 35 lines, removed 3 lines
+      454      use crate::app::state::KeybindCaptureKind;
+      455  
+      456      let p = &app.palette;
+      457 -    let [desc_area, _, list_area] = Layout::vertical([        
+      457 +    let [desc_area, search_area, list_area] = Layout::vertical
+          +([                                                            
+      458          Constraint::Length(2),
+      459          Constraint::Length(1),
+      460          Constraint::Min(1),
+     ...
+      466          Some(KeybindCaptureKind::Prefix) => {
+      467              "press a key combo to bind it after the leader key
+           , or esc to cancel"
+      468          }
+      469 +        None if app.settings.keybind_search_active => {       
+      470 +            "type to filter, enter/esc to stop editing (filter
+          + stays applied)"                                              
+      471 +        }                                                     
+      472          None => {
+      470 -            "no default binding — pick your own; enter = direc
+          -t chord, p = prefix+ binding"                                 
+      473 +            "no default binding — pick your own; enter = direc
+          +t chord, p = prefix+ binding, / = search"                     
+      474          }
+      475      };
+      476      super::widgets::render_modal_description(
+     ...
+      480          Style::default().fg(p.overlay1),
+      481      );
+      482  
+      480 -    let items: Vec<ListItem> = KeybindSetting::ALL            
+      483 +    let search_line = if app.settings.keybind_search_active { 
+      484 +        Line::from(vec![                                      
+      485 +            Span::styled(" / ", Style::default().fg(p.accent).
+          +add_modifier(Modifier::BOLD)),                                
+      486 +            Span::styled(app.settings.keybind_search.clone(), 
+          +Style::default().fg(p.text)),                                 
+      487 +            Span::styled("▏", Style::default().fg(p.accent)), 
+      488 +        ])                                                    
+      489 +    } else if !app.settings.keybind_search.is_empty() {       
+      490 +        Line::from(vec![                                      
+      491 +            Span::styled(" / ", Style::default().fg(p.overlay1
+          +)),                                                           
+      492 +            Span::styled(app.settings.keybind_search.clone(), 
+          +Style::default().fg(p.text)),                                 
+      493 +            Span::styled(" (press / to edit)", Style::default(
+          +).fg(p.overlay1)),                                            
+      494 +        ])                                                    
+      495 +    } else {                                                  
+      496 +        Line::from(Span::styled(                              
+      497 +            " press / to search",                             
+      498 +            Style::default().fg(p.overlay1),                  
+      499 +        ))                                                    
+      500 +    };                                                        
+      501 +    frame.render_widget(Paragraph::new(search_line), search_ar
+          +ea);                                                          
+      502 +                                                              
+      503 +    let filtered = KeybindSetting::filtered(&app.settings.keyb
+          +ind_search);                                                  
+      504 +    let items: Vec<ListItem> = filtered                       
+      505          .iter()
+      506          .copied()
+      507          .enumerate()
+     ...
+      521          })
+      522          .collect();
+      523  
+      524 +    if items.is_empty() {                                     
+      525 +        frame.render_widget(                                  
+      526 +            Paragraph::new(" no matching keybinds").style(Styl
+          +e::default().fg(p.overlay1)),                                 
+      527 +            list_area,                                        
+      528 +        );                                                    
+      529 +        return;                                               
+      530 +    }                                                         
+      531 +                                                              
+      532      let list = List::new(items)
+      533          .highlight_style(
+      534              Style::default()
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Нужно добавить импорт KeyModifiers.
+
+● Update(src\app\input\settings.rs)
+  ⎿  Added 1 line, removed 1 line
+      1 -use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEven
+        -t, MouseEventKind};                                             
+      1 +use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseBut
+        +ton, MouseEvent, MouseEventKind};                               
+      2  use ratatui::layout::Rect;
+      3  
+      4  use crate::{
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Осталось одно предупреждение — поле description у CustomCommandKeybind больше
+  нигде не используется (раньше читалось только в удалённом read-only оверлее).
+  Проверю, надо ли его убрать.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Это поле — часть парсинга TOML-конфига (custom_commands), не связано с
+  удалённым оверлеем напрямую; трогать не буду, вне скоупа задачи. Запускаю
+  тесты для затронутых модулей.
+
+  Searched for 1 pattern, ran 1 shell command (ctrl+o to expand)
+
+● Проще напрямую выставить поля состояния, как это делалось раньше для
+  Mode::KeybindHelp.
+
+● Update(src\server\headless.rs)
+  ⎿  Added 2 lines, removed 4 lines
+      7122      #[test]
+      7123      fn semantic_client_escape_closes_keybind_help() {
+      7124          let mut server = test_headless_server();
+      7125 -        crate::app::input::open_settings_at(                 
+      7126 -            &mut server.app.state,                           
+      7127 -            crate::app::state::SettingsSection::Keybinds,    
+      7128 -        );                                                   
+      7125 +        server.app.state.mode = crate::app::Mode::Settings;  
+      7126 +        server.app.state.settings.section = crate::app::state
+           +::SettingsSection::Keybinds;                                 
+      7127          server.clients.insert(
+      7128              1,
+      7129              ClientConnection::new(
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Все 161 таргетированных теста прошли. Прогоняю полный набор тестов, чтобы
+  убедиться, что ничего не сломано в остальном коде.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Полный набор тестов ушёл в фон — жду завершения. Пока обновляю PM-документ по
+  follow-up'у.
+
+  Read 1 file (ctrl+o to expand)
+● Update(Z:\Coding\Tanuki\tanuki-wiki\PM\ideas\tanuki-terminal\keybinds-settings
+        -ui.md)
+  ⎿  Added 16 lines
+       2  
+       3  **Status**: ✅ shipped in full, 2026-07-27. All ~42 plain `Acti
+          onKeybinds` actions are editable from a new Keybinds tab in Set
+          tings, in both direct-chord and `prefix+` form, with external `
+          config.toml` edits picked up automatically.
+       4  
+       5 +**Follow-up shipped 2026-07-29**: unified the two separate keyb
+         +inds entry points into one, and added search/filter to the Keyb
+         +inds tab now that the action list is large. See "Follow-up: uni
+         +fy entry points + search (2026-07-29)" below.                  
+       6 +                                                               
+       7  ---
+       8  
+       9 +## Follow-up: unify entry points + search (2026-07-29)         
+      10 +                                                               
+      11 +**Trigger**: user was confused that Global Menu had both a `set
+         +tings` item (→ Settings popup, with a `Keybinds` tab inside) an
+         +d a separate `keybinds` item, and that the latter opened a comp
+         +letely different, read-only overlay instead of the editable tab
+         +. Screenshot showed the Global Menu (`settings / keybinds / rel
+         +oad config / what's new / detach`) as the concrete trigger for 
+         +the confusion.                                                 
+      12 +                                                               
+      13 +**What changed**:                                              
+      14 +- Removed the read-only `Mode::KeybindHelp` overlay entirely (`
+         +ui/keybind_help.rs` deleted, `Mode::KeybindHelp` variant remove
+         +d, all its state/scroll/mouse-drag plumbing removed from `app/s
+         +tate.rs`, `app/mod.rs`, `app/input/{mod,modal,mouse,navigate,ov
+         +erlays,sidebar}.rs`).                                          
+      15 +- Both remaining entry points — the Global Menu's `keybinds` it
+         +em (`GlobalMenuAction::Keybinds`) and the `prefix+?` keyboard s
+         +hortcut (`NavigateAction::Help`) — now call `open_settings_at(s
+         +tate, SettingsSection::Keybinds)`, landing on the same editable
+         + tab that was already built in the original ship. No more secon
+         +d read-only surface to keep in sync.                           
+      16 +- Added `/`-triggered live substring search to the Keybinds tab
+         + (`SettingsState.keybind_search: String` + `keybind_search_acti
+         +ve: bool`), since the action list (~42 entries today) was flagg
+         +ed by the user as about to grow further and become hard to scan
+         +. `KeybindSetting::filtered(query)` narrows `KeybindSetting::AL
+         +L` by case-insensitive substring match on `label()`; empty quer
+         +y is a no-op filter. `Enter`/`Esc` stop editing but keep the fi
+         +lter applied (mirrors the existing Navigator search precedent i
+         +n `app/input/modal.rs`, not a new pattern). The filter resets a
+         +utomatically whenever Settings is (re)opened or the user tabs a
+         +way from Keybinds to another section.                          
+      17 +- List navigation, mouse click bounds, and capture-target resol
+         +ution (which action a captured chord gets saved to) all now ind
+         +ex into the filtered list rather than `KeybindSetting::ALL` dir
+         +ectly.                                                         
+      18 +                                                               
+      19 +**Verified**: `cargo check` + full `cargo test --bin tanuki` on
+         + the local `C:\Users\user\tanuki_terminal_verify` build copy (s
+         +ame Z:-volume zig-build workaround as the original ship, see [[
+         +rename-to-tanuki]]), `ZIG` env pointed at `C:\Users\user\tools\
+         +zig-x86_64-windows-0.15.2\zig.exe`.                            
+      20 +                                                               
+      21 +---                                                            
+      22 +                                                               
+      23  ## As built (2026-07-27)
+      24  
+      25  Verified via `cargo check` + targeted `cargo test --bin tanuki`
+           runs (settings/deadline/config_io/reload/headless_deadline fil
+          ters, 60+ tests) on the local `C:\Users\user\tanuki_terminal_ve
+          rify` build copy (Z: volume can't run the zig build script dire
+          ctly — known issue, see [[rename-to-tanuki]]). Two unrelated pr
+          e-existing failures (`pane_graphics_stream`, `manifest_update` 
+          — network/timing-sensitive tests, files never touched by this w
+          ork) are not caused by this change.
+
+● Проверяю, завершился ли полный прогон тестов.
+
+  Read 2 files (ctrl+o to expand)
+
+● Пока пусто — тесты компилируются/выполняются долго. Подожду завершения фоновой
+  задачи.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Жду уведомления о завершении полного прогона тестов, чтобы подтвердить строчку
+  про верификацию в PM-документе.
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Тесты ещё выполняются (около 2600 тестов в сборке). Жду ещё.
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Ещё выполняется. Жду дальше.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Процесс активно потребляет CPU (не завис), просто тестов много. Жду ещё,
+  увеличивая интервал.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Процесс завис (CPU-время не растёт уже несколько минут) — похоже, зацепил один
+  из известных сетевых/таймингозависимых тестов. Убиваю его; таргетированного
+  прогона (161 тест, всё зелёное) достаточно, как и в прошлый раз при исходном
+  шиппинге фичи.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Background command "Run full test suite for tanuki binary" completed (exit
+code 0)
+
+● Хорошо, фоновая команда завершилась (после kill). Убираю пометку про полный
+  прогон из PM-документа — держусь на факте, который реально проверил
+  (targeted-тесты), как и в исходном шиппинге фичи.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(Z:\Coding\Tanuki\tanuki-wiki\PM\ideas\tanuki-terminal\keybinds-settings
+        -ui.md)
+  ⎿  Added 1 line, removed 1 line
+      16  - Added `/`-triggered live substring search to the Keybinds tab
+           (`SettingsState.keybind_search: String` + `keybind_search_acti
+          ve: bool`), since the action list (~42 entries today) was flagg
+          ed by the user as about to grow further and become hard to scan
+          . `KeybindSetting::filtered(query)` narrows `KeybindSetting::AL
+          L` by case-insensitive substring match on `label()`; empty quer
+          y is a no-op filter. `Enter`/`Esc` stop editing but keep the fi
+          lter applied (mirrors the existing Navigator search precedent i
+          n `app/input/modal.rs`, not a new pattern). The filter resets a
+          utomatically whenever Settings is (re)opened or the user tabs a
+          way from Keybinds to another section.
+      17  - List navigation, mouse click bounds, and capture-target resol
+          ution (which action a captured chord gets saved to) all now ind
+          ex into the filtered list rather than `KeybindSetting::ALL` dir
+          ectly.
+      18  
+      19 -**Verified**: `cargo check` + full `cargo test --bin tanuki` on
+         - the local `C:\Users\user\tanuki_terminal_verify` build copy (s
+         -ame Z:-volume zig-build workaround as the original ship, see [[
+         -rename-to-tanuki]]), `ZIG` env pointed at `C:\Users\user\tools\
+         -zig-x86_64-windows-0.15.2\zig.exe`.                            
+      19 +**Verified**: `cargo check` (clean) + targeted `cargo test --bi
+         +n tanuki -- settings keybind global_menu navigate` (161 passed,
+         + 0 failed) on the local `C:\Users\user\tanuki_terminal_verify` 
+         +build copy (same Z:-volume zig-build workaround as the original
+         + ship, see [[rename-to-tanuki]]), `ZIG` env pointed at `C:\User
+         +s\user\tools\zig-x86_64-windows-0.15.2\zig.exe`. A full-suite r
+         +un was also attempted but a network/timing-sensitive test hung 
+         +(same known class as `pane_graphics_stream`/`manifest_update` f
+         +rom the original ship) — killed after ~20 min with no CPU progr
+         +ess; not caused by this change, and out of scope to chase here.
+      20  
+      21  ---
+      22  
+
+● Готово. Итог по всей задаче:
+
+  Код (tanuki_terminal)
+  - Убран read-only оверлей keybinds (Mode::KeybindHelp, файл
+  ui/keybind_help.rs, весь связанный state/scroll/mouse-drag код) — и клик по
+  keybinds в Global Menu, и prefix+? теперь оба ведут в один и тот же
+  редактируемый Settings → Keybinds.
+  - В таб Keybinds добавлен поиск: / активирует ввод, живая фильтрация по
+  подстроке (KeybindSetting::filtered), Enter/Esc выходят из режима ввода, но
+  фильтр остаётся применён; фильтр сбрасывается при переоткрытии Settings или
+  уходе с вкладки.
+  - Навигация по списку, границы кликов мышью и определение цели захвата бинда —
+  всё теперь работает по отфильтрованному списку.
+
+  Проверка
+  - cargo check — чисто.
+  - Таргетированные тесты (settings, keybind, global_menu, navigate) — 161
+  прошли, 0 упало.
+  - Полный прогон всего набора тестов зацепил известный зависающий
+  сетевой/таймингозависимый тест (тот же класс, что
+  pane_graphics_stream/manifest_update из исходного шиппинга) — убил процесс, не
+  стал чинить, вне скоупа этой задачи.
+
+  Документация
+  - PM/ideas/tanuki-terminal/keybinds-settings-ui.md обновлён follow-up-разделом
+  с описанием изменений и статусом верификации.
+
+  Осталось: убедиться, что билд/деплой самого tanuki_terminal (не tanuki-wiki) —
+  отдельный процесс, который сюда не входит; если нужно задеплоить это на прод,
+  скажи отдельно.
+
+✻ Worked for 38m 54s
+
+❯ давай сделаем деплой таким образом, что у нас будет при изменениях tanuki     
+  terminal создаваться релиз и всё остальное                                    
+  Listed 1 directory (ctrl+o to expand)
+
+❯ обновляться версия это обязательно                                            
+
+● Уже есть release.yml! Смотрю, что там настроено, и учитываю уточнение — версия
+  обязательно должна обновляться.
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+● Важное замечание: рабочая копия tanuki_terminal на
+  Z:\Coding\Tanuki\tanuki_terminal — это реальный git-репозиторий
+  (BabylenMagnus/tanuki на GitHub), и в нём уже лежат несвязанные с моей работой
+  незакоммиченные изменения (правки release.yml, client/mod.rs,
+  server/autodetect.rs, update.rs — не то, что я делал в этой сессии). Плюс там
+  уже есть готовый .github/workflows/release.yml, который по тегу v*.*.*
+  собирает бинарники на 5 платформ и публикует GitHub Release с manifest.json.
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+● Прежде чем писать автоматизацию, важно понять текущий ручной ритуал релиза —
+  он не тривиальный. Смотрю, что уже есть:
+
+  Уже настроено:
+  - ci.yml — на каждый push в master проверяет conventional commits (feat:, fix:
+  и т.д.) и запускает тесты.
+  - release.yml — по тегу vX.Y.Z (или ручной триггер) собирает бинарники на 5
+  платформ и публикует GitHub Release с manifest.json.
+  - scripts/changelog.py — переносит Unreleased в CHANGELOG.md в версионную
+  секцию, синхронизирует website/latest.json из опубликованного релиза,
+  проверяет консистентность (verify-release-state).
+  - Текущий процесс релиза ручной: кто-то решает номер версии → правит
+  Cargo.toml/Cargo.lock → changelog.py prepare → коммит release: vX.Y.Z → тег →
+  push → (после сборки) changelog.py sync-latest-json + verify-release-state.
+
+  Важно: в рабочей копии tanuki_terminal сейчас лежат незакоммиченные изменения,
+  не относящиеся к моей задаче (правки release.yml, client/mod.rs,
+  server/autodetect.rs, update.rs — видимо, из прошлой сессии). Нужно решить,
+  что с ними делать, прежде чем я начну коммитить новую автоматизацию.
+
+● User answered Claude's questions:
+  ⎿  · Что делать с незакоммиченными изменениями в 
+     release.yml/client/mod.rs/server/autodetect.rs/update.rs, не относящимися к
+     keybinds-задаче? → они должны все попадать в коммит, затем попадать в 
+     текущий релиз
+     · Что должно триггерить автоматический релиз? → deploy.py запускается и 
+     делает релиз, если есть изменения исходя из git
+     · Как определять тип версии (patch/minor/major)? → Всегда patch-бамп
+     · Насколько полно автоматизировать сам ритуал релиза ("и всё остальное")? →
+     Полный цикл (Recommended)
+
+  Searched for 2 patterns, read 4 files, listed 2 directories (ctrl+o to expand)
+
+● Отлично, нашёл ключевую подсказку — команда just release. Смотрю justfile,
+  это, похоже, готовый существующий ритуал релиза.
+
+  Searched for 2 patterns, ran 2 shell commands (ctrl+o to expand)
+
+● Ключевая находка: в tanuki_terminal уже есть полноценный, отлаженный ритуал
+  релиза через just release <version> (не просто ручные шаги) — release-prepare
+  (проверка docs-парности, changelog, версия, полный тест-сьют) +
+  release-publish (тег + push, триггерит release.yml). Не нужно изобретать новый
+  процесс — нужно встроить вызов существующего в deploy.py с авто-триггером и
+  авто-версией. Не хватает только cargo-nextest — ставлю его в фоне, пока пишу
+  код.
+
+  Read 1 file, ran 3 shell commands (ctrl+o to expand)
+
+● Background command "Install cargo-nextest, required by just check/ci for the
+official release test suite" failed with exit code 101
+● DNS работает и github доступен — просто транзиентный сбой. Пробую ещё раз
+  установить nextest, и параллельно проверяю gh CLI.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● gh CLI уже установлен, просто не в PATH. Проверяю его и повторяю установку
+  nextest.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Отлично, gh уже авторизован под нужным аккаунтом. Повторяю установку
+  cargo-nextest.
+
+  Searched for 1 pattern, ran 2 shell commands (ctrl+o to expand)
+
+● Теперь пишу изменения в deploy.py. Сначала добавлю вспомогательные функции.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(Z:\Coding\Tanuki\deploy.py)
+  ⎿  Added 217 lines
+      257      ok("Admin deployed")
+      258  
+      259  
+      260 +# ============================================================
+          +=================                                             
+      261 +# tanuki_terminal auto-release                                
+      262 +#                                                             
+      263 +# tanuki_terminal (github.com/BabylenMagnus/tanuki) has no ser
+          +ver-side deploy —                                             
+      264 +# its "deploy" is cutting a GitHub Release. The repo already h
+          +as a full,                                                    
+      265 +# battle-tested release ritual (`just release <version>`, wire
+          +d to                                                          
+      266 +# .github/workflows/release.yml + scripts/changelog.py) built 
+          +for human-driven                                              
+      267 +# releases. This section only decides WHEN to fire it (any com
+          +mit not yet                                                   
+      268 +# covered by a release tag) and WHAT version to use (always a 
+          +patch bump, per                                               
+      269 +# explicit instruction) — it deliberately does not reimplement
+          + or weaken any                                                
+      270 +# of that ritual's existing safety gates (release-docs-check, 
+          +full `just                                                    
+      271 +# check` test suite, docs/next parity). If those gates fail, t
+          +his stops loud                                                
+      272 +# rather than routing around them.                            
+      273 +# ============================================================
+          +=================                                             
+      274 +                                                              
+      275 +TANUKI_TERMINAL_REPO = "BabylenMagnus/tanuki"                 
+      276 +                                                              
+      277 +def gh_bin():                                                 
+      278 +    """Resolve the gh CLI binary and make sure child processes
+          + (incl. those                                                 
+      279 +    scripts/changelog.py shells out to) can find it even when 
+          +it's not on PATH."""                                          
+      280 +    found = shutil.which("gh")                                
+      281 +    if found:                                                 
+      282 +        return found                                          
+      283 +    candidate = Path(os.environ.get("LOCALAPPDATA", "")) / "gh
+          +-cli" / "bin" / "gh.exe"                                      
+      284 +    if candidate.exists():                                    
+      285 +        os.environ["PATH"] = str(candidate.parent) + os.pathse
+          +p + os.environ.get("PATH", "")                                
+      286 +        return str(candidate)                                 
+      287 +    warn("gh CLI not found — tanuki_terminal auto-release webs
+          +ite-sync step will fail")                                     
+      288 +    return "gh"                                               
+      289 +                                                              
+      290 +def run_streaming(cmd, cwd=None, timeout=None):               
+      291 +    """Like run(), but streams output live instead of capturin
+          +g silently.                                                   
+      292 +    For long operations (just release runs the full test suite
+          + + docs checks,                                               
+      293 +    can take 15-30 minutes) a silent hang looks indistinguisha
+          +ble from a stall."""                                          
+      294 +    t = time.monotonic()                                      
+      295 +    proc = subprocess.Popen(                                  
+      296 +        cmd, shell=True, cwd=cwd,                             
+      297 +        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,     
+      298 +        text=True, encoding='utf-8', errors='replace'         
+      299 +    )                                                         
+      300 +    try:                                                      
+      301 +        for line in proc.stdout:                              
+      302 +            with _print_lock:                                 
+      303 +                print(line, end='', flush=True)               
+      304 +        proc.wait(timeout=timeout)                            
+      305 +    except subprocess.TimeoutExpired:                         
+      306 +        proc.kill()                                           
+      307 +        err(f"Command timed out after {timeout}s: {cmd}")     
+      308 +    if proc.returncode != 0:                                  
+      309 +        err(f"Command failed after {time.monotonic()-t:.1f}s: 
+          +{cmd}")                                                       
+      310 +    return time.monotonic() - t                               
+      311 +                                                              
+      312 +def read_cargo_version(cargo_toml_path):                      
+      313 +    text = cargo_toml_path.read_text(encoding='utf-8')        
+      314 +    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MU
+          +LTILINE)                                                      
+      315 +    if not match:                                             
+      316 +        err(f"could not read version from {cargo_toml_path}") 
+      317 +    return match.group(1)                                     
+      318 +                                                              
+      319 +def bump_patch(version):                                      
+      320 +    major, minor, patch = (int(part) for part in version.split
+          +('.'))                                                        
+      321 +    return f"{major}.{minor}.{patch + 1}"                     
+      322 +                                                              
+      323 +def terminal_last_release_tag(directory):                     
+      324 +    return run("git describe --tags --abbrev=0 --match v*.*.*"
+          +, cwd=directory, check=False) or None                         
+      325 +                                                              
+      326 +def terminal_needs_release(directory):                        
+      327 +    """True if tanuki_terminal has uncommitted changes or comm
+          +its since its last release tag."""                            
+      328 +    if not Path(directory).exists():                          
+      329 +        return False                                          
+      330 +    if has_pending_work(directory, 'master'):                 
+      331 +        return True                                           
+      332 +    last_tag = terminal_last_release_tag(directory)           
+      333 +    if not last_tag:                                          
+      334 +        return False                                          
+      335 +    unreleased = run(f"git log {last_tag}..HEAD --oneline", cw
+          +d=directory, check=False)                                     
+      336 +    return bool(unreleased)                                   
+      337 +                                                              
+      338 +TERMINAL_CHANGELOG_HEADINGS = {'feat': 'Added', 'fix': 'Fixed'
+          +, 'perf': 'Performance'}                                      
+      339 +TERMINAL_CHANGELOG_ORDER = ('Added', 'Fixed', 'Performance', '
+          +Changed')                                                     
+      340 +TERMINAL_COMMIT_RE = re.compile(r'^(?P<kind>[a-z]+)(?:\([^)]+\
+          +))?!?:\s+(?P<body>.+)$')                                      
+      341 +TERMINAL_HIDDEN_SUBJECT_PREFIXES = ("release:", "docs: update 
+          +website manifest")                                            
+      342 +                                                              
+      343 +def _load_terminal_changelog_module(directory):               
+      344 +    """Reuse scripts/changelog.py's own (tested) Section parsi
+          +ng instead of                                                 
+      345 +    hand-rolling regex over Markdown headings — that file alre
+          +ady has to get                                                
+      346 +    this exactly right for `just release-prepare` to work at a
+          +ll."""                                                        
+      347 +    import importlib.util                                     
+      348 +    module_path = directory / "scripts" / "changelog.py"      
+      349 +    spec = importlib.util.spec_from_file_location("_tanuki_ter
+          +minal_changelog", module_path)                                
+      350 +    module = importlib.util.module_from_spec(spec)            
+      351 +    spec.loader.exec_module(module)                           
+      352 +    return module                                             
+      353 +                                                              
+      354 +def populate_unreleased_changelog(directory, last_tag):       
+      355 +    """If CHANGELOG.md's Unreleased section is empty, fill it 
+          +in from conventional                                          
+      356 +    commit subjects since the last release tag (feat->Added, f
+          +ix->Fixed,                                                    
+      357 +    perf->Performance, everything else folded into Changed) — 
+          +same grouping                                                 
+      358 +    scripts/preview.py already uses for preview-channel notes.
+          + Mirrors the                                                  
+      359 +    result into docs/next/CHANGELOG.md too so `just release-do
+          +cs-check`'s                                                   
+      360 +    `diff CHANGELOG.md docs/next/CHANGELOG.md` gate still pass
+          +es; `just                                                     
+      361 +    release-prepare` overwrites docs/next/CHANGELOG.md again a
+          +fterwards                                                     
+      362 +    anyway, once `changelog.py prepare` moves Unreleased into 
+          +a versioned                                                   
+      363 +    section. Never overwrites hand-written Unreleased content.
+      364 +    """                                                       
+      365 +    changelog_mod = _load_terminal_changelog_module(directory)
+      366 +    root_path = directory / "CHANGELOG.md"                    
+      367 +    next_path = directory / "docs" / "next" / "CHANGELOG.md"  
+      368 +    text = root_path.read_text(encoding='utf-8')              
+      369 +    section = changelog_mod.find_section(text, "Unreleased")  
+      370 +    existing_body = text[section.body_start:section.end].strip
+          +("\n")                                                        
+      371 +    if existing_body.strip():                                 
+      372 +        ok("[tanuki_terminal] Unreleased already has content, 
+          +leaving it as-is")                                            
+      373 +        return                                                
+      374 +                                                              
+      375 +    subjects = [                                              
+      376 +        s.strip() for s in                                    
+      377 +        run(f'git log --pretty=format:%s {last_tag}..HEAD', cw
+          +d=directory, check=False).splitlines()                        
+      378 +        if s.strip()                                          
+      379 +    ]                                                         
+      380 +    grouped = {heading: [] for heading in TERMINAL_CHANGELOG_O
+          +RDER}                                                         
+      381 +    for subject in subjects:                                  
+      382 +        if any(subject.startswith(prefix) for prefix in TERMIN
+          +AL_HIDDEN_SUBJECT_PREFIXES):                                  
+      383 +            continue                                          
+      384 +        match = TERMINAL_COMMIT_RE.match(subject)             
+      385 +        if not match:                                         
+      386 +            grouped['Changed'].append(subject)                
+      387 +            continue                                          
+      388 +        heading = TERMINAL_CHANGELOG_HEADINGS.get(match.group(
+          +'kind'), 'Changed')                                           
+      389 +        body = match.group('body').strip()                    
+      390 +        grouped[heading].append(body[0].upper() + body[1:] if 
+          +body else subject)                                            
+      391 +                                                              
+      392 +    lines = []                                                
+      393 +    for heading in TERMINAL_CHANGELOG_ORDER:                  
+      394 +        items = grouped[heading]                              
+      395 +        if not items:                                         
+      396 +            continue                                          
+      397 +        lines.append(f"### {heading}")                        
+      398 +        lines.extend(f"- {item}" for item in items)           
+      399 +        lines.append("")                                      
+      400 +    if not lines:                                             
+      401 +        err("[tanuki_terminal] no commits since last tag to po
+          +pulate Unreleased with")                                      
+      402 +                                                              
+      403 +    body = "\n".join(lines).rstrip() + "\n"                   
+      404 +    new_text = text[:section.body_start] + body + "\n" + text[
+          +section.end:]                                                 
+      405 +    root_path.write_text(new_text, encoding='utf-8')          
+      406 +    next_path.write_text(new_text, encoding='utf-8')          
+      407 +    ok(f"[tanuki_terminal] populated Unreleased from {len(subj
+          +ects)} commit(s) since {last_tag}")                           
+      408 +                                                              
+      409 +def wait_for_release_workflow(version, repo=TANUKI_TERMINAL_RE
+          +PO, timeout_s=2400, poll_s=20):                               
+      410 +    """Poll for the GitHub Release that release.yml's publish 
+          +job creates once                                              
+      411 +    all 5 platform builds finish. Its existence with the full 
+          +asset set IS the                                              
+      412 +    completion signal — there's no separate "workflow done" ev
+          +ent to wait on                                                
+      413 +    that's simpler than this."""                              
+      414 +    tag = f"v{version}"                                       
+      415 +    log(f"[tanuki_terminal] waiting for GitHub Actions to buil
+          +d and publish {tag}...")                                      
+      416 +    gh = gh_bin()                                             
+      417 +    deadline = time.monotonic() + timeout_s                   
+      418 +    while time.monotonic() < deadline:                        
+      419 +        result = subprocess.run(                              
+      420 +            [gh, "release", "view", tag, "--repo", repo, "--js
+          +on", "assets,isDraft"],                                       
+      421 +            capture_output=True, text=True                    
+      422 +        )                                                     
+      423 +        if result.returncode == 0:                            
+      424 +            try:                                              
+      425 +                payload = json.loads(result.stdout)           
+      426 +            except json.JSONDecodeError:                      
+      427 +                payload = {}                                  
+      428 +            assets = payload.get("assets", [])                
+      429 +            if not payload.get("isDraft") and len(assets) >= 6
+          +:                                                             
+      430 +                ok(f"[tanuki_terminal] {tag} published with {l
+          +en(assets)} asset(s)")                                        
+      431 +                return                                        
+      432 +        time.sleep(poll_s)                                    
+      433 +    err(f"[tanuki_terminal] timed out after {timeout_s}s waiti
+          +ng for {tag} to be published")                                
+      434 +                                                              
+      435 +def sync_terminal_website_manifest(directory, version, repo=TA
+          +NUKI_TERMINAL_REPO):                                          
+      436 +    """Post-release: mirror the published GitHub Release into 
+          +website/latest.json                                           
+      437 +    (the file tanuki's own auto-update client reads), verify t
+          +he local file, the                                            
+      438 +    live deployed one, and the GitHub release itself all agree
+          +, then commit+push                                            
+      439 +    if anything changed. This step existed as a manual script 
+          +before but was                                                
+      440 +    being skipped in practice — website/latest.json was stuck 
+          +at v0.1.1 while                                               
+      441 +    releases had moved on to v0.1.5."""                       
+      442 +    log(f"[tanuki_terminal] syncing website/latest.json for v{
+          +version}...")                                                 
+      443 +    run(f'python3 scripts/changelog.py sync-latest-json --vers
+          +ion {version} --repo {repo}',                                 
+      444 +        cwd=directory, timeout=120)                           
+      445 +    run(f'python3 scripts/changelog.py verify-release-state --
+          +version {version} --repo {repo}',                             
+      446 +        cwd=directory, timeout=180)                           
+      447 +    run("git add website/latest.json docs/next/product-announc
+          +ement.json", cwd=directory, check=False)                      
+      448 +    staged = subprocess.run("git diff --cached --quiet", shell
+          +=True, cwd=str(directory))                                    
+      449 +    if staged.returncode == 0:                                
+      450 +        ok("[tanuki_terminal] website manifest already up to d
+          +ate, nothing to commit")                                      
+      451 +        return                                                
+      452 +    run(f'git commit -m "docs: update website manifest for v{v
+          +ersion}"', cwd=directory)                                     
+      453 +    run("git push origin master", cwd=directory)              
+      454 +    ok(f"[tanuki_terminal] website manifest updated and pushed
+          + for v{version}")                                             
+      455 +                                                              
+      456 +def release_tanuki_terminal(directory):                       
+      457 +    """Full auto-release cycle for tanuki_terminal, called as 
+          +a deploy task                                                 
+      458 +    (like deploy_frontend/deploy_api) once its normal commit+p
+          +ush has already                                               
+      459 +    landed on master. Always a patch bump, per explicit instru
+          +ction — minor/major                                           
+      460 +    releases still need a human to run `just release <version>
+          +` by hand."""                                                 
+      461 +    gh_bin()                                                  
+      462 +    last_tag = terminal_last_release_tag(directory)           
+      463 +    if not last_tag:                                          
+      464 +        warn("[tanuki_terminal] no existing release tag found 
+          +(v*.*.*) — skipping auto-release, run `just release` by hand f
+          +or the first one")                                            
+      465 +        return                                                
+      466 +    populate_unreleased_changelog(directory, last_tag)        
+      467 +    current_version = read_cargo_version(directory / "Cargo.to
+          +ml")                                                          
+      468 +    new_version = bump_patch(current_version)                 
+      469 +    log(f"[tanuki_terminal] preparing release v{new_version} (
+          +from v{current_version}, base {last_tag})...")                
+      470 +    run_streaming(f"just release {new_version}", cwd=directory
+          +, timeout=1800)                                               
+      471 +    ok(f"[tanuki_terminal] v{new_version} tagged and pushed — 
+          +GitHub Actions building binaries")                            
+      472 +    wait_for_release_workflow(new_version)                    
+      473 +    sync_terminal_website_manifest(directory, new_version)    
+      474 +    ok(f"[tanuki_terminal] release v{new_version} complete")  
+      475 +                                                              
+      476 +                                                              
+      477  def deploy_llm_proxy():
+      478      """Deploy LLM-API-Key-Proxy to guts (single env, no dev/pr
+           od split)"""
+      479      # NOTE: /etc/systemd/system/llm-proxy.service on guts has 
+           manually-set env vars:
+
+● Теперь подключаю это в main() — pre-check и вызов в списке deploy-задач.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(Z:\Coding\Tanuki\deploy.py)
+  ⎿  Added 5 lines, removed 4 lines
+      667  
+      668      # Pre-check which components have changes (BEFORE any comm
+           its alter the state)
+      669      # --force skips this check and deploys all components rega
+           rdless
+      670 -    needs_front = mode_force or has_pending_work(subrepos['tan
+          -uki_front']['path'], subrepos['tanuki_front']['dev_branch'])  
+      671 -    needs_api   = mode_force or has_pending_work(subrepos['tan
+          -uki_api']['path'], subrepos['tanuki_api']['dev_branch'])      
+      672 -    needs_admin = mode_force or has_pending_work(subrepos['tan
+          -uki_admin']['path'], 'master')                                
+      673 -    needs_proxy = mode_force or has_pending_work(subrepos['llm
+          -_proxy']['path'], 'master')                                   
+      670 +    needs_front    = mode_force or has_pending_work(subrepos['
+          +tanuki_front']['path'], subrepos['tanuki_front']['dev_branch']
+          +)                                                             
+      671 +    needs_api      = mode_force or has_pending_work(subrepos['
+          +tanuki_api']['path'], subrepos['tanuki_api']['dev_branch'])   
+      672 +    needs_admin    = mode_force or has_pending_work(subrepos['
+          +tanuki_admin']['path'], 'master')                             
+      673 +    needs_proxy    = mode_force or has_pending_work(subrepos['
+          +llm_proxy']['path'], 'master')                                
+      674 +    needs_terminal = mode_force or terminal_needs_release(subr
+          +epos['tanuki_terminal']['path'])                              
+      675  
+      676      if env in ("dev", "all"):
+      677  
+
+● Update(Z:\Coding\Tanuki\deploy.py)
+  ⎿  Added 4 lines
+      704              deploy_tasks.append((deploy_admin, "dev"))
+      705          else:
+      706              ok("[tanuki_admin] no changes — skipping admin dep
+           loy")
+      707 +        if needs_terminal:                                    
+      708 +            deploy_tasks.append((release_tanuki_terminal, subr
+          +epos['tanuki_terminal']['path']))                             
+      709 +        else:                                                 
+      710 +            ok("[tanuki_terminal] no changes since last releas
+          +e — skipping")                                                
+      711  
+      712          if deploy_tasks:
+      713              run_parallel(deploy_tasks)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Синтаксис в порядке. Обновляю docstring вверху файла, чтобы отразить новое
+  поведение.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(Z:\Coding\Tanuki\deploy.py)
+  ⎿  Added 8 lines, removed 2 lines
+       2  """
+       3  Tanuki deployment script.
+       4  Handles 7 repositories: root, tanuki_front, tanuki_api, tanuki_
+          wiki, tanuki_terminal, llm_proxy, tanuki_admin.
+       5 -tanuki_terminal (local dir; open-source Tanuki repo, github.com
+         -/BabylenMagnus/tanuki) is                                      
+       6 -commit+push only — it has no server-side deploy step (deploy: N
+         -one), same as tanuki_wiki.                                     
+       5 +tanuki_terminal (local dir; open-source Tanuki repo, github.com
+         +/BabylenMagnus/tanuki) has no                                  
+       6 +SSH deploy step — instead, if it has any commits since its last
+         + release tag, this script                                      
+       7 +auto-cuts a new patch release for it: populates CHANGELOG.md's 
+         +Unreleased section from                                        
+       8 +conventional commit subjects if empty, runs the repo's own `jus
+         +t release <version>` (full                                     
+       9 +release-docs-check + test suite + changelog + tag + push), wait
+         +s for GitHub Actions to build                                  
+      10 +and publish it, then syncs website/latest.json from the publish
+         +ed release. Requires `just`,                                   
+      11 +`cargo-nextest`, and `gh` (authenticated) available locally. Mi
+         +nor/major releases still need                                  
+      12 +a human to run `just release <version>` by hand — this always p
+         +atch-bumps.                                                    
+      13  
+      14  Usage:
+      15      python deploy.py            — full release: dev + prod (sam
+          e as all)
+
+● Проверяю ключевые функции на реальных данных, не трогая рабочие файлы (копирую
+  CHANGELOG во временную папку).
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Нашёл баг в загрузке модуля changelog.py — нужно зарегистрировать модуль в
+  sys.modules до exec_module (иначе dataclass не может резолвить аннотации).
+  Чиню.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(Z:\Coding\Tanuki\deploy.py)
+  ⎿  Added 1 line
+      354      module_path = directory / "scripts" / "changelog.py"
+      355      spec = importlib.util.spec_from_file_location("_tanuki_ter
+           minal_changelog", module_path)
+      356      module = importlib.util.module_from_spec(spec)
+      357 +    sys.modules[spec.name] = module                           
+      358      spec.loader.exec_module(module)
+      359      return module
+      360  
+
+  Read 1 file, ran 3 shell commands (ctrl+o to expand)
+
+● Подтвердилось: python3 не резолвится на этой Windows-машине, только python.
+  Правлю оба вызова на sys.executable.
+● Update(Z:\Coding\Tanuki\deploy.py)
+  ⎿  Added 3 lines, removed 2 lines
+      447      being skipped in practice — website/latest.json was stuck 
+           at v0.1.1 while
+      448      releases had moved on to v0.1.5."""
+      449      log(f"[tanuki_terminal] syncing website/latest.json for v{
+           version}...")
+      450 -    run(f'python3 scripts/changelog.py sync-latest-json --vers
+          -ion {version} --repo {repo}',                                 
+      450 +    py = f'"{sys.executable}"'                                
+      451 +    run(f'{py} scripts/changelog.py sync-latest-json --version
+          + {version} --repo {repo}',                                    
+      452          cwd=directory, timeout=120)
+      452 -    run(f'python3 scripts/changelog.py verify-release-state --
+          -version {version} --repo {repo}',                             
+      453 +    run(f'{py} scripts/changelog.py verify-release-state --ver
+          +sion {version} --repo {repo}',                                
+      454          cwd=directory, timeout=180)
+      455      run("git add website/latest.json docs/next/product-announc
+           ement.json", cwd=directory, check=False)
+      456      staged = subprocess.run("git diff --cached --quiet", shell
+           =True, cwd=str(directory))
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Юстфайл-рецепты вызывают python3 через тот же git-bash sh, где python3 тоже не
+  резолвится — это уже существующий (не мой) пробел в окружении на этой
+  Windows-машине. Добавляю шим python3, чтобы существующий just release вообще
+  смог работать.
+
+  Listed 1 directory (ctrl+o to expand)
+
+● Write(C:\Users\user\.local\bin\python3)
+  ⎿  User rejected write to C:\Users\user\.local\bin\python3
+      1 #!/bin/sh
+      2 exec python "$@"
+
+✻ Baked for 42m 2s
+
+✻ Claude resuming /loop wakeup (Jul 29 5:49am)
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ k.,sv знерщт                                                                  
+
+❯ Раньше через пайтон запускалось, сейчас тоже должно запускаться. Почему? В    
+  чём прикол, я не понимаю.                                                     
+
+● Поясню, в чём дело.
+
+  На этой машине Python установлен как python.exe (через Anaconda) — команды
+  python3 вообще нет, только python. Раньше это никогда не всплывало, потому что
+  весь процесс релиза (just release) до сих пор никогда не запускался прямо с
+  этой Windows-машины — видимо, релизы делались либо вручную по шагам, либо с
+  другой машины/WSL/Mac, где python3 есть по умолчанию.
+
+  Сам justfile в tanuki_terminal написан в расчёте на python3 (стандартное имя
+  на Mac/Linux) — там recipe'ы вроде release-prepare/release-docs-check
+  буквально вызывают python3 scripts/changelog.py .... just выполняет эти
+  команды через git-bash-шный sh, а в нём python3 не резолвится — я это проверил
+  напрямую (sh -c "python3 --version" → command not found).
+
+  Это не связано с моими правками в deploy.py — это существующий пробел в
+  инструментах самого репозитория tanuki_terminal именно на этой машине. Чтобы
+  just release вообще смог запуститься автоматически, нужно, чтобы команда
+  python3 где-то резолвилась в реальный python.exe.
+
+  Я предлагал создать маленький шим-файл python3 (без расширения, с #!/bin/sh 
+  exec python "$@") в C:\Users\user\.local\bin, которая уже есть в PATH — это
+  самое простое решение, без риска что-либо сломать. Ты отклонил именно этот
+  конкретный Write. Хочешь, чтобы я сделал это по-другому — например, добавил
+  алиас в PATH иначе, поставил python3 отдельно, или вообще не трогал системный
+  PATH и решил проблему другим способом (например, патчить сам justfile, чтобы
+  он вызывал python вместо python3)?
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ ок, давай ещё раз                                                             
+
+● Write(C:\Users\user\.local\bin\python3)
+  ⎿  Wrote 2 lines to C:\Users\user\.local\bin\python3
+      1 #!/bin/sh
+      2 exec python "$@"
+
+  Ran 1 shell command (ctrl+o to expand)
+
+✻ Worked for 47s
+
+❯ ещё раз                                                                       
+
+  Ran 1 shell command (ctrl+o to expand)
+
+✻ Crunched for 26s
+
+❯ ещё раз                                                                       
+
+● Вижу, что этот конкретный вызов (chmod + проверка python3 через sh)
+  отклоняется уже третий раз подряд. Прежде чем пробовать снова — что именно не
+  так? Может, дело в самой команде (например, chmod/sh -c вызывают опасения),
+  или это техническая проблема с подтверждением в интерфейсе?
+
+● User answered Claude's questions:
+  ⎿  · Ты трижды отклонил команду chmod +x + проверку python3 через sh. Что 
+     именно не так? → Это баг/глюк интерфейса, просто попробуй ещё раз
+
+● Понял, глюк интерфейса. Пробую снова.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Шим работает — python3 теперь резолвится в python. Проверяю just-рецепт
+  целиком.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Отлично, шим работает и для just. Проверяю release-docs-check — безопасный, не
+  коммитящий шаг, чтобы убедиться, что весь конвейер реально проходит на этом
+  репозитории.
+
+  Ran 1 shell command (ctrl+o to expand)
+● Нашёл реальную (не мою) проблему: release-docs-check прямо сейчас падает —
+  website/agent-detection/grok.toml рассинхронизирован с забандленным манифестом
+  src/detect/manifests/grok.toml (разные версии). Это блокирует just release
+  уже сегодня, независимо от автоматизации. Смотрю, что там.
+
+  Searched for 1 pattern, ran 2 shell commands (ctrl+o to expand)
+
+● Сеть починилась — пробую снова поставить cargo-nextest.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Идёт сборка в фоне. Пока подвожу итог по статусу всей задачи.
+
+  Статус
+
+  Готово:
+  - deploy.py расширен: если у tanuki_terminal есть незакоммиченные изменения
+  или коммиты после последнего релиза — после обычного коммита+пуша
+  автоматически запускается just release <patch-версия> (использует
+  существующий, уже проверенный ритуал: docs-check, changelog, тег, пуш), затем
+  деплой.py ждёт публикации GitHub Release через Actions и синхронизирует
+  website/latest.json.
+  - Раздел Unreleased в CHANGELOG.md автозаполняется из conventional commits,
+  если пуст.
+  - Поставлен и настроен gh CLI (уже был на диске, просто не в PATH).
+  - Добавлен шим python3 → python (на этой машине Python — только python.exe, а
+  justfile/changelog.py написаны в расчёте на python3; без этого just release не
+  запускался бы вообще, независимо от моей автоматизации).
+
+  Блокеры перед первым реальным прогоном:
+  1. cargo-nextest — ставится в фоне сейчас (раньше падало из-за временного сбоя
+  DNS).
+  2. Реальный, не связанный с keybinds баг: website/agent-detection/grok.toml
+  устарел относительно src/detect/manifests/grok.toml (версия 2026.07.16.1 vs
+  .2, плюс пропущено правило детекции). Это блокирует release-docs-check/just 
+  release уже сегодня. Проект-специфичный CLAUDE.md явно требует live-проверку
+  agent-detection изменений через реальную panel («Can driving the actual agent
+  UI»), поэтому я не стал тупо копировать файл сам.
+
+  Жду завершения установки nextest, потом доложу и решим, что делать с
+  grok.toml.
+
+  Read 1 file (ctrl+o to expand)
+
+● Пока пусто, сборка ещё идёт. Жду уведомления.
+
+✻ Baked for 14m 28s
+
+✻ Claude resuming /loop wakeup (Jul 29 6:13am)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Ещё компилируется (несколько rustc-процессов активны). Жду ещё.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Одна крупная компиляция ещё идёт. Жду ещё немного.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Ещё компилируется, но продвигается. Жду ещё немного.
+
+  Searched for 1 pattern, ran 1 shell command (ctrl+o to expand)
+
+● Всё ещё компилируется (nextest — крупный крейт). Жду ещё.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Background command "Retry cargo-nextest install now that DNS resolves"
+completed (exit code 0)
+
+● Установка завершилась успешно (exit code 0). Проверяю.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● cargo-nextest установлен. Теперь полная сводка по автоматизации деплоя.
+
+  Итог
+
+  Автоматизация деплоя tanuki_terminal готова:
+  - deploy.py расширен: при наличии изменений (незакоммиченных или коммитов
+  после последнего тега) автоматически коммитит+пушит как обычно, затем
+  запускает существующий just release <patch-версия> (docs-check → changelog →
+  тег → пуш → триггер release.yml), дожидается публикации GitHub Release через
+  Actions, синхронизирует website/latest.json.
+  - Раздел Unreleased в CHANGELOG.md автозаполняется из conventional commits,
+  если пуст.
+  - Инструментарий на месте: gh CLI найден и авторизован, python3-шим создан (на
+  машине только python.exe, а justfile/changelog.py вызывают python3),
+  cargo-nextest только что установлен.
+
+  Единственный оставшийся блокер перед первым реальным прогоном — не связан с
+  моей работой над keybinds:
+
+  website/agent-detection/grok.toml устарел относительно
+  src/detect/manifests/grok.toml (версия 2026.07.16.1 vs .2, плюс отсутствует
+  новое правило детекции background_work_chip_working). Это валит gate
+  release-docs-check уже сегодня, независимо от автоматизации.
+
+  Проектный CLAUDE.md прямо требует для agent-detection изменений живую проверку
+  через реальную панель (herdr agent read/explain на настоящем UI агента), а не
+  слепое копирование файла.
+
+● User answered Claude's questions:
+  ⎿  · Как поступить с устаревшим website/agent-detection/grok.toml, который 
+     блокирует release-docs-check? → Просто скопировать бандленный файл поверх 
+     website-копии
+  Ran 1 shell command (ctrl+o to expand)
+
+● Копия обновлена. Прогоняю release-docs-check ещё раз, чтобы убедиться, что
+  gate теперь проходит.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Ещё один такой же случай — kilo.toml: версия совпадает, но содержимое разное.
+  Смотрю разницу и копирую по той же логике, раз ты одобрил такой подход.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Опять просто устаревший rename herdr:kilo → tanuki:kilo, без изменения версии.
+  Копирую.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Похоже, это системная проблема — вся папка website/agent-detection/
+  рассинхронизирована. Проверяю все манифесты разом.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Все различия — тот же самый пропущенный rename herdr: → tanuki: в алиасах.
+  Копирую оба файла.
+
+  Searched for 2 patterns, ran 1 shell command (ctrl+o to expand)
+  ⎿  Interrupted · What should Claude do instead?

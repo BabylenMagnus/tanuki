@@ -562,7 +562,6 @@ impl App {
                     preview: announcement.preview,
                 }
             }),
-            keybind_help: state::KeybindHelpState { scroll: 0 },
             navigator: state::NavigatorState::default(),
             copy_mode: None,
             workspace_scroll: 0,
@@ -661,6 +660,8 @@ impl App {
                 original_palette: None,
                 original_theme: None,
                 keybind_capture: None,
+                keybind_search: String::new(),
+                keybind_search_active: false,
             },
             integration_recommendations: crate::integration::integration_recommendations(),
             agent_manifest_summaries,
@@ -1707,9 +1708,6 @@ impl App {
             Mode::ContextMenu => {
                 self.handle_context_menu_key_via_api(key_event);
             }
-            Mode::KeybindHelp => {
-                input::handle_keybind_help_key(&mut self.state, key_event);
-            }
             Mode::GlobalMenu => {
                 input::handle_global_menu_key(&mut self.state, key_event);
             }
@@ -1903,7 +1901,6 @@ mod tests {
             Mode::ConfirmRemoveWorktree,
             Mode::ContextMenu,
             Mode::GlobalMenu,
-            Mode::KeybindHelp,
         ] {
             assert!(mode.wants_ascii_input(), "{mode:?} should want ASCII");
         }

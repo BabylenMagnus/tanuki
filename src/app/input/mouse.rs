@@ -127,11 +127,7 @@ impl AppState {
             && !self.sidebar_collapsed
             && matches!(
                 self.mode,
-                Mode::Terminal
-                    | Mode::Navigate
-                    | Mode::Resize
-                    | Mode::GlobalMenu
-                    | Mode::KeybindHelp
+                Mode::Terminal | Mode::Navigate | Mode::Resize | Mode::GlobalMenu
             );
         let launcher = self.global_launcher_rect();
         let launcher_hit = launcher_enabled
@@ -166,10 +162,6 @@ impl AppState {
                     leave_modal(self);
                 }
             }
-            return None;
-        }
-
-        if self.mode == Mode::KeybindHelp {
             return None;
         }
 
@@ -788,8 +780,7 @@ impl AppState {
                             self.set_sidebar_section_split(mouse.row);
                         }
                         DragTarget::ReleaseNotesScrollbar { .. }
-                        | DragTarget::ProductAnnouncementScrollbar { .. }
-                        | DragTarget::KeybindHelpScrollbar { .. } => {}
+                        | DragTarget::ProductAnnouncementScrollbar { .. } => {}
                     }
                 }
             }

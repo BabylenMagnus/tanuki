@@ -454,7 +454,7 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
     use crate::app::state::KeybindCaptureKind;
 
     let p = &app.palette;
-    let [desc_area, _, list_area] = Layout::vertical([
+    let [desc_area, search_area, list_area] = Layout::vertical([
         Constraint::Length(2),
         Constraint::Length(1),
         Constraint::Min(1),
@@ -466,8 +466,11 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
         Some(KeybindCaptureKind::Prefix) => {
             "press a key combo to bind it after the leader key, or esc to cancel"
         }
+        None if app.settings.keybind_search_active => {
+            "type to filter, enter/esc to stop editing (filter stays applied)"
+        }
         None => {
-            "no default binding — pick your own; enter = direct chord, p = prefix+ binding"
+            "no default binding — pick your own; enter = direct chord, p = prefix+ binding, / = search"
         }
     };
     super::widgets::render_modal_description(
@@ -477,7 +480,28 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
         Style::default().fg(p.overlay1),
     );
 
-    let items: Vec<ListItem> = KeybindSetting::ALL
+    let search_line = if app.settings.keybind_search_active {
+        Line::from(vec![
+            Span::styled(" / ", Style::default().fg(p.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(app.settings.keybind_search.clone(), Style::default().fg(p.text)),
+            Span::styled("▏", Style::default().fg(p.accent)),
+        ])
+    } else if !app.settings.keybind_search.is_empty() {
+        Line::from(vec![
+            Span::styled(" / ", Style::default().fg(p.overlay1)),
+            Span::styled(app.settings.keybind_search.clone(), Style::default().fg(p.text)),
+            Span::styled(" (press / to edit)", Style::default().fg(p.overlay1)),
+        ])
+    } else {
+        Line::from(Span::styled(
+            " press / to search",
+            Style::default().fg(p.overlay1),
+        ))
+    };
+    frame.render_widget(Paragraph::new(search_line), search_area);
+
+    let filtered = KeybindSetting::filtered(&app.settings.keybind_search);
+    let items: Vec<ListItem> = filtered
         .iter()
         .copied()
         .enumerate()
@@ -496,6 +520,14 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
             ]))
         })
         .collect();
+
+    if items.is_empty() {
+        frame.render_widget(
+            Paragraph::new(" no matching keybinds").style(Style::default().fg(p.overlay1)),
+            list_area,
+        );
+        return;
+    }
 
     let list = List::new(items)
         .highlight_style(

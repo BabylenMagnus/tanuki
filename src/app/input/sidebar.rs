@@ -530,7 +530,11 @@ mod tests {
             menu.y + 2,
         ));
 
-        assert_eq!(app.state.mode, Mode::KeybindHelp);
+        assert_eq!(app.state.mode, Mode::Settings);
+        assert_eq!(
+            app.state.settings.section,
+            crate::app::state::SettingsSection::Keybinds
+        );
     }
 
     #[test]

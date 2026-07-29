@@ -2024,8 +2024,9 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         eprintln!("installed {}", release.label());
         print_outdated_integration_notice_with_updated_binary(&updated_exe);
         eprintln!(
-            "Restart any running Tanuki sessions to use {}.",
-            release.label()
+            "{} is on disk now, but any Tanuki session you already have open is still running the old server.\n{}",
+            release.label(),
+            crate::session::active_restart_after_update_guidance()
         );
     }
 

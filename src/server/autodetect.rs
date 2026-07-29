@@ -278,6 +278,16 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
 // Auto-detect launch
 // ---------------------------------------------------------------------------
 
+/// Total time budget for retrying through a server restart race (e.g. the
+/// brief window where a stale server from before `tanuki update` is
+/// shutting down and its replacement hasn't come up yet). Matches
+/// `SERVER_READY_TIMEOUT`, the existing budget for a fresh server to become
+/// ready, since a restarting server goes through the same startup path.
+const RELAUNCH_RACE_RETRY_BUDGET: Duration = SERVER_READY_TIMEOUT;
+
+/// Delay between retry attempts while waiting out a relaunch race.
+const RELAUNCH_RACE_RETRY_DELAY: Duration = Duration::from_millis(300);
+
 /// Performs auto-detect launch: check for server, spawn if needed, then
 /// attach as a thin client.
 ///
@@ -288,7 +298,30 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
 /// 1. Check if a server is listening on the client socket
 /// 2. If no server → spawn server daemon → wait for socket readiness
 /// 3. Run the thin client (which connects to the server)
+///
+/// A server that is mid-restart (e.g. the stale pre-update server shutting
+/// down while its replacement isn't listening yet) can make step 1-3 fail
+/// with a transient error. Rather than surfacing that as a scary "server is
+/// shutting down" message to a user who just ran `tanuki` normally, retry
+/// the whole sequence for a bounded window before giving up.
 pub fn auto_detect_launch() -> io::Result<()> {
+    let deadline = std::time::Instant::now() + RELAUNCH_RACE_RETRY_BUDGET;
+
+    loop {
+        match try_auto_detect_launch_once() {
+            Ok(()) => return Ok(()),
+            Err(err) if std::time::Instant::now() < deadline
+                && crate::client::is_transient_relaunch_race(&err) =>
+            {
+                info!(%err, "relaunch raced a server restart in progress, retrying");
+                std::thread::sleep(RELAUNCH_RACE_RETRY_DELAY);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn try_auto_detect_launch_once() -> io::Result<()> {
     let socket_path = client_socket_path();
     info!(path = %socket_path.display(), "auto-detect launch starting");
 

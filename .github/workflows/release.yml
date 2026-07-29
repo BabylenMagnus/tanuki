@@ -190,6 +190,15 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # Must run before "Download all artifacts" -- actions/checkout cleans
+      # the workspace by default and would otherwise wipe the downloaded
+      # build artifacts.
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -202,27 +211,9 @@ jobs:
         run: |
           set -eu
           version="${TAG#v}"
-          repo="${{ github.repository }}"
-          {
-            echo "{"
-            echo "  \"version\": \"${version}\","
-            echo "  \"notes\": \"Tanuki ${TAG}\","
-            echo "  \"announcement\": null,"
-            echo "  \"assets\": {"
-            first=1
-            for target in tanuki-windows-x86_64.exe tanuki-linux-x86_64 tanuki-linux-aarch64 tanuki-macos-x86_64 tanuki-macos-aarch64; do
-              key="${target#tanuki-}"
-              key="${key%.exe}"
-              file="artifacts/${target}"
-              sha256="$(sha256sum "$file" | cut -d' ' -f1)"
-              url="https://github.com/${repo}/releases/download/${TAG}/${target}"
-              if [ "$first" -eq 0 ]; then echo "    ,"; fi
-              first=0
-              echo "    \"${key}\": { \"url\": \"${url}\", \"sha256\": \"${sha256}\" }"
-            done
-            echo "  }"
-            echo "}"
-          } > artifacts/manifest.json
+          python3 .github/scripts/generate_release_manifest.py \
+            "$version" "${{ github.repository }}" "$TAG" artifacts \
+            > artifacts/manifest.json
           cat artifacts/manifest.json
 
       - name: Create/update release

@@ -1,19 +1,54 @@
 ---
 title: Install Tanuki
-description: Build and run Tanuki from source on Linux, macOS, and Windows.
+description: Install, update, and verify Tanuki on Linux, macOS, and Windows.
 ---
 
-Tanuki is a Rust binary (package name `tanuki`). There is no hosted installer or package-manager
-release yet — this page will grow install-script, Homebrew, mise, and Nix sections once release CI is set
-up for this repository ([tracked in the open-source-release checklist](https://github.com/BabylenMagnus/tanuki)).
-For now, build from source.
+Tanuki publishes prebuilt binaries for Linux, macOS, and Windows with every release
+([releases](https://github.com/BabylenMagnus/tanuki/releases)). There is no Homebrew, mise, or Nix
+package yet — use the install script, a manual download, or build from source.
 
-## Requirements
+## Install
+
+On Linux or macOS, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BabylenMagnus/tanuki/master/website/install.sh | sh
+```
+
+On Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/BabylenMagnus/tanuki/master/website/install.ps1 | iex"
+```
+
+The installer downloads the release binary matching your platform and puts it on your `PATH`. Set
+`TANUKI_INSTALL_DIR` (or `-InstallDir` on Windows) to install somewhere other than the default.
+
+## Manual download
+
+You can also download a binary directly from [GitHub releases](https://github.com/BabylenMagnus/tanuki/releases).
+
+Pick the asset that matches your system:
+
+| System | Asset |
+| --- | --- |
+| Linux x86_64 | `tanuki-linux-x86_64` |
+| Linux aarch64 | `tanuki-linux-aarch64` |
+| macOS Intel | `tanuki-macos-x86_64` |
+| macOS Apple silicon | `tanuki-macos-aarch64` |
+| Windows x86_64 | `tanuki-windows-x86_64.exe` |
+
+On Linux or macOS, make it executable and move it somewhere on your `PATH`:
+
+```bash
+chmod +x tanuki-linux-x86_64
+mv tanuki-linux-x86_64 ~/.local/bin/tanuki
+```
+
+## Build from source
 
 - [Rust toolchain](https://rustup.rs/) matching the version pinned in [`rust-toolchain.toml`](https://github.com/BabylenMagnus/tanuki/blob/master/rust-toolchain.toml)
 - `git`
-
-## Build from source
 
 ```bash
 git clone https://github.com/BabylenMagnus/tanuki
@@ -21,17 +56,7 @@ cd tanuki
 cargo build --release
 ```
 
-The resulting binary is `target/release/tanuki` (`.exe` on Windows). Copy or symlink it onto your `PATH`:
-
-```bash
-# Linux / macOS
-cp target/release/tanuki ~/.local/bin/tanuki
-```
-
-```powershell
-# Windows (PowerShell)
-Copy-Item target\release\tanuki.exe "$env:USERPROFILE\bin\tanuki.exe"
-```
+The resulting binary is `target/release/tanuki` (`.exe` on Windows). Copy or symlink it onto your `PATH`.
 
 ## Verify
 
@@ -45,11 +70,24 @@ If your shell cannot find `tanuki`, restart the terminal or check that the insta
 
 ## Update
 
-There is no `tanuki update` command or update channel yet — pull the latest source and rebuild:
+Tanuki checks for new releases and notifies you in-app. You can also update manually:
 
 ```bash
-git pull
-cargo build --release
+tanuki update
+```
+
+`tanuki update` downloads and installs the latest release. Tanuki tracks a stable update channel by
+default; a preview channel exists in the CLI (`tanuki channel set preview`) but no preview builds are
+published yet, so it currently falls back to the stable manifest.
+
+If an update changes Tanuki's client/server protocol, Tanuki asks whether to stop the old server after
+installing — stop it to use the new version. For the default session, run `tanuki server stop` then
+`tanuki` again; for a named session, run `tanuki session stop <name>` then `tanuki session attach <name>`.
+
+To opt a compatible running session into experimental live server handoff:
+
+```bash
+tanuki update --handoff
 ```
 
 ## Development builds
@@ -61,6 +99,5 @@ just check       # formatting, tests, and maintenance checks
 
 ## Platform support
 
-Tanuki builds and runs on Linux and macOS. Windows support is inherited from upstream Herdr's preview-beta
-Windows build and has not been separately verified for this fork yet — see [Windows beta](/docs/windows-beta/)
-for the upstream caveats.
+Tanuki builds and ships release binaries for Linux, macOS, and Windows from the same release pipeline —
+Windows is a regular supported platform, not a separate preview track.
