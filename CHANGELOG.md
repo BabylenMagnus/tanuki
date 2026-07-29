@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add script to generate release manifest from CHANGELOG.md
+
 ## [0.1.5] - 2026-07-29
 
 ### Fixed
