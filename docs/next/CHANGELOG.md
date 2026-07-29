@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Update version to 0.1.6 and modify asset links in latest.json
+
 ## [0.1.6] - 2026-07-29
 
 ### Added
