@@ -267,29 +267,63 @@ fn set_managed_junction(
     managed_target_prefix: &Path,
     allow_legacy_bin_migration: bool,
 ) -> Result<(), String> {
-    if link_path.exists() {
-        let is_junction = junction::exists(link_path)
-            .map_err(|err| format!("failed to inspect {}: {err}", link_path.display()))?;
+    // `Path::exists()` follows the reparse point and reports `false` for a
+    // junction whose target has been removed (e.g. a pruned release dir).
+    // `symlink_metadata` sees the reparse point entry itself, dangling or
+    // not, so use it to decide whether anything is here at all.
+    let link_metadata = fs::symlink_metadata(link_path).ok();
+    if let Some(metadata) = link_metadata {
+        // A dangling reparse point resolves `Path::exists()` to `false`.
+        // `junction::exists`/`get_target` both gate internally on
+        // `Path::exists()` too, so they misreport a dangling junction as
+        // "not found" rather than erroring -- work around that by only
+        // trusting them when the target still resolves, and otherwise
+        // falling back to the raw file-type bit (a reparse point that
+        // isn't a real file or a non-empty directory can only be a stale
+        // junction of ours, since nothing else places one at a managed
+        // install path).
+        let target_resolves = link_path.exists();
+        let is_junction = if target_resolves {
+            junction::exists(link_path)
+                .map_err(|err| format!("failed to inspect {}: {err}", link_path.display()))?
+        } else {
+            metadata.file_type().is_symlink()
+        };
 
         if is_junction {
-            let existing_target = junction::get_target(link_path).map_err(|err| {
-                format!(
-                    "failed to read junction target at {}: {err}",
-                    link_path.display()
-                )
-            })?;
-            if !path_starts_with_ignore_case(&existing_target, managed_target_prefix) {
-                return Err(format!(
-                    "refusing to retarget junction at {} because it is not managed by this installer",
-                    link_path.display()
-                ));
-            }
-            if paths_equal_ignore_case(&existing_target, target_path) {
-                return Ok(()); // already correct -- no-op
+            if target_resolves {
+                let existing_target = junction::get_target(link_path).map_err(|err| {
+                    format!(
+                        "failed to read junction target at {}: {err}",
+                        link_path.display()
+                    )
+                })?;
+                if !path_starts_with_ignore_case(&existing_target, managed_target_prefix) {
+                    return Err(format!(
+                        "refusing to retarget junction at {} because it is not managed by this installer",
+                        link_path.display()
+                    ));
+                }
+                if paths_equal_ignore_case(&existing_target, target_path) {
+                    return Ok(()); // already correct -- no-op
+                }
             }
             junction::delete(link_path).map_err(|err| {
                 format!(
                     "failed to remove stale junction at {}: {err}",
+                    link_path.display()
+                )
+            })?;
+            // `junction::delete` only clears the reparse-point tag (via
+            // FSCTL_DELETE_REPARSE_POINT) -- the now-plain, empty directory
+            // it leaves behind is still on disk. `junction::create` calls
+            // `fs::create_dir` on the link path first, which fails with
+            // "already exists" (os error 183) unless that leftover
+            // directory is removed too. This is not a dangling-target edge
+            // case: it fires on every retarget to a different release.
+            fs::remove_dir(link_path).map_err(|err| {
+                format!(
+                    "failed to remove leftover directory at {} after clearing its junction tag: {err}",
                     link_path.display()
                 )
             })?;
@@ -697,6 +731,52 @@ mod tests {
             !remaining.contains(&"release-2".to_string()),
             "{remaining:?}"
         );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn set_managed_junction_retargets_existing_valid_junction() {
+        // Reproduces the real `tanuki update` failure: retargeting an
+        // existing, valid managed junction to a different release dir
+        // (i.e. every ordinary version update).
+        let root = unique_temp_dir("junction-retarget");
+        let old_target = root.join("release-0.1.5");
+        fs::create_dir_all(&old_target).unwrap();
+        let link_path = root.join("current");
+        junction::create(&old_target, &link_path).unwrap();
+
+        let new_target = root.join("release-0.1.6");
+        fs::create_dir_all(&new_target).unwrap();
+
+        set_managed_junction(&link_path, &new_target, &root, false)
+            .expect("retargets an existing valid junction to a new release");
+        assert_eq!(junction::get_target(&link_path).unwrap(), new_target);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn set_managed_junction_recreates_dangling_junction() {
+        let root = unique_temp_dir("junction-dangling");
+        let old_target = root.join("old-release");
+        fs::create_dir_all(&old_target).unwrap();
+        let link_path = root.join("current");
+        junction::create(&old_target, &link_path).unwrap();
+
+        // Simulate a pruned release: the junction entry still exists on
+        // disk, but the directory it points at is gone, so `Path::exists()`
+        // (which follows the reparse point) reports `false` for it.
+        fs::remove_dir_all(&old_target).unwrap();
+        assert!(!link_path.exists());
+        assert!(fs::symlink_metadata(&link_path).is_ok());
+
+        let new_target = root.join("new-release");
+        fs::create_dir_all(&new_target).unwrap();
+
+        set_managed_junction(&link_path, &new_target, &root, false)
+            .expect("recreates a dangling junction instead of erroring");
+        assert_eq!(junction::get_target(&link_path).unwrap(), new_target);
 
         let _ = fs::remove_dir_all(&root);
     }
