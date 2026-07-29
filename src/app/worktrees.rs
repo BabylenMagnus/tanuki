@@ -1555,6 +1555,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn worktree_create_enter_submits_through_api_path() {
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = std::path::PathBuf::from("/w");

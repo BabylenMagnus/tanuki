@@ -253,7 +253,7 @@ fn probe_stream_closed(stream: &mut LocalStream) -> io::Result<bool> {
 }
 
 #[cfg(windows)]
-fn windows_named_pipe_available(stream: &mut LocalStream) -> io::Result<Option<u32>> {
+pub(crate) fn windows_named_pipe_available(stream: &mut LocalStream) -> io::Result<Option<u32>> {
     use std::os::windows::io::{AsHandle, AsRawHandle};
 
     let LocalStream::NamedPipe(pipe) = stream;

@@ -176,7 +176,9 @@ pub fn config_path() -> PathBuf {
 /// Used to detect edits made outside the app (hand-editing, syncing from another
 /// machine) so they can be picked up without a manual `reload_config`.
 pub fn config_mtime() -> Option<std::time::SystemTime> {
-    std::fs::metadata(config_path()).and_then(|meta| meta.modified()).ok()
+    std::fs::metadata(config_path())
+        .and_then(|meta| meta.modified())
+        .ok()
 }
 
 pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {

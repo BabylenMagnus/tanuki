@@ -310,8 +310,9 @@ pub fn auto_detect_launch() -> io::Result<()> {
     loop {
         match try_auto_detect_launch_once() {
             Ok(()) => return Ok(()),
-            Err(err) if std::time::Instant::now() < deadline
-                && crate::client::is_transient_relaunch_race(&err) =>
+            Err(err)
+                if std::time::Instant::now() < deadline
+                    && crate::client::is_transient_relaunch_race(&err) =>
             {
                 info!(%err, "relaunch raced a server restart in progress, retrying");
                 std::thread::sleep(RELAUNCH_RACE_RETRY_DELAY);

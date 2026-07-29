@@ -482,14 +482,23 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
 
     let search_line = if app.settings.keybind_search_active {
         Line::from(vec![
-            Span::styled(" / ", Style::default().fg(p.accent).add_modifier(Modifier::BOLD)),
-            Span::styled(app.settings.keybind_search.clone(), Style::default().fg(p.text)),
+            Span::styled(
+                " / ",
+                Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                app.settings.keybind_search.clone(),
+                Style::default().fg(p.text),
+            ),
             Span::styled("▏", Style::default().fg(p.accent)),
         ])
     } else if !app.settings.keybind_search.is_empty() {
         Line::from(vec![
             Span::styled(" / ", Style::default().fg(p.overlay1)),
-            Span::styled(app.settings.keybind_search.clone(), Style::default().fg(p.text)),
+            Span::styled(
+                app.settings.keybind_search.clone(),
+                Style::default().fg(p.text),
+            ),
             Span::styled(" (press / to edit)", Style::default().fg(p.overlay1)),
         ])
     } else {
@@ -509,11 +518,12 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
             let binding_label = setting
                 .current_binding(&app.keybinds)
                 .unwrap_or_else(|| "unset".to_string());
-            let value = if app.settings.list.selected == idx && app.settings.keybind_capture.is_some() {
-                "press a key…".to_string()
-            } else {
-                binding_label
-            };
+            let value =
+                if app.settings.list.selected == idx && app.settings.keybind_capture.is_some() {
+                    "press a key…".to_string()
+                } else {
+                    binding_label
+                };
             ListItem::new(Line::from(vec![
                 Span::raw(format!(" {:<24}", setting.label())),
                 Span::styled(value, Style::default().fg(p.accent)),

@@ -548,7 +548,6 @@ impl AppState {
             self.request_complete_onboarding = true;
         }
     }
-
 }
 
 #[cfg(test)]

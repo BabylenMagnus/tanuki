@@ -655,10 +655,11 @@ path = "codex.toml"
                 remote_manifest("9999.01.01.1", "auto-update-ready"),
             )
             .unwrap();
-            std::env::set_var(
-                CATALOG_URL_ENV,
-                format!("file://{}", web_dir.join("index.toml").display()),
-            );
+            let index_path = web_dir
+                .join("index.toml")
+                .to_string_lossy()
+                .replace('\\', "/");
+            std::env::set_var(CATALOG_URL_ENV, format!("file://{index_path}"));
 
             let (tx, mut rx) = tokio::sync::mpsc::channel(1);
             auto_update(tx);

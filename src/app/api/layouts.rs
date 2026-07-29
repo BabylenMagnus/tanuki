@@ -718,6 +718,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn layout_apply_replaces_tab_with_requested_tree() {
         let mut app = app_with_workspace();
         let original_tab_id = app.public_tab_id(0, 0).unwrap();

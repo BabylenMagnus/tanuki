@@ -2335,6 +2335,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn remote_ssh_command_uses_managed_config_when_present() {
         let managed_config = write_managed_ssh_config().expect("write managed config");
         let config_path = managed_config.options.config_path.clone();
@@ -3227,6 +3228,7 @@ mod tests {
         assert!(source.temporary_dir.is_none());
     }
 
+    #[cfg(unix)]
     fn remote_env_lock() -> &'static std::sync::Mutex<()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))

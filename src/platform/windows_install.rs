@@ -167,6 +167,7 @@ fn with_install_lock<T>(
     let lock_file = loop {
         match OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .share_mode(0) // exclusive -- no other process may open this file concurrently
@@ -206,11 +207,7 @@ fn remove_stale_staging_dirs(releases_dir: &Path) {
         return;
     };
     for entry in entries.flatten() {
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".staging.")
-        {
+        if entry.file_name().to_string_lossy().starts_with(".staging.") {
             let _ = fs::remove_dir_all(entry.path());
         }
     }
@@ -244,10 +241,7 @@ fn stage_and_place_release(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("release");
-    let staging_dir = releases_dir.join(format!(
-        ".staging.{release_name}.{}",
-        std::process::id()
-    ));
+    let staging_dir = releases_dir.join(format!(".staging.{release_name}.{}", std::process::id()));
     fs::create_dir_all(&staging_dir)
         .map_err(|err| format!("failed to create staging dir: {err}"))?;
     fs::copy(downloaded_file, staging_dir.join("tanuki.exe")).map_err(|err| {
@@ -333,8 +327,12 @@ fn set_managed_junction(
         fs::create_dir_all(parent)
             .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
     }
-    junction::create(target_path, link_path)
-        .map_err(|err| format!("failed to create junction at {}: {err}", link_path.display()))
+    junction::create(target_path, link_path).map_err(|err| {
+        format!(
+            "failed to create junction at {}: {err}",
+            link_path.display()
+        )
+    })
 }
 
 fn is_legacy_bin_dir(path: &Path) -> Result<bool, String> {
@@ -358,7 +356,10 @@ fn migrate_legacy_bin_dir(path: &Path) -> Result<(), String> {
     let legacy_path = path.with_file_name(format!("{base_name}.legacy.{}", random_suffix()));
     fs::rename(path, &legacy_path)
         .map_err(|err| format!("failed to move legacy bin directory aside: {err}"))?;
-    eprintln!("Moved legacy Tanuki bin directory to {}.", legacy_path.display());
+    eprintln!(
+        "Moved legacy Tanuki bin directory to {}.",
+        legacy_path.display()
+    );
     Ok(())
 }
 
@@ -425,18 +426,13 @@ fn prune_old_releases(releases_dir: &Path, current_release_dir: &Path, keep: usi
     let mut dirs: Vec<(PathBuf, SystemTime)> = entries
         .flatten()
         .filter(|entry| entry.path().is_dir())
-        .filter(|entry| {
-            !entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".staging.")
-        })
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with(".staging."))
         .filter_map(|entry| {
             let modified = entry.metadata().ok()?.modified().ok()?;
             Some((entry.path(), modified))
         })
         .collect();
-    dirs.sort_by(|a, b| b.1.cmp(&a.1));
+    dirs.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     let current = current_release_dir
         .canonicalize()
@@ -559,15 +555,15 @@ mod tests {
     #[test]
     fn sanitize_version_identity_replaces_disallowed_chars() {
         assert_eq!(sanitize_version_identity("0.1.4"), "0.1.4");
-        assert_eq!(sanitize_version_identity("0.1.4-preview.7+abc"), "0.1.4-preview.7-abc");
+        assert_eq!(
+            sanitize_version_identity("0.1.4-preview.7+abc"),
+            "0.1.4-preview.7-abc"
+        );
     }
 
     #[test]
     fn release_dir_name_appends_target_triple() {
-        assert_eq!(
-            release_dir_name("0.1.4"),
-            "0.1.4-x86_64-pc-windows-msvc"
-        );
+        assert_eq!(release_dir_name("0.1.4"), "0.1.4-x86_64-pc-windows-msvc");
     }
 
     #[test]
@@ -585,7 +581,10 @@ mod tests {
     #[test]
     fn prepend_path_entry_is_a_no_op_when_already_first() {
         let path = r"C:\Users\user\AppData\Local\Programs\Tanuki\bin;C:\Windows";
-        assert_eq!(prepend_path_entry(path, r"C:\Users\user\AppData\Local\Programs\Tanuki\bin"), path);
+        assert_eq!(
+            prepend_path_entry(path, r"C:\Users\user\AppData\Local\Programs\Tanuki\bin"),
+            path
+        );
     }
 
     #[test]
@@ -645,7 +644,9 @@ mod tests {
 
         remove_stale_staging_dirs(&root);
 
-        assert!(!root.join(".staging.0.1.4-x86_64-pc-windows-msvc.1234").exists());
+        assert!(!root
+            .join(".staging.0.1.4-x86_64-pc-windows-msvc.1234")
+            .exists());
         assert!(root.join("0.1.3-x86_64-pc-windows-msvc").exists());
 
         let _ = fs::remove_dir_all(&root);
@@ -676,11 +677,26 @@ mod tests {
             .map(|entry| entry.file_name().to_string_lossy().to_string())
             .collect();
 
-        assert!(remaining.contains(&"release-0".to_string()), "{remaining:?}");
-        assert!(remaining.contains(&"release-4".to_string()), "{remaining:?}");
-        assert!(remaining.contains(&"release-3".to_string()), "{remaining:?}");
-        assert!(!remaining.contains(&"release-1".to_string()), "{remaining:?}");
-        assert!(!remaining.contains(&"release-2".to_string()), "{remaining:?}");
+        assert!(
+            remaining.contains(&"release-0".to_string()),
+            "{remaining:?}"
+        );
+        assert!(
+            remaining.contains(&"release-4".to_string()),
+            "{remaining:?}"
+        );
+        assert!(
+            remaining.contains(&"release-3".to_string()),
+            "{remaining:?}"
+        );
+        assert!(
+            !remaining.contains(&"release-1".to_string()),
+            "{remaining:?}"
+        );
+        assert!(
+            !remaining.contains(&"release-2".to_string()),
+            "{remaining:?}"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -713,7 +729,10 @@ mod tests {
         env::set_var("TANUKI_INSTALL_DIR", &fake_install_dir);
 
         let paths = TanukiInstallPaths::resolve().unwrap();
-        assert_eq!(paths.standalone_root, fake_home.join("packages").join("standalone"));
+        assert_eq!(
+            paths.standalone_root,
+            fake_home.join("packages").join("standalone")
+        );
         assert_eq!(paths.visible_bin_dir, fake_install_dir);
 
         match previous_home {

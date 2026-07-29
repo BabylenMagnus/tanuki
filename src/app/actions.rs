@@ -3545,6 +3545,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn navigator_rows_match_live_root_runtime_cwd_workspace_label() {
         let unique = format!(
             "tanuki-navigator-runtime-cwd-{}-{}",

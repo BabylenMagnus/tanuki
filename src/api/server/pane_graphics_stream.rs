@@ -352,6 +352,22 @@ fn read_line(
                 total_deadline,
                 "timed out reading stream frame header",
             )?;
+            // Windows named pipes in nonblocking mode return `Ok(0)` from a
+            // read when no data is currently available, indistinguishable
+            // from a genuine EOF. Peek first so "nothing yet" is treated as
+            // a retry instead of a premature close (matches the pattern
+            // used by `crate::ipc::poll_local_stream_read`).
+            #[cfg(windows)]
+            if let ReadWait::Poll(_) = wait {
+                match crate::ipc::windows_named_pipe_available(stream)? {
+                    None => return Ok(None),
+                    Some(0) => {
+                        wait.after_retry(idle_deadline, total_deadline);
+                        continue;
+                    }
+                    Some(_) => {}
+                }
+            }
             match stream.read(&mut byte) {
                 Ok(0) => return Ok(None),
                 Ok(_) => {
@@ -414,6 +430,26 @@ fn read_exact(
             )?;
             let remaining = len - data.len();
             let read_len = remaining.min(chunk.len());
+            // See the matching comment in `read_line`: Windows named pipes
+            // report "no data yet" as `Ok(0)` in nonblocking mode, which is
+            // otherwise indistinguishable from EOF.
+            #[cfg(windows)]
+            if let ReadWait::Poll(_) = wait {
+                match crate::ipc::windows_named_pipe_available(stream)? {
+                    None if data.is_empty() => return Ok(None),
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "stream ended mid-frame",
+                        ))
+                    }
+                    Some(0) => {
+                        wait.after_retry(Some(idle_deadline), Some(total_deadline));
+                        continue;
+                    }
+                    Some(_) => {}
+                }
+            }
             match stream.read(&mut chunk[..read_len]) {
                 Ok(0) if data.is_empty() => return Ok(None),
                 Ok(0) => {
@@ -574,7 +610,9 @@ fn read_should_retry(err: &io::Error) -> bool {
 mod tests {
     use super::*;
     use crate::api::schema::{ErrorResponse, Method, ResponseResult, SuccessResponse};
-    use crate::api::{ApiRequestMessage, EventHub};
+    use crate::api::ApiRequestMessage;
+    #[cfg(unix)]
+    use crate::api::EventHub;
     use crate::ipc::LocalStream;
     use interprocess::local_socket::traits::Listener as _;
     use std::io::{BufRead, BufReader, Write};
@@ -606,6 +644,7 @@ mod tests {
         line
     }
 
+    #[cfg(unix)]
     fn assert_server_stream_owner(owner: &str) {
         assert!(owner.starts_with("pane.graphics.stream:"));
     }

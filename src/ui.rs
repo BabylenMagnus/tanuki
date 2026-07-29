@@ -1347,5 +1347,4 @@ mod tests {
             .collect::<String>();
         assert!(rendered.contains("PREFIX"));
     }
-
 }

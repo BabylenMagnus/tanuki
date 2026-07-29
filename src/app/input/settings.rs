@@ -318,7 +318,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 }
                 KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                     state.settings.section = SettingsSection::PaneLabels;
-                    state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+                    state.settings.list.selected =
+                        usize::from(!state.agent_border_labels_enabled());
                     state.settings.keybind_search.clear();
                 }
                 KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
@@ -765,10 +766,7 @@ mod tests {
 
         let action = update_settings_state(
             &mut state,
-            KeyEvent::new(
-                KeyCode::Right,
-                KeyModifiers::CONTROL | KeyModifiers::ALT,
-            ),
+            KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL | KeyModifiers::ALT),
         );
 
         assert_eq!(

@@ -1705,10 +1705,9 @@ pub(super) fn execute_navigate_action_in_context(
             state.last_pane();
             leave_navigate_mode(state);
         }
-        NavigateAction::Help => super::settings::open_settings_at(
-            state,
-            crate::app::state::SettingsSection::Keybinds,
-        ),
+        NavigateAction::Help => {
+            super::settings::open_settings_at(state, crate::app::state::SettingsSection::Keybinds)
+        }
         NavigateAction::Settings => super::settings::open_settings(state),
         NavigateAction::ReloadConfig => {
             state.request_reload_config = true;
