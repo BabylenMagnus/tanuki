@@ -1110,6 +1110,9 @@ impl AppState {
 
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
+            if self.active != Some(idx) {
+                self.pending_full_redraw = true;
+            }
             let previous_focus = self.current_pane_focus_target();
             self.active = Some(idx);
             self.selected = idx;
@@ -1145,6 +1148,14 @@ impl AppState {
 
         let previous_focus = self.current_pane_focus_target();
         let workspace_changed = self.active != Some(ws_idx);
+        let tab_changed = workspace_changed
+            || self
+                .workspaces
+                .get(ws_idx)
+                .is_some_and(|ws| ws.active_tab_index() != tab_idx);
+        if tab_changed {
+            self.pending_full_redraw = true;
+        }
         self.active = Some(ws_idx);
         self.selected = ws_idx;
         let workspace_id = self.workspaces[ws_idx].id.clone();
@@ -4176,6 +4187,52 @@ mod tests {
         state.switch_workspace(2);
         assert_eq!(state.active, Some(2));
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn switch_workspace_requests_full_redraw_only_when_active_changes() {
+        let mut state = app_with_workspaces(&["a", "b", "c"]);
+        state.switch_workspace(0);
+        state.pending_full_redraw = false;
+
+        state.switch_workspace(0);
+        assert!(
+            !state.pending_full_redraw,
+            "switching to the already-active workspace should not force a full redraw"
+        );
+
+        state.switch_workspace(1);
+        assert!(
+            state.pending_full_redraw,
+            "switching to a different workspace should force a full redraw to avoid a staircase"
+        );
+    }
+
+    #[test]
+    fn switch_workspace_tab_requests_full_redraw_on_workspace_or_tab_change() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+        state.workspaces[0].test_add_tab(Some("second"));
+        state.switch_workspace_tab(0, 0);
+        state.pending_full_redraw = false;
+
+        assert!(state.switch_workspace_tab(0, 0));
+        assert!(
+            !state.pending_full_redraw,
+            "switching to the already-active tab should not force a full redraw"
+        );
+
+        assert!(state.switch_workspace_tab(0, 1));
+        assert!(
+            state.pending_full_redraw,
+            "switching to a different tab in the same workspace should force a full redraw"
+        );
+
+        state.pending_full_redraw = false;
+        assert!(state.switch_workspace_tab(1, 0));
+        assert!(
+            state.pending_full_redraw,
+            "switching workspace via switch_workspace_tab should force a full redraw"
+        );
     }
 
     #[test]

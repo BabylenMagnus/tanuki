@@ -667,6 +667,14 @@ impl HeadlessServer {
                 crate::render_prof::event("full_render_cause.default_workspace");
             }
 
+            if self.app.state.pending_full_redraw {
+                self.app.state.pending_full_redraw = false;
+                self.app.full_redraw_pending = true;
+                needs_render = true;
+                needs_full_render = true;
+                crate::render_prof::event("full_render_cause.workspace_or_tab_switch");
+            }
+
             self.cancel_inactive_pane_graphics_streams();
 
             self.drain_client_config_reload_request();

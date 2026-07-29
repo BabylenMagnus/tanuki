@@ -521,6 +521,7 @@ impl App {
             public_pane_id_aliases: std::collections::HashMap::new(),
             workspaces,
             active,
+            pending_full_redraw: false,
             previous_pane_focus: None,
             selected,
             mode,
@@ -1025,6 +1026,12 @@ impl App {
             }
 
             if self.ensure_default_workspace() {
+                needs_render = true;
+            }
+
+            if self.state.pending_full_redraw {
+                self.state.pending_full_redraw = false;
+                self.full_redraw_pending = true;
                 needs_render = true;
             }
 

@@ -1682,6 +1682,17 @@ pub struct AppState {
     pub(crate) public_pane_id_aliases: std::collections::HashMap<String, PaneId>,
     pub workspaces: Vec<Workspace>,
     pub active: Option<usize>,
+    /// Set by `switch_workspace`/`switch_workspace_tab` whenever the active
+    /// workspace or tab actually changes. Drained by every render loop
+    /// (`App::run`, `HeadlessServer`'s tick) into `App::full_redraw_pending`
+    /// so a workspace/tab switch always forces a full redraw instead of a
+    /// diff-based update, regardless of which code path (keybinding,
+    /// navigator, remote API, worktree action) triggered it. Without this, a
+    /// switch replaces most/all visible pane content but only the API-level
+    /// `handle_tab_focus`/`handle_workspace_focus` call sites requested a
+    /// full redraw, leaving every other switch path prone to a scattered,
+    /// cursor-addressed "staircase" redraw.
+    pub(crate) pending_full_redraw: bool,
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
     pub selected: usize,
     pub mode: Mode,
@@ -2058,6 +2069,7 @@ impl AppState {
             public_pane_id_aliases: std::collections::HashMap::new(),
             workspaces: Vec::new(),
             active: None,
+            pending_full_redraw: false,
             previous_pane_focus: None,
             selected: 0,
             mode: Mode::Navigate,

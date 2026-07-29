@@ -77,6 +77,9 @@ impl App {
         if self.state.workspaces.get(index).is_none() {
             return workspace_not_found(id, &target.workspace_id);
         }
+        // `switch_workspace` sets `state.pending_full_redraw` itself when the
+        // active workspace actually changes -- avoids the staircase redraw
+        // that diffing a large-area content change produces.
         self.state.switch_workspace(index);
 
         encode_success(
