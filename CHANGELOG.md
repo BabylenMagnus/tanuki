@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.24] - 2026-07-30
+
 ### Added
 - Add protocol version extraction to release manifest generation
 
