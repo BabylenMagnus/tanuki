@@ -2195,18 +2195,22 @@ impl HeadlessServer {
                 // Clipboard writes are client-local side effects. Forward them only to
                 // the foreground client instead of broadcasting to every attached client.
                 let data = base64::engine::general_purpose::STANDARD.encode(content.as_slice());
+                // Only the copy-feedback toast is visible on screen; the clipboard
+                // write itself is a client-local side effect with no render impact.
+                let feedback_before = self.app.state.copy_feedback.clone();
                 if self.send_to_foreground_client(ServerMessage::Clipboard { data }) {
                     self.app.show_clipboard_feedback();
                 }
-                true
+                self.app.state.copy_feedback != feedback_before
             }
             AppEvent::PrefixInputSource { active } => {
                 // Input-source switching is a client-local host side effect; forward it to the
                 // foreground client (which owns the real TIS switch + run-loop pump), like clipboard.
+                // Never touches the rendered ratatui Buffer -- no render impact.
                 self.send_to_foreground_client(ServerMessage::PrefixInputSource {
                     active: *active,
                 });
-                true
+                false
             }
             AppEvent::StateChanged { pane_id, agent, .. } => {
                 // Capture toast before handling.
@@ -2287,6 +2291,7 @@ impl HeadlessServer {
                     None
                 };
 
+                let toast_shown = toast_msg.is_some();
                 if let Some(msg) = toast_msg {
                     self.send_flat_toast_to_foreground_client(
                         toast_notify_kind(self.app.state.toast_config.delivery)
@@ -2295,7 +2300,11 @@ impl HeadlessServer {
                     );
                 }
 
-                true
+                // Only render if the pane's effective state/agent label actually
+                // changed, or a toast was shown -- both are already computed above.
+                next_state != prev_state
+                    || next_agent_label != prev_agent_label
+                    || toast_shown
             }
             AppEvent::HookStateReported {
                 pane_id,
@@ -2379,6 +2388,7 @@ impl HeadlessServer {
                     None
                 };
 
+                let toast_shown = toast_msg.is_some();
                 if let Some(msg) = toast_msg {
                     self.send_flat_toast_to_foreground_client(
                         toast_notify_kind(self.app.state.toast_config.delivery)
@@ -2387,7 +2397,9 @@ impl HeadlessServer {
                     );
                 }
 
-                true
+                next_state != prev_state
+                    || next_agent_label != prev_agent_label
+                    || toast_shown
             }
             AppEvent::UpdateReady {
                 version,
@@ -8753,7 +8765,10 @@ next_tab = ""
             content: b"test".to_vec(),
         });
 
-        assert!(changed);
+        assert!(
+            !changed,
+            "no copy-feedback toast was shown, so nothing visible changed"
+        );
         assert!(
             server.app.state.copy_feedback.is_none(),
             "clipboard feedback should only show when a foreground client can receive the write"
@@ -8784,7 +8799,10 @@ next_tab = ""
             content: b"test".to_vec(),
         });
 
-        assert!(changed);
+        assert!(
+            !changed,
+            "no copy-feedback toast was shown, so nothing visible changed"
+        );
         assert!(
             server.app.state.copy_feedback.is_none(),
             "clipboard feedback should only show after the foreground client receives the write"
@@ -8836,7 +8854,10 @@ next_tab = ""
         let changed = server
             .handle_internal_event_with_forwarding(AppEvent::PrefixInputSource { active: true });
 
-        assert!(changed);
+        assert!(
+            !changed,
+            "prefix input source switching is a client-local side effect with no render impact"
+        );
         match read_server_message(
             foreground_control_rx
                 .recv_timeout(Duration::from_millis(100))
