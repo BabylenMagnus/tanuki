@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add diagnostic logging for full redraw events in client loop
+
 ## [0.1.34] - 2026-07-30
 
 ### Added
