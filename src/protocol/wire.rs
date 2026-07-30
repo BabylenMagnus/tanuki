@@ -456,7 +456,7 @@ pub struct CursorState {
 }
 
 /// A rendered frame to be displayed by the client.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct FrameData {
     /// Cells in row-major order. Length must equal `width * height`.
     pub cells: Vec<CellData>,
@@ -470,6 +470,16 @@ pub struct FrameData {
     pub hyperlinks: Vec<String>,
     /// Kitty graphics protocol bytes to apply after the text frame.
     pub graphics: Vec<u8>,
+    /// Whether the server built this frame as a full, from-scratch redraw
+    /// rather than a patch applied to previously-sent state (e.g. on
+    /// workspace/tab switch). Clients must force an atomic full-screen blit
+    /// (not a cell-diff against their locally cached frame) when this is
+    /// true -- otherwise a large logical redraw still gets painted as
+    /// scattered cursor-addressed writes, producing a visible "staircase"
+    /// artifact. `#[serde(default)]` keeps older peers (frames without this
+    /// field) defaulting to `false`, i.e. today's diff-only behavior.
+    #[serde(default)]
+    pub is_full: bool,
 }
 
 impl FrameData {
@@ -529,6 +539,7 @@ impl FrameData {
         }
 
         FrameData {
+            is_full: false,
             cells,
             width,
             height,
@@ -1241,6 +1252,7 @@ mod tests {
     fn server_frame_roundtrip_nontrivial() {
         // Build a 3×2 frame with varied styles (≥2×2).
         let frame = FrameData {
+            is_full: false,
             cells: vec![
                 CellData {
                     symbol: "H".into(),
@@ -1466,6 +1478,7 @@ mod tests {
             .collect();
 
         let frame = FrameData {
+            is_full: false,
             cells,
             width,
             height,
@@ -1804,6 +1817,7 @@ mod tests {
     #[test]
     fn frame_data_rejects_mismatched_cell_count() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![
                 CellData {
                     symbol: "X".into(),

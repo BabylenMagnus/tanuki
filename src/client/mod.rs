@@ -1590,12 +1590,13 @@ async fn run_client_loop(
                     } else {
                         frame_data
                     };
+                    let force_full = frame_data.is_full;
                     let encoded = if state.draw_host_cursor {
                         state
                             .blit_encoder
-                            .encode_with_suppressed_visible_cursor(&frame_data, false)
+                            .encode_with_suppressed_visible_cursor(&frame_data, force_full)
                     } else {
-                        state.blit_encoder.encode(&frame_data, false)
+                        state.blit_encoder.encode(&frame_data, force_full)
                     };
                     let mut stdout = io::stdout();
                     let graphics = if state.kitty_graphics_enabled {

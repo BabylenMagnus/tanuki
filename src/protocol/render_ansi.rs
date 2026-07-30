@@ -801,6 +801,7 @@ mod tests {
 
     fn make_frame(width: u16, height: u16, cells: Vec<CellData>) -> FrameData {
         FrameData {
+            is_full: false,
             cells,
             width,
             height,
@@ -994,6 +995,7 @@ mod tests {
     #[test]
     fn blit_frame_begins_sync_before_hiding_cursor_after_visible_cursor_repeat() {
         let visible = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1061,6 +1063,7 @@ mod tests {
     #[test]
     fn blit_frame_can_repeat_final_cursor_state_after_synchronized_output() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1101,6 +1104,7 @@ mod tests {
     #[test]
     fn blit_frame_can_skip_final_cursor_state_after_synchronized_output() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1141,6 +1145,7 @@ mod tests {
     #[test]
     fn drawn_cursor_reverses_visible_cursor_cell() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1178,6 +1183,7 @@ mod tests {
     #[test]
     fn drawn_cursor_ignores_hidden_cursor() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1197,6 +1203,7 @@ mod tests {
     #[test]
     fn blit_frame_emits_cursor_shape_before_visibility_without_touching_ime_anchor() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1244,6 +1251,7 @@ mod tests {
     #[test]
     fn blit_frame_repeats_explicit_hidden_cursor_anchor_after_synchronized_output() {
         let visible = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1257,6 +1265,7 @@ mod tests {
             graphics: Vec::new(),
         };
         let hidden = FrameData {
+            is_full: false,
             cells: vec![make_cell("B", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1475,8 +1484,39 @@ mod tests {
     }
 
     #[test]
+    fn encoder_honors_force_full_even_when_only_one_cell_changed() {
+        // Reproduces the "staircase" bug: a server-marked full redraw
+        // (`FrameData::is_full`) must reach `BlitEncoder::encode` as
+        // `force_full`, not be silently downgraded to a cell-diff just
+        // because most of the frame content happens to be unchanged from
+        // what the client last painted.
+        let encoder = BlitEncoder::new();
+        let first = make_frame(2, 2, vec![make_cell("A", 0, 0, 0); 4]);
+        let baseline = encoder.encode(&first, false);
+        let mut committed = BlitEncoder::new();
+        committed.commit(first, baseline);
+
+        let mut cells = vec![make_cell("A", 0, 0, 0); 4];
+        cells[3] = make_cell("B", 0, 0, 0);
+        let second = make_frame(2, 2, cells);
+
+        let diffed = committed.encode(&second, false);
+        assert!(
+            !diffed.bytes.windows(4).any(|w| w == b"\x1b[2J"),
+            "without force_full, a single changed cell should stay a diff"
+        );
+
+        let forced = committed.encode(&second, true);
+        assert!(
+            forced.bytes.windows(4).any(|w| w == b"\x1b[2J"),
+            "force_full must produce a full redraw even when the diff would be tiny"
+        );
+    }
+
+    #[test]
     fn blit_frame_positions_cursor() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1503,6 +1543,7 @@ mod tests {
     #[test]
     fn blit_frame_hides_cursor_when_invisible() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1529,6 +1570,7 @@ mod tests {
     #[test]
     fn blit_frame_no_cursor_hides_cursor() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1551,6 +1593,7 @@ mod tests {
     fn blit_frame_restores_cursor_visibility() {
         // First frame: cursor hidden.
         let prev = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1573,6 +1616,7 @@ mod tests {
 
         // Second frame: cursor visible — should restore visibility.
         let curr = FrameData {
+            is_full: false,
             cells: vec![make_cell("B", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1602,6 +1646,7 @@ mod tests {
     #[test]
     fn blit_frame_positions_cursor_before_showing_it() {
         let prev = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1642,6 +1687,7 @@ mod tests {
     #[test]
     fn blit_frame_parks_hidden_cursor_at_last_visible_position() {
         let visible = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1655,6 +1701,7 @@ mod tests {
             graphics: Vec::new(),
         };
         let hidden = FrameData {
+            is_full: false,
             cells: vec![make_cell("B", 0, 0, 0); 9],
             width: 3,
             height: 3,
@@ -1697,6 +1744,7 @@ mod tests {
     #[test]
     fn blit_frame_parks_hidden_cursor_at_bottom_right_without_history() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0); 6],
             width: 3,
             height: 2,
@@ -1727,6 +1775,7 @@ mod tests {
     #[test]
     fn blit_frame_hides_previous_visible_cursor_when_next_frame_has_none() {
         let prev = FrameData {
+            is_full: false,
             cells: vec![make_cell("A", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1740,6 +1789,7 @@ mod tests {
             graphics: Vec::new(),
         };
         let curr = FrameData {
+            is_full: false,
             cells: vec![make_cell("B", 0, 0, 0)],
             width: 1,
             height: 1,
@@ -1760,6 +1810,7 @@ mod tests {
     #[test]
     fn full_redraw_skips_trailing_cells_covered_by_wide_graphemes() {
         let frame = FrameData {
+            is_full: false,
             cells: vec![
                 make_cell(WIDE_GRAPHEME, 0, 0, 0),
                 make_cell(" ", 0, 0, 0),
@@ -1784,6 +1835,7 @@ mod tests {
     #[test]
     fn diff_redraw_reveals_cells_hidden_by_previous_wide_graphemes() {
         let prev = FrameData {
+            is_full: false,
             cells: vec![
                 make_cell(WIDE_GRAPHEME, 0, 0, 0),
                 make_cell(" ", 0, 0, 0),
@@ -1796,6 +1848,7 @@ mod tests {
             graphics: Vec::new(),
         };
         let curr = FrameData {
+            is_full: false,
             cells: vec![
                 make_cell("A", 0, 0, 0),
                 make_cell(" ", 0, 0, 0),
@@ -1822,6 +1875,7 @@ mod tests {
     #[test]
     fn diff_redraw_skips_new_trailing_cells_covered_by_wide_graphemes() {
         let prev = FrameData {
+            is_full: false,
             cells: vec![
                 make_cell("A", 0, 0, 0),
                 make_cell("B", 0, 0, 0),
@@ -1834,6 +1888,7 @@ mod tests {
             graphics: Vec::new(),
         };
         let curr = FrameData {
+            is_full: false,
             cells: vec![
                 make_cell(WIDE_GRAPHEME, 0, 0, 0),
                 make_cell(" ", 0, 0, 0),

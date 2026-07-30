@@ -3480,6 +3480,10 @@ impl HeadlessServer {
             retained_fallback!("frame_size_mismatch");
         }
         frame.graphics.clear();
+        // Cloned from the last frame sent, which may itself have been a full
+        // redraw (`is_full: true`) -- this path only patches individual pane
+        // cells, so it must never claim to be a from-scratch redraw.
+        frame.is_full = false;
 
         let Some(ws_idx) = self.app.state.active else {
             retained_fallback!("no_active_workspace");
@@ -3693,11 +3697,12 @@ impl HeadlessServer {
                         hyperlinks_started,
                     );
                     let frame_started = crate::render_prof::timer();
-                    let frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+                    let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(
                         &buffer,
                         cursor,
                         &hyperlinks,
                     );
+                    frame.is_full = true;
                     crate::render_prof::duration_since("full_render.frame_build", frame_started);
                     frame
                 }
@@ -3729,11 +3734,12 @@ impl HeadlessServer {
                         hyperlinks_started,
                     );
                     let frame_started = crate::render_prof::timer();
-                    let frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+                    let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(
                         &buffer,
                         cursor,
                         &hyperlinks,
                     );
+                    frame.is_full = true;
                     crate::render_prof::duration_since("full_render.frame_build", frame_started);
                     frame
                 }

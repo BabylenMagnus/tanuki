@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Fixed
+- Fixed the root cause of the "staircase" redraw artifact (partial, top-to-bottom scattered repaints instead of an atomic full-screen paint), which could still appear when switching workspaces/tabs or after any large content change, especially with many panes/agents active. The server-to-client wire protocol (`FrameData`) never actually carried a "this is a full redraw" signal — the client's blit encoder always diffed incoming frames against its last locally cached frame regardless of server intent, so the earlier workspace/tab-switch fix (0.1.8) could never fully reach the client. Added a `FrameData::is_full` field, set it on the server for full-render frames, and made the client (and the server's own terminal-ANSI encoding path) honor it instead of hardcoding a diff-only blit.
+
+## [0.1.9] - 2026-07-30
+
+### Fixed
 - `tanuki update` no longer fails with "The file or directory is not a reparse point" (os error 4390) when `current` or the visible bin dir is a plain directory rather than a junction (e.g. left over from before junction-based installs). The `junction` crate's `exists()` check errors instead of returning `false` for a plain, non-reparse-point directory that fully resolves; that specific error is now treated as "not a junction" so the existing plain-directory handling takes over.
 
 ## [0.1.8] - 2026-07-30

@@ -58,7 +58,7 @@ impl ClientRenderState {
                     crate::render_prof::event("prepare_frame.ansi.skip_current");
                     return None;
                 }
-                let mut encoded = blit_encoder.encode(&frame, false);
+                let mut encoded = blit_encoder.encode(&frame, frame.is_full);
                 crate::render_prof::event("prepare_frame.ansi.changed");
                 crate::render_prof::counter("prepare_frame.ansi.bytes", encoded.bytes.len() as u64);
                 if encoded.full {
