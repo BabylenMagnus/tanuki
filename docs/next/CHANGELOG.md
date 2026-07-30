@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.34] - 2026-07-30
+
 ### Added
 - Track changes from git status refresh for optimized rendering
 
