@@ -100,10 +100,11 @@ impl App {
             } else {
                 self.last_git_remote_status_refresh = Instant::now();
             }
-            if self
+            let changed = self
                 .state
-                .apply_workspace_git_statuses(&self.terminal_runtimes, results)
-            {
+                .apply_workspace_git_statuses(&self.terminal_runtimes, results);
+            self.last_git_status_apply_changed = changed;
+            if changed {
                 self.render_dirty.store(true, Ordering::Release);
                 self.render_notify.notify_one();
             }

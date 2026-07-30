@@ -127,6 +127,14 @@ pub struct App {
     pub(crate) git_refresh_in_flight: bool,
     pub(crate) git_refresh_due_after_in_flight: bool,
     pub(crate) git_status_cache: HashMap<std::path::PathBuf, crate::workspace::GitStatusCacheEntry>,
+    /// Whether the most recently processed `AppEvent::GitStatusRefreshed`
+    /// actually changed any displayed status (vs. a poll tick that found
+    /// nothing new). The background git-status poll fires every ~1.5s
+    /// regardless of repo activity; callers that would otherwise force a
+    /// full render for *every* delivery of this event (see
+    /// `HeadlessServer::handle_internal_event_with_forwarding`) should
+    /// check this instead.
+    pub(crate) last_git_status_apply_changed: bool,
     pub(crate) pending_api_worktree_creates: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_api_worktree_removes: HashMap<String, u64>,
     pub(crate) pending_api_worktree_remove_paths: HashMap<std::path::PathBuf, u64>,
@@ -746,6 +754,7 @@ impl App {
             git_refresh_in_flight: false,
             git_refresh_due_after_in_flight: false,
             git_status_cache: HashMap::new(),
+            last_git_status_apply_changed: false,
             pending_api_worktree_creates: HashMap::new(),
             pending_api_worktree_removes: HashMap::new(),
             pending_api_worktree_remove_paths: HashMap::new(),

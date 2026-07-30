@@ -2458,6 +2458,18 @@ impl HeadlessServer {
 
                 true
             }
+            AppEvent::GitStatusRefreshed { .. } => {
+                // Background git-status poll tick, delivered roughly every
+                // 1.5s regardless of whether the repo actually changed.
+                // Unconditionally forcing a full render here (like the
+                // catch-all below) was the dominant cause of full renders
+                // even at idle -- confirmed via `render.full_cause.diag`
+                // (~90% of idle full-render invokes were this event).
+                // `apply_workspace_git_statuses` already tells us whether
+                // anything displayed actually changed; only render then.
+                self.app.handle_internal_event(ev);
+                self.app.last_git_status_apply_changed
+            }
             _ => {
                 self.app.handle_internal_event(ev);
                 true
