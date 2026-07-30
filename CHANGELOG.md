@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Update changelog and latest.json for version 0.1.24 release
+
 ## [0.1.24] - 2026-07-30
 
 ### Added
