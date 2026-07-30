@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Update changelog and latest.json for version 0.1.24 release
+
+### Changed
+- Bump version to 0.1.25 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.25] - 2026-07-30
 
 ### Added
