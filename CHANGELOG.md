@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.33] - 2026-07-30
+
 ### Added
 - Add debounce delay for initial render to reduce tearing
 
