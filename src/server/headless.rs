@@ -752,7 +752,7 @@ impl HeadlessServer {
             // it -- otherwise a deferred full render could sit unsent if
             // nothing else happens to fire in the meantime.
             let full_render_throttle_deadline = (needs_full_render && !full_render_ready)
-                .then(|| self.app.last_full_render_at)
+                .then_some(self.app.last_full_render_at)
                 .flatten()
                 .map(|last| last + app::MIN_FULL_RENDER_INTERVAL);
             let next_deadline = self
