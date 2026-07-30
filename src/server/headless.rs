@@ -145,6 +145,19 @@ impl RenderImpact {
     }
 }
 
+/// Extracts the enum variant name from a `Debug` representation, e.g.
+/// `PaneDied { pane_id: .. }` -> `"PaneDied"`. Used only for temporary
+/// diagnostic logging (see `TANUKI_RENDER_PROF`-adjacent full-render-cause
+/// investigation) so it doesn't need updating whenever an enum gains a
+/// variant.
+fn debug_variant_name(value: &impl std::fmt::Debug) -> String {
+    let full = format!("{value:?}");
+    full.split(|c: char| c == '{' || c == '(' || c.is_whitespace())
+        .next()
+        .unwrap_or(&full)
+        .to_string()
+}
+
 fn record_render_impact(source: &'static str, impact: RenderImpact) {
     let event = match (source, impact) {
         ("api_requests", RenderImpact::Graphics) => "graphics_render_cause.api_requests",
@@ -790,7 +803,19 @@ impl HeadlessServer {
             match event {
                 LoopEvent::Timer => {}
                 LoopEvent::Internal(ev) => {
+                    // TEMPORARY diagnostic: this select()-driven path forces
+                    // a full render for *any* internal event with no
+                    // RenderImpact classification, unlike the top-of-loop
+                    // batch drain. Logging which variant fires here is how
+                    // we find what's causing frequent/idle full renders.
+                    let variant = debug_variant_name(&ev);
                     if self.handle_internal_event_with_forwarding(ev) {
+                        tracing::info!(
+                            event = "render.full_cause.diag",
+                            source = "select.internal",
+                            variant = %variant,
+                            "full render triggered"
+                        );
                         needs_render = true;
                         needs_full_render = true;
                         needs_graphics_render = false;
@@ -812,9 +837,18 @@ impl HeadlessServer {
                                 needs_graphics_render = false;
                             }
                         }
-                    } else if self.handle_api_request_with_shutdown_check(*msg) {
-                        needs_render = true;
-                        needs_full_render = true;
+                    } else {
+                        let variant = debug_variant_name(&msg.request.method);
+                        if self.handle_api_request_with_shutdown_check(*msg) {
+                            tracing::info!(
+                                event = "render.full_cause.diag",
+                                source = "select.api",
+                                variant = %variant,
+                                "full render triggered"
+                            );
+                            needs_render = true;
+                            needs_full_render = true;
+                        }
                     }
                 }
                 LoopEvent::ServerEvent(ev) => {
@@ -833,9 +867,18 @@ impl HeadlessServer {
                                 needs_graphics_render = false;
                             }
                         }
-                    } else if self.handle_server_event(ev) {
-                        needs_render = true;
-                        needs_full_render = true;
+                    } else {
+                        let variant = debug_variant_name(&ev);
+                        if self.handle_server_event(ev) {
+                            tracing::info!(
+                                event = "render.full_cause.diag",
+                                source = "select.server_event",
+                                variant = %variant,
+                                "full render triggered"
+                            );
+                            needs_render = true;
+                            needs_full_render = true;
+                        }
                     }
                 }
                 LoopEvent::RenderRequested => {
