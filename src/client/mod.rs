@@ -1604,8 +1604,12 @@ async fn run_client_loop(
                     } else {
                         &[]
                     };
-                    let _ =
-                        write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics);
+                    let _ = write_encoded_frame_with_graphics(
+                        &mut stdout,
+                        &encoded.bytes,
+                        graphics,
+                        force_full,
+                    );
                     let _ = stdout.flush();
                     state.blit_encoder.commit(frame_data, encoded);
                 }
@@ -2044,20 +2048,39 @@ fn write_window_title(title: Option<&str>) {
 // Frame output
 // ---------------------------------------------------------------------------
 
+/// DEC private mode 2026 (Synchronized Output): `SYNC_OUTPUT_START` tells a
+/// supporting terminal to hold rendering until `SYNC_OUTPUT_END`, so a full
+/// (clear-and-repaint) frame is applied atomically instead of being visible
+/// mid-draw ("staircase" artifact) -- especially relevant on Windows, where
+/// this crate's usual host-terminal capability query/reply pipeline
+/// (`should_query_host_terminal_theme`) is disabled entirely, so there is no
+/// reliable way to probe support first. Per the mode 2026 spec, an
+/// unsupporting terminal treats an unrecognized private-mode CSI as a no-op,
+/// so wrapping unconditionally is the documented safe default rather than a
+/// gap -- see wiki/tanuki-terminal-staircase-investigation.md.
+const SYNC_OUTPUT_START: &[u8] = b"\x1b[?2026h";
+const SYNC_OUTPUT_END: &[u8] = b"\x1b[?2026l";
+
 fn write_encoded_frame_with_graphics(
     mut writer: impl io::Write,
     encoded: &[u8],
     graphics: &[u8],
+    synchronized: bool,
 ) -> io::Result<()> {
-    writer.write_all(encoded)?;
-    if graphics.is_empty() {
-        return Ok(());
+    if synchronized {
+        writer.write_all(SYNC_OUTPUT_START)?;
     }
-
-    record_received_kitty_graphics(graphics);
-    writer.write_all(b"\x1b7")?;
-    writer.write_all(graphics)?;
-    writer.write_all(b"\x1b8")
+    writer.write_all(encoded)?;
+    if !graphics.is_empty() {
+        record_received_kitty_graphics(graphics);
+        writer.write_all(b"\x1b7")?;
+        writer.write_all(graphics)?;
+        writer.write_all(b"\x1b8")?;
+    }
+    if synchronized {
+        writer.write_all(SYNC_OUTPUT_END)?;
+    }
+    Ok(())
 }
 
 fn contains_kitty_graphics_bytes(bytes: &[u8]) -> bool {
@@ -2427,23 +2450,34 @@ mod tests {
     #[test]
     fn graphics_bytes_are_written_after_blit_with_saved_cursor() {
         let mut output = Vec::new();
-        write_encoded_frame_with_graphics(
-            &mut output,
-            b"\x1b[?2026htext\x1b[?2026lcursor",
-            b"graphics",
-        )
-        .unwrap();
+        write_encoded_frame_with_graphics(&mut output, b"blit-text", b"graphics", false).unwrap();
 
-        assert_eq!(
-            output,
-            b"\x1b[?2026htext\x1b[?2026lcursor\x1b7graphics\x1b8"
-        );
+        assert_eq!(output, b"blit-text\x1b7graphics\x1b8");
     }
 
     #[test]
     fn empty_graphics_writes_only_blit_frame() {
         let mut output = Vec::new();
-        write_encoded_frame_with_graphics(&mut output, b"text", b"").unwrap();
+        write_encoded_frame_with_graphics(&mut output, b"text", b"", false).unwrap();
+
+        assert_eq!(output, b"text");
+    }
+
+    #[test]
+    fn synchronized_frame_is_wrapped_in_dec_2026_around_blit_and_graphics() {
+        let mut output = Vec::new();
+        write_encoded_frame_with_graphics(&mut output, b"text", b"graphics", true).unwrap();
+
+        assert_eq!(
+            output,
+            b"\x1b[?2026htext\x1b7graphics\x1b8\x1b[?2026l"
+        );
+    }
+
+    #[test]
+    fn unsynchronized_frame_has_no_dec_2026_wrapper() {
+        let mut output = Vec::new();
+        write_encoded_frame_with_graphics(&mut output, b"text", b"", false).unwrap();
 
         assert_eq!(output, b"text");
     }
