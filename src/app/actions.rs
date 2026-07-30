@@ -2820,6 +2820,7 @@ impl AppState {
             AppEvent::ClipboardWrite { .. } => Vec::new(),
             AppEvent::PrefixInputSource { .. } => Vec::new(),
             AppEvent::TerminalCwdReported { pane_id, cwd } => {
+                self.last_terminal_cwd_report_changed = false;
                 if !cwd.is_absolute() || !cwd.is_dir() {
                     return Vec::new();
                 }
@@ -2832,7 +2833,9 @@ impl AppState {
                 let Some(terminal) = self.terminals.get_mut(&terminal_id) else {
                     return Vec::new();
                 };
-                if terminal.cwd != cwd {
+                let changed = terminal.cwd != cwd;
+                self.last_terminal_cwd_report_changed = changed;
+                if changed {
                     terminal.cwd = cwd;
                     self.mark_session_dirty();
                 }

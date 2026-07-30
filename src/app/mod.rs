@@ -545,6 +545,7 @@ impl App {
             workspaces,
             active,
             pending_full_redraw: false,
+            last_terminal_cwd_report_changed: false,
             previous_pane_focus: None,
             selected,
             mode,

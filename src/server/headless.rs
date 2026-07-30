@@ -2470,6 +2470,19 @@ impl HeadlessServer {
                 self.app.handle_internal_event(ev);
                 self.app.last_git_status_apply_changed
             }
+            AppEvent::TerminalCwdReported { .. } => {
+                // The PTY reports its cwd (via OSC 7 or a shell hook) on
+                // essentially every prompt redraw, not just on an actual
+                // `cd`. Unconditionally forcing a full render here (like
+                // the catch-all below) was a smaller but still measurable
+                // contributor to full renders even at idle -- see
+                // `render.full_cause.diag` (variant=TerminalCwdReported).
+                // `handle_app_event`'s `TerminalCwdReported` arm already
+                // tells us whether the cwd actually changed; only render
+                // then.
+                self.app.handle_internal_event(ev);
+                self.app.state.last_terminal_cwd_report_changed
+            }
             _ => {
                 self.app.handle_internal_event(ev);
                 true

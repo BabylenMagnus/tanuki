@@ -272,8 +272,10 @@ impl App {
         self.sync_full_lifecycle_authority_detection_pauses();
         if terminal_cwd_reported {
             self.mark_git_status_refresh_due(Instant::now());
-            self.render_dirty.store(true, Ordering::Release);
-            self.render_notify.notify_one();
+            if self.state.last_terminal_cwd_report_changed {
+                self.render_dirty.store(true, Ordering::Release);
+                self.render_notify.notify_one();
+            }
         }
         for update in &pane_updates {
             self.refresh_new_tanuki_toast_context_for_update(update, &previous_toast);

@@ -247,13 +247,21 @@ impl ClientConnection {
 
 pub(crate) fn events_include_interaction(events: &[crate::raw_input::RawInputEvent]) -> bool {
     events.iter().any(|event| {
-        matches!(
-            event,
+        match event {
             crate::raw_input::RawInputEvent::Key(_)
-                | crate::raw_input::RawInputEvent::Mouse(_)
-                | crate::raw_input::RawInputEvent::Paste(_)
-                | crate::raw_input::RawInputEvent::OuterFocusGained
-        )
+            | crate::raw_input::RawInputEvent::Paste(_)
+            | crate::raw_input::RawInputEvent::OuterFocusGained => true,
+            // A bare hover move (no button held) reports on essentially
+            // every pixel the cursor crosses whenever the pane has mouse
+            // tracking enabled -- it was the single largest source of
+            // full-screen redraws even at complete idle (see
+            // `render.full_cause.diag`, variant=ClientInputEvents). Clicks,
+            // drags, and scrolls still count as real interaction.
+            crate::raw_input::RawInputEvent::Mouse(mouse) => {
+                !matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
+            }
+            _ => false,
+        }
     })
 }
 

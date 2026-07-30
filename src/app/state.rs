@@ -1808,6 +1808,14 @@ pub struct AppState {
     /// full redraw, leaving every other switch path prone to a scattered,
     /// cursor-addressed "staircase" redraw.
     pub(crate) pending_full_redraw: bool,
+    /// Whether the most recently processed `AppEvent::TerminalCwdReported`
+    /// actually changed the tracked terminal cwd (vs. a report that matches
+    /// what's already recorded). The PTY reports cwd on essentially every
+    /// prompt redraw, so callers that would otherwise force a full render
+    /// for *every* delivery of this event (see
+    /// `HeadlessServer::handle_internal_event_with_forwarding`) should
+    /// check this instead.
+    pub(crate) last_terminal_cwd_report_changed: bool,
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
     pub selected: usize,
     pub mode: Mode,
@@ -2185,6 +2193,7 @@ impl AppState {
             workspaces: Vec::new(),
             active: None,
             pending_full_redraw: false,
+            last_terminal_cwd_report_changed: false,
             previous_pane_focus: None,
             selected: 0,
             mode: Mode::Navigate,
