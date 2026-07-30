@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Add diagnostic logging for full render causes in headless server
+
+### Changed
+- Bump version to 0.1.30 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.30] - 2026-07-30
 
 ### Added
