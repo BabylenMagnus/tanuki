@@ -1598,6 +1598,23 @@ async fn run_client_loop(
                     } else {
                         state.blit_encoder.encode(&frame_data, force_full)
                     };
+                    // TEMPORARY diagnostic: pinpoint how often the client
+                    // actually blits a full clear+redraw (as opposed to a
+                    // cell-level diff), independent of server-side render
+                    // classification -- see `render.full_cause.diag` on the
+                    // server for the counterpart. The server-side fixes
+                    // (throttle/coalesce/git-status classification) did not
+                    // change the visible "staircase" symptom, so the next
+                    // step is confirming whether the client itself is being
+                    // asked to full-redraw far more often than the server's
+                    // own render.prof counters would suggest.
+                    if force_full {
+                        info!(
+                            event = "client.render.full_cause.diag",
+                            bytes = encoded.bytes.len(),
+                            "client full redraw"
+                        );
+                    }
                     let mut stdout = io::stdout();
                     let graphics = if state.kitty_graphics_enabled {
                         frame_data.graphics.as_slice()
