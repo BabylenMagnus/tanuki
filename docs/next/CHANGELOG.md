@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.31] - 2026-07-30
+
 ### Added
 - Add diagnostic logging for full render causes in headless server
 
