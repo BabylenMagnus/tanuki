@@ -84,6 +84,17 @@ function createExtensionHarness() {
   };
 }
 
+// Mirrors the win32 branch in the shipped integrations (e.g.
+// pi/tanuki-agent-state.ts's `socketEndpoint`) and Rust's own
+// `interprocess::GenericNamespaced` handling in src/ipc.rs: on Windows both
+// sides turn the raw socket path into a `\\.\pipe\<raw path>` named-pipe
+// name. The mock recording server below must listen on that same
+// transformed name -- on real Windows (unlike the `win32`-mocked isolated
+// test above) the client actually connects there, not to the raw path.
+function listenPath(rawPath: string): string {
+  return process.platform === "win32" ? `\\\\.\\pipe\\${rawPath}` : rawPath;
+}
+
 function configureIntegrationEnvironment(recordingSocketPath: string) {
   process.env.TANUKI_ENV = "1";
   process.env.TANUKI_SOCKET_PATH = recordingSocketPath;
@@ -121,7 +132,7 @@ async function startRecordingServer(name: string): Promise<unknown[]> {
   server = recordingServer;
   await new Promise<void>((resolve, reject) => {
     recordingServer.once("error", reject);
-    recordingServer.listen(recordingSocketPath, resolve);
+    recordingServer.listen(listenPath(recordingSocketPath), resolve);
   });
   configureIntegrationEnvironment(recordingSocketPath);
   return requests;
@@ -345,7 +356,7 @@ test("Pi waits for a replacement session report before publishing state", async 
   server = recordingServer;
   await new Promise<void>((resolve, reject) => {
     recordingServer.once("error", reject);
-    recordingServer.listen(recordingSocketPath, resolve);
+    recordingServer.listen(listenPath(recordingSocketPath), resolve);
   });
 
   configureIntegrationEnvironment(recordingSocketPath);
@@ -423,7 +434,7 @@ async function startDroppedFirstResponseServer(name: string) {
   server = recordingServer;
   await new Promise<void>((resolve, reject) => {
     recordingServer.once("error", reject);
-    recordingServer.listen(recordingSocketPath, resolve);
+    recordingServer.listen(listenPath(recordingSocketPath), resolve);
   });
 
   configureIntegrationEnvironment(recordingSocketPath);
