@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add synchronized output support for frame rendering
+
 ## [0.1.31] - 2026-07-30
 
 ### Added
