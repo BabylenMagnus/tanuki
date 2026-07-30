@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Update version to 0.1.27 and enhance changelog notes
+
+### Changed
+- Bump version to 0.1.28 and update changelog entries
+- Populate Unreleased changelog from commits
+
 ## [0.1.28] - 2026-07-30
 
 ### Added
