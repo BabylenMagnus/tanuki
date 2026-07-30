@@ -1,14 +1,24 @@
 {
-  "version": "0.1.36",
+  "version": "0.1.37",
   "protocol": 17,
-  "notes": "### Added\n- Track terminal cwd changes to optimize rendering performance",
+  "notes": "### Added\n- Add performance profiling for layout and draw phases",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.36/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.36/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.36/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.36/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.37": {
+      "notes": "### Added\n- Add performance profiling for layout and draw phases",
+      "protocol": 17,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.37/tanuki-macos-aarch64"
+      }
+    },
     "0.1.36": {
       "notes": "### Added\n- Track terminal cwd changes to optimize rendering performance",
       "protocol": 17,
