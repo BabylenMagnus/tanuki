@@ -78,20 +78,28 @@ def check_docs_translation_parity(docs_root: Path, locales: tuple[str, ...] = DE
                 continue
 
             errors.append(
-                format_outline_error(source, translated, source_outline, translated_outline)
+                format_outline_error(
+                    docs_root, source, translated, source_outline, translated_outline
+                )
             )
 
     return errors
 
 
 def format_outline_error(
+    docs_root: Path,
     source: Path,
     translated: Path,
     source_outline: list[int],
     translated_outline: list[int],
 ) -> str:
+    # Relative, forward-slash paths: readable and stable across platforms,
+    # unlike the absolute native-separator paths `str(Path)` would give on
+    # Windows (backslashes).
+    translated_rel = translated.relative_to(docs_root).as_posix()
+    source_rel = source.relative_to(docs_root).as_posix()
     return (
-        f"{translated}: heading outline differs from {source} "
+        f"{translated_rel}: heading outline differs from {source_rel} "
         f"(English {format_counts(source_outline)}, translated {format_counts(translated_outline)})"
     )
 

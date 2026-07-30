@@ -1,0 +1,8 @@
+# Unified-diff patch files must always use LF line endings — CRLF corrupts
+# the hunk format and `patch`/`git apply` fail to apply them cleanly. Without
+# this, checking out this repo on Windows with `core.autocrlf=true` silently
+# mangles every file under vendor/patches/, breaking the vendored
+# libghostty-vt/portable-pty patch application regardless of the actual patch
+# content — see scripts/test_vendor_libghostty_vt.py and
+# scripts/test_vendor_portable_pty.py.
+*.patch text eol=lf
