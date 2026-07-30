@@ -248,6 +248,23 @@ const SHUTDOWN_API_TIMEOUT: Duration = Duration::from_secs(5);
 /// avoid reintroducing the idle CPU spin.
 const CLIENT_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Short debounce window applied before the *first* render of a fresh batch
+/// (i.e. when the loop was idle -- `needs_render` just flipped from false to
+/// true). Several independent event sources (agent PTY output, spinner
+/// ticks, toast/git-status refresh, client input echo...) commonly fire
+/// within a few milliseconds of each other but are delivered one at a time
+/// through `tokio::select!`. Without this delay the loop renders on the very
+/// first one and then renders again for each follow-up event, each paying
+/// the throttle windows independently -- still visible as tearing even
+/// though each individual render is coalesced/atomic on its own.
+///
+/// This mirrors WezTerm's `mux_output_parser_coalesce_delay_ms` (default
+/// 3ms, "poll a little more once we get some data, so that we can consume
+/// more of the data that is likely to be arriving soon") and Zellij's
+/// `RenderToClients` background-job debounce (10ms). Kept short so it does
+/// not add perceptible input latency on top of `MIN_RENDER_INTERVAL`.
+const RENDER_COALESCE_DELAY: Duration = Duration::from_millis(4);
+
 // ---------------------------------------------------------------------------
 // Headless server
 // ---------------------------------------------------------------------------
@@ -564,6 +581,11 @@ impl HeadlessServer {
         let mut needs_render = true;
         let mut needs_full_render = true;
         let mut needs_graphics_render = false;
+        // When the loop was idle and a batch of events just started (see
+        // `RENDER_COALESCE_DELAY`), this is when the first one landed.
+        // Reset to `None` after every render so the next batch gets its own
+        // fresh debounce window.
+        let mut pending_render_since: Option<Instant> = None;
 
         loop {
             crate::render_prof::event("loop.tick");
@@ -715,8 +737,17 @@ impl HeadlessServer {
             // (see the `continue` below is skipped) and the loop's wait
             // deadline (step 8) is widened to include the throttle window, so
             // same-window causes coalesce into one full frame once it opens.
+            // Start (or continue) this batch's coalesce window. Only armed
+            // once per batch -- stays set across iterations until a render
+            // actually goes out, so later events in the same batch don't
+            // each restart the clock.
+            if needs_render && pending_render_since.is_none() {
+                pending_render_since = Some(now);
+            }
+            let coalesce_ready = pending_render_since
+                .is_none_or(|since| now.duration_since(since) >= RENDER_COALESCE_DELAY);
             let full_render_ready = !needs_full_render || self.app.can_full_render_now(now);
-            if needs_render && self.app.can_render_now(now) && full_render_ready {
+            if needs_render && self.app.can_render_now(now) && full_render_ready && coalesce_ready {
                 crate::render_prof::event("render.attempt");
                 let pty_dirty = self.app.render_dirty.swap(false, Ordering::AcqRel);
                 if pty_dirty {
@@ -754,6 +785,7 @@ impl HeadlessServer {
                 needs_render = false;
                 needs_full_render = false;
                 needs_graphics_render = false;
+                pending_render_since = None;
                 continue;
             }
 
@@ -768,6 +800,14 @@ impl HeadlessServer {
                 .then_some(self.app.last_full_render_at)
                 .flatten()
                 .map(|last| last + app::MIN_FULL_RENDER_INTERVAL);
+            // Same idea for the coalesce window (`RENDER_COALESCE_DELAY`):
+            // if a render is pending only because its debounce hasn't
+            // elapsed yet, wake up right when it does instead of waiting on
+            // some unrelated event.
+            let coalesce_deadline = (needs_render && !coalesce_ready)
+                .then_some(pending_render_since)
+                .flatten()
+                .map(|since| since + RENDER_COALESCE_DELAY);
             let next_deadline = self
                 .app
                 .next_headless_loop_deadline_with_git_refresh(
@@ -779,6 +819,10 @@ impl HeadlessServer {
                 .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL))
                 .map(|deadline| match full_render_throttle_deadline {
                     Some(throttle) => deadline.min(throttle),
+                    None => deadline,
+                })
+                .map(|deadline| match coalesce_deadline {
+                    Some(coalesce) => deadline.min(coalesce),
                     None => deadline,
                 });
             let event = {
