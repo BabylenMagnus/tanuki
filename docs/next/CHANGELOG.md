@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+- Update clipboard and input source handling to reflect local effects
+
+### Changed
+- Bump version to 0.1.38 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.38] - 2026-07-31
 
 ### Fixed
