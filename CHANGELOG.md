@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add performance profiling for layout and draw phases
+
 ## [0.1.36] - 2026-07-31
 
 ### Added
