@@ -1,14 +1,24 @@
 {
-  "version": "0.1.27",
+  "version": "0.1.29",
   "protocol": 17,
-  "notes": "### Added\n- Read changelog notes from CHANGELOG.md in release manifest generation",
+  "notes": "### Added\n- Update version to 0.1.27 and enhance changelog notes\n\n### Changed\n- Bump version to 0.1.28 and update changelog entries\n- Populate Unreleased changelog from commits",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.27/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.27/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.27/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.27/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.29": {
+      "notes": "### Added\n- Update version to 0.1.27 and enhance changelog notes\n\n### Changed\n- Bump version to 0.1.28 and update changelog entries\n- Populate Unreleased changelog from commits",
+      "protocol": 17,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.29/tanuki-macos-aarch64"
+      }
+    },
     "0.1.27": {
       "notes": "### Added\n- Read changelog notes from CHANGELOG.md in release manifest generation",
       "protocol": 17,
