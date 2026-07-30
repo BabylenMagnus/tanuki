@@ -227,6 +227,12 @@ class ChangelogScriptTests(unittest.TestCase):
             tmp.write(content)
         return Path(tmp.name)
 
+    def write_temp_changelog(self, version: str, notes: str) -> Path:
+        tmp = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
+        with tmp:
+            tmp.write(f"# Changelog\n\n## [{version}] - 2026-01-01\n\n{notes}\n")
+        return Path(tmp.name)
+
     def test_checked_in_product_announcement_is_valid_or_null(self) -> None:
         self.assertTrue(DEFAULT_PRODUCT_ANNOUNCEMENT_PATH.is_file())
         load_product_announcement(DEFAULT_PRODUCT_ANNOUNCEMENT_PATH)
@@ -280,22 +286,27 @@ class ChangelogScriptTests(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
 
-    def test_manifest_from_release_payload_uses_release_body_and_asset_urls(self) -> None:
-        manifest = manifest_from_release_payload(
-            {
-                "tagName": "v0.1.1",
-                "isDraft": False,
-                "isPrerelease": False,
-                "body": "### Fixed\n- One\n",
-                "assets": [
-                    {"name": "tanuki-linux-x86_64", "url": "https://example.com/linux-x86_64"},
-                    {"name": "tanuki-linux-aarch64", "url": "https://example.com/linux-aarch64"},
-                    {"name": "tanuki-macos-x86_64", "url": "https://example.com/macos-x86_64"},
-                    {"name": "tanuki-macos-aarch64", "url": "https://example.com/macos-aarch64"},
-                ],
-            },
-            "0.1.1",
-        )
+    def test_manifest_from_release_payload_uses_changelog_notes_and_asset_urls(self) -> None:
+        changelog_path = self.write_temp_changelog("0.1.1", "### Fixed\n- One")
+        try:
+            manifest = manifest_from_release_payload(
+                {
+                    "tagName": "v0.1.1",
+                    "isDraft": False,
+                    "isPrerelease": False,
+                    "body": "**Full Changelog**: https://example.com/compare/v0.1.0...v0.1.1",
+                    "assets": [
+                        {"name": "tanuki-linux-x86_64", "url": "https://example.com/linux-x86_64"},
+                        {"name": "tanuki-linux-aarch64", "url": "https://example.com/linux-aarch64"},
+                        {"name": "tanuki-macos-x86_64", "url": "https://example.com/macos-x86_64"},
+                        {"name": "tanuki-macos-aarch64", "url": "https://example.com/macos-aarch64"},
+                    ],
+                },
+                "0.1.1",
+                changelog_path=changelog_path,
+            )
+        finally:
+            changelog_path.unlink(missing_ok=True)
 
         self.assertEqual(
             manifest,
@@ -313,41 +324,51 @@ class ChangelogScriptTests(unittest.TestCase):
         )
 
     def test_manifest_from_release_payload_uses_explicit_protocol(self) -> None:
-        manifest = manifest_from_release_payload(
-            {
-                "tagName": "v0.1.1",
-                "isDraft": False,
-                "isPrerelease": False,
-                "body": "### Fixed\n- One\n",
-                "assets": [
-                    {"name": "tanuki-linux-x86_64", "url": "https://example.com/linux-x86_64"},
-                    {"name": "tanuki-linux-aarch64", "url": "https://example.com/linux-aarch64"},
-                    {"name": "tanuki-macos-x86_64", "url": "https://example.com/macos-x86_64"},
-                    {"name": "tanuki-macos-aarch64", "url": "https://example.com/macos-aarch64"},
-                ],
-            },
-            "0.1.1",
-            protocol=42,
-        )
-
-        self.assertEqual(manifest["protocol"], 42)
-
-    def test_manifest_from_release_payload_rejects_missing_asset(self) -> None:
-        with self.assertRaisesRegex(ChangelogError, "missing asset tanuki-macos-aarch64"):
-            manifest_from_release_payload(
+        changelog_path = self.write_temp_changelog("0.1.1", "### Fixed\n- One")
+        try:
+            manifest = manifest_from_release_payload(
                 {
                     "tagName": "v0.1.1",
                     "isDraft": False,
                     "isPrerelease": False,
-                    "body": "### Fixed\n- One\n",
+                    "body": "**Full Changelog**: https://example.com/compare/v0.1.0...v0.1.1",
                     "assets": [
                         {"name": "tanuki-linux-x86_64", "url": "https://example.com/linux-x86_64"},
                         {"name": "tanuki-linux-aarch64", "url": "https://example.com/linux-aarch64"},
                         {"name": "tanuki-macos-x86_64", "url": "https://example.com/macos-x86_64"},
+                        {"name": "tanuki-macos-aarch64", "url": "https://example.com/macos-aarch64"},
                     ],
                 },
                 "0.1.1",
+                protocol=42,
+                changelog_path=changelog_path,
             )
+        finally:
+            changelog_path.unlink(missing_ok=True)
+
+        self.assertEqual(manifest["protocol"], 42)
+
+    def test_manifest_from_release_payload_rejects_missing_asset(self) -> None:
+        changelog_path = self.write_temp_changelog("0.1.1", "### Fixed\n- One")
+        try:
+            with self.assertRaisesRegex(ChangelogError, "missing asset tanuki-macos-aarch64"):
+                manifest_from_release_payload(
+                    {
+                        "tagName": "v0.1.1",
+                        "isDraft": False,
+                        "isPrerelease": False,
+                        "body": "**Full Changelog**: https://example.com/compare/v0.1.0...v0.1.1",
+                        "assets": [
+                            {"name": "tanuki-linux-x86_64", "url": "https://example.com/linux-x86_64"},
+                            {"name": "tanuki-linux-aarch64", "url": "https://example.com/linux-aarch64"},
+                            {"name": "tanuki-macos-x86_64", "url": "https://example.com/macos-x86_64"},
+                        ],
+                    },
+                    "0.1.1",
+                    changelog_path=changelog_path,
+                )
+        finally:
+            changelog_path.unlink(missing_ok=True)
 
     def test_ensure_manifest_is_outdated_rejects_same_or_newer_version(self) -> None:
         with self.assertRaisesRegex(ChangelogError, "already at v0.1.1"):

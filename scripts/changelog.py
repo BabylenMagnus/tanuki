@@ -19,6 +19,7 @@ SECTION_RE = re.compile(r"^##\s+(?:\[(?P<bracketed>[^\]]+)\]|(?P<plain>.+?))\s*$
 VERSION_WITH_DATE_RE = re.compile(r"^(?P<version>.+?)\s+-\s+\d{4}-\d{2}-\d{2}$")
 DEFAULT_RELEASE_REPO = "BabylenMagnus/tanuki"
 DEFAULT_LATEST_JSON_PATH = Path("website/latest.json")
+DEFAULT_CHANGELOG_PATH = Path("CHANGELOG.md")
 DEFAULT_PRODUCT_ANNOUNCEMENT_PATH = Path("docs/next/product-announcement.json")
 PROTOCOL_SOURCE_PATH = Path("src/protocol/wire.rs")
 ASSET_TARGETS = (
@@ -300,7 +301,10 @@ def default_release_assets(version: str, repo: str = DEFAULT_RELEASE_REPO) -> di
 
 
 def manifest_from_release_payload(
-    payload: dict[str, Any], version: str, protocol: int | None = None
+    payload: dict[str, Any],
+    version: str,
+    protocol: int | None = None,
+    changelog_path: Path = DEFAULT_CHANGELOG_PATH,
 ) -> dict[str, Any]:
     normalized_version = normalize_version(version)
     tag_name = str(payload.get("tagName") or "")
@@ -313,9 +317,14 @@ def manifest_from_release_payload(
     if payload.get("isPrerelease"):
         raise ChangelogError(f"GitHub release v{normalized_version} is a prerelease")
 
-    notes = str(payload.get("body") or "").strip()
-    if not notes:
-        raise ChangelogError(f"GitHub release v{normalized_version} has empty release notes")
+    # Sourced from CHANGELOG.md, not the GitHub release body: the release is
+    # created with `gh release create --generate-notes`, which only ever
+    # produces a generic "Full Changelog: compare..." link. The curated
+    # CHANGELOG.md section is what release assets' manifest.json embeds
+    # (see .github/scripts/generate_release_manifest.py) and what the in-app
+    # "What's New" (src/update.rs) actually shows, so this must agree with it.
+    changelog_text = changelog_path.read_text(encoding="utf-8")
+    notes = extract_section_body(changelog_text, normalized_version).strip()
 
     assets_list = payload.get("assets")
     if not isinstance(assets_list, list):
