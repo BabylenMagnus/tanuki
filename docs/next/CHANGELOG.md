@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.1.13] - 2026-07-30
+
+### Fixed
+- Panes launched with custom CLI flags (e.g. `claude --dangerously-skip-permissions`) no longer lose them across a native session restore. The restore path saved the pane's original launch argv (`saved_launch_argv`) but never read it back on the native-agent-resume branch, always using the hardcoded per-agent resume template (e.g. `["claude", "--resume", "<id>"]`) verbatim instead. The template now keeps any extra flags from the original launch that it doesn't already set itself. Affects all agents built on the shared native-resume mechanism (claude, codex, copilot, devin, droid, omp, qodercli, cursor, hermes, pi, kilo, mastracode).
+
+## [0.1.12] - 2026-07-30
+
 ### Changed
 - Settings → Keybinds now groups shortcuts into sections (global, navigation, workspaces / tabs, panes) instead of one flat 42-item list, matching the grouping the old standalone read-only keybind-help overlay used before it was unified into this tab. Also added the navigate-mode focus/move bindings (previously not editable here at all), and read-only reference rows for the indexed `1..9` shortcuts (switch workspace/tab, focus agent) and any configured custom commands, so every shortcut that used to be visible in the old overlay is visible again — the indexed and custom-command entries keep their own binding models and aren't edited from this list.
 

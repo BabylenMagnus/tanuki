@@ -528,7 +528,8 @@ fn restore_tab(
         } else {
             startup.restore_plan.clone()
         };
-        if let Some(plan) = pending_native_agent_restore {
+        if let Some(mut plan) = pending_native_agent_restore {
+            plan.argv = merge_persisted_launch_flags(plan.argv, saved_launch_argv.as_deref());
             let terminal_id = TerminalId::alloc();
             let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone())
                 .with_pending_agent_resume_plan(plan);
@@ -726,6 +727,30 @@ fn restore_tab(
         )),
         failed_imports,
     )
+}
+
+/// Appends the user's original extra CLI flags (everything after the binary
+/// name in the pane's saved launch argv, e.g. `--dangerously-skip-permissions`)
+/// onto a native-resume plan's templated argv (e.g. `["claude", "--resume",
+/// "<id>"]`), so a pane launched with custom flags keeps them across a native
+/// session restore instead of coming back "bare". Flags already present in
+/// the templated argv are not duplicated.
+fn merge_persisted_launch_flags(
+    base_argv: Vec<String>,
+    saved_launch_argv: Option<&[String]>,
+) -> Vec<String> {
+    let Some(saved) = saved_launch_argv else {
+        return base_argv;
+    };
+    let extra_flags: Vec<String> = saved
+        .iter()
+        .skip(1)
+        .filter(|flag| !base_argv.contains(flag))
+        .cloned()
+        .collect();
+    let mut argv = base_argv;
+    argv.extend(extra_flags);
+    argv
 }
 
 fn pane_restore_startup<'a>(
@@ -1157,6 +1182,123 @@ mod tests {
         assert!(take_restore_plan_for_snapshot(&session, true, &mut resumed).is_none());
 
         assert!(restored_terminal_agent_session(Some(&session), true).is_none());
+    }
+
+    #[test]
+    fn merge_persisted_launch_flags_appends_missing_extra_flags() {
+        let base = vec!["claude".into(), "--resume".into(), "claude-session".into()];
+        let saved = vec![
+            "claude".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+        assert_eq!(
+            merge_persisted_launch_flags(base, Some(&saved)),
+            vec![
+                "claude",
+                "--resume",
+                "claude-session",
+                "--dangerously-skip-permissions"
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_persisted_launch_flags_does_not_duplicate_existing_flags() {
+        let base = vec!["codex".into(), "resume".into(), "codex-session".into()];
+        let saved = vec!["codex".to_string(), "resume".to_string()];
+        assert_eq!(
+            merge_persisted_launch_flags(base, Some(&saved)),
+            vec!["codex", "resume", "codex-session"]
+        );
+    }
+
+    #[test]
+    fn merge_persisted_launch_flags_is_noop_without_saved_argv() {
+        let base = vec!["claude".into(), "--resume".into(), "claude-session".into()];
+        assert_eq!(merge_persisted_launch_flags(base.clone(), None), base);
+    }
+
+    #[tokio::test]
+    async fn restore_preserves_custom_launch_flags_across_native_agent_resume() {
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(
+                        0,
+                        super::super::snapshot::PaneSnapshot {
+                            cwd,
+                            label: Some("claude".into()),
+                            agent_name: Some("claude".into()),
+                            managed_agent_kind: Some("claude".into()),
+                            agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
+                                source: "tanuki:claude".into(),
+                                agent: "claude".into(),
+                                kind: crate::agent_resume::AgentSessionRefKind::Id,
+                                value: "claude-session".into(),
+                            }),
+                            launch_argv: Some(vec![
+                                "claude".into(),
+                                "--dangerously-skip-permissions".into(),
+                            ]),
+                        },
+                    )]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        let plan = terminal
+            .pending_agent_resume_plan
+            .as_ref()
+            .expect("native agent resume should be pending");
+        assert_eq!(
+            plan.argv,
+            vec![
+                "claude",
+                "--resume",
+                "claude-session",
+                "--dangerously-skip-permissions"
+            ]
+        );
     }
 
     #[tokio::test]

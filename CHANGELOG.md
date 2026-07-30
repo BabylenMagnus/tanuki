@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.13] - 2026-07-30
+
+### Fixed
+- Panes launched with custom CLI flags (e.g. `claude --dangerously-skip-permissions`) no longer lose them across a native session restore. The restore path saved the pane's original launch argv (`saved_launch_argv`) but never read it back on the native-agent-resume branch, always using the hardcoded per-agent resume template (e.g. `["claude", "--resume", "<id>"]`) verbatim instead. The template now keeps any extra flags from the original launch that it doesn't already set itself. Affects all agents built on the shared native-resume mechanism (claude, codex, copilot, devin, droid, omp, qodercli, cursor, hermes, pi, kilo, mastracode).
+
 ## [0.1.12] - 2026-07-30
 
 ### Changed
