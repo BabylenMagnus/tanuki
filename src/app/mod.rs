@@ -32,6 +32,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const MIN_RENDER_INTERVAL: Duration = Duration::from_millis(16);
+/// Minimum spacing between two *full* (clear-and-repaint) renders in the
+/// headless server. Deliberately wider than `MIN_RENDER_INTERVAL`: a full
+/// render is expensive to build (serializes the entire screen buffer) and,
+/// when several unrelated causes each request one within the same handful of
+/// milliseconds (spinner, toast, git-status refresh, agent output...), firing
+/// them back-to-back produces competing frames that race the client's
+/// synchronized-output budget -- the "staircase" artifact. Widening the gap
+/// lets same-window causes coalesce into a single full frame instead of each
+/// getting its own. See `HeadlessServer::run`'s render gate.
+pub(crate) const MIN_FULL_RENDER_INTERVAL: Duration = Duration::from_millis(30);
 pub(crate) const ANIMATION_INTERVAL: Duration = Duration::from_millis(16);
 pub(crate) const HEADLESS_ANIMATION_INTERVAL: Duration = Duration::from_millis(128);
 pub(crate) const HEADLESS_ANIMATION_TICK_STEP: u32 = 8;
@@ -141,6 +151,11 @@ pub struct App {
     pub(crate) detached_custom_command_children: Vec<std::process::Child>,
     pub(crate) persist_pane_history: bool,
     pub(crate) last_render_at: Option<Instant>,
+    /// Set only when a *full* render was actually sent — separate from
+    /// `last_render_at` (updated by every render, full or diff) so the
+    /// headless server can throttle full renders on their own, wider,
+    /// interval. See `MIN_FULL_RENDER_INTERVAL`.
+    pub(crate) last_full_render_at: Option<Instant>,
     pub(crate) suppressed_repeat_keys:
         HashSet<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)>,
     pub render_notify: Arc<Notify>,
@@ -757,6 +772,7 @@ impl App {
             selection_highlight_clear_deadline: None,
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
+            last_full_render_at: None,
             suppressed_repeat_keys: HashSet::new(),
             api_rx,
             event_hub,

@@ -689,7 +689,21 @@ impl HeadlessServer {
             self.app.sync_headless_animation_timer(now);
 
             // 7. Render virtually and stream frames.
-            if needs_render && self.app.can_render_now(now) {
+            //
+            // The extra `needs_full_render` check below throttles full
+            // (clear-and-repaint) renders on their own, wider interval
+            // (`MIN_FULL_RENDER_INTERVAL`) instead of the general
+            // `MIN_RENDER_INTERVAL`. Several unrelated causes can each flip
+            // `needs_full_render` within the same few milliseconds (spinner,
+            // toast, git-status refresh, agent PTY output...); without this,
+            // each one bypassed the render gate and produced its own
+            // competing full-screen frame -- the "staircase" artifact. When
+            // throttled, `needs_render`/`needs_full_render` simply stay set
+            // (see the `continue` below is skipped) and the loop's wait
+            // deadline (step 8) is widened to include the throttle window, so
+            // same-window causes coalesce into one full frame once it opens.
+            let full_render_ready = !needs_full_render || self.app.can_full_render_now(now);
+            if needs_render && self.app.can_render_now(now) && full_render_ready {
                 crate::render_prof::event("render.attempt");
                 let pty_dirty = self.app.render_dirty.swap(false, Ordering::AcqRel);
                 if pty_dirty {
@@ -721,6 +735,7 @@ impl HeadlessServer {
                 if !rendered_retained {
                     crate::render_prof::event("full_render.invoke");
                     self.render_and_stream();
+                    self.app.last_full_render_at = Some(now);
                 }
                 self.app.last_render_at = Some(now);
                 needs_render = false;
@@ -730,6 +745,16 @@ impl HeadlessServer {
             }
 
             // 8. Wait for next event.
+            //
+            // If a full render is pending but throttled (`!full_render_ready`
+            // above), make sure the loop actually wakes up once the throttle
+            // window opens instead of relying on some other event to nudge
+            // it -- otherwise a deferred full render could sit unsent if
+            // nothing else happens to fire in the meantime.
+            let full_render_throttle_deadline = (needs_full_render && !full_render_ready)
+                .then(|| self.app.last_full_render_at)
+                .flatten()
+                .map(|last| last + app::MIN_FULL_RENDER_INTERVAL);
             let next_deadline = self
                 .app
                 .next_headless_loop_deadline_with_git_refresh(
@@ -738,7 +763,11 @@ impl HeadlessServer {
                     self.has_app_client(),
                 )
                 .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
-                .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
+                .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL))
+                .map(|deadline| match full_render_throttle_deadline {
+                    Some(throttle) => deadline.min(throttle),
+                    None => deadline,
+                });
             let event = {
                 tokio::select! {
                     maybe_api = self.app.api_rx.recv() => match maybe_api {

@@ -5,7 +5,8 @@ use crossterm::terminal;
 use super::{
     background_update_check_enabled, repeat_key_identity, App, Mode, ANIMATION_INTERVAL,
     AUTO_UPDATE_CHECK_INTERVAL, CONFIG_WATCH_POLL_INTERVAL, GIT_REMOTE_STATUS_REFRESH_INTERVAL,
-    MIN_RENDER_INTERVAL, RESIZE_POLL_INTERVAL, SELECTION_AUTOSCROLL_INTERVAL,
+    MIN_FULL_RENDER_INTERVAL, MIN_RENDER_INTERVAL, RESIZE_POLL_INTERVAL,
+    SELECTION_AUTOSCROLL_INTERVAL,
 };
 use crate::events::AppEvent;
 use crate::workspace::{GitStatusCacheEntry, Workspace, WorkspaceGitStatus};
@@ -503,6 +504,19 @@ impl App {
     pub(crate) fn can_render_now(&self, now: Instant) -> bool {
         match self.last_render_at {
             Some(last_render_at) => now.duration_since(last_render_at) >= MIN_RENDER_INTERVAL,
+            None => true,
+        }
+    }
+
+    /// Like `can_render_now`, but gated on the wider `MIN_FULL_RENDER_INTERVAL`
+    /// and tracked against `last_full_render_at` instead of `last_render_at` --
+    /// see `MIN_FULL_RENDER_INTERVAL`'s doc comment for why full renders need
+    /// their own, longer throttle.
+    pub(crate) fn can_full_render_now(&self, now: Instant) -> bool {
+        match self.last_full_render_at {
+            Some(last_full_render_at) => {
+                now.duration_since(last_full_render_at) >= MIN_FULL_RENDER_INTERVAL
+            }
             None => true,
         }
     }
