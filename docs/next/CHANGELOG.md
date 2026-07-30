@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.14] - 2026-07-30
+
+### Changed
+- Vendored `portable-pty` (Windows ConPTY backend) now exposes the raw handles behind a live pseudoconsole (`PsuedoCon::{handoff_handles,into_handoff_handles,from_handoff_handles}`, `ConPtyMasterPty::into_handoff`/`master_from_handoff`) for cross-process hand-off, laying the groundwork for a Windows equivalent of the existing Unix `server/handoff.rs` self-update path (live session hand-off without killing running shells). This release only adds the capability to the vendored crate; nothing in `tanuki server`/`tanuki update` calls it yet, so there is no user-visible behavior change. Verified empirically against real Windows ConPTY internals with a standalone scratch harness before landing (see `vendor/portable-pty.patches.md`, patch 0003).
+
 ## [0.1.13] - 2026-07-30
 
 ### Fixed

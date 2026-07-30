@@ -69,6 +69,95 @@ impl Drop for PsuedoCon {
     }
 }
 
+/// Mirrors the undocumented `_PseudoConsole` struct that `HPCON` actually
+/// points to (verified against `microsoft/terminal`'s `src/winconpty/winconpty.h`,
+/// and confirmed empirically: duplicating exactly these 3 handles into another
+/// process and heap-reconstructing this struct there produces an `HPCON` that
+/// `ResizePseudoConsole` accepts and that the live shell honors -- see the
+/// `conpty-handoff` scratch experiment referenced in the handoff design notes).
+///
+/// This is not a portable-pty concept; it exists only to support live
+/// hand-off of an owned pseudoconsole to a successor process (e.g. during a
+/// self-update), which requires reaching past the opaque `HPCON` to the raw
+/// kernel handles so they can be duplicated with `DuplicateHandle`.
+#[repr(C)]
+struct PseudoConsoleInternal {
+    h_signal: HANDLE,
+    h_pty_reference: HANDLE,
+    h_conpty_process: HANDLE,
+}
+
+/// The raw handles behind a live `HPCON`, extracted for cross-process
+/// hand-off. Each field is a `HANDLE` value still owned by the process that
+/// extracted it -- the receiving process must `DuplicateHandle` these into
+/// its own handle table before use; the values are meaningless as-is in any
+/// other process.
+#[derive(Debug, Clone, Copy)]
+pub struct PseudoConsoleHandoffHandles {
+    pub signal: HANDLE,
+    pub pty_reference: HANDLE,
+    pub conpty_process: HANDLE,
+}
+
+impl PsuedoCon {
+    /// Reads out the raw handles behind this `HPCON` without taking
+    /// ownership of them or affecting this `PsuedoCon`'s normal lifecycle.
+    /// The caller is responsible for duplicating them into a target process
+    /// before this `PsuedoCon` is dropped (which still calls
+    /// `ClosePseudoConsole` normally, as if `handoff_handles` were never
+    /// called).
+    pub fn handoff_handles(&self) -> PseudoConsoleHandoffHandles {
+        let internal = unsafe { &*(self.con as *const PseudoConsoleInternal) };
+        PseudoConsoleHandoffHandles {
+            signal: internal.h_signal,
+            pty_reference: internal.h_pty_reference,
+            conpty_process: internal.h_conpty_process,
+        }
+    }
+
+    /// Consumes this `PsuedoCon` for hand-off to a successor process,
+    /// returning the same raw handles as [`Self::handoff_handles`] but
+    /// suppressing this instance's `Drop` impl so it does NOT call
+    /// `ClosePseudoConsole` -- only the caller's own, now-transferred-out
+    /// copies of the handles are closed, exactly as validated by
+    /// Experiment 2a in the handoff design notes (owner exits without ever
+    /// calling `ClosePseudoConsole`). Deliberately never calls
+    /// `ClosePseudoConsole` on the hand-off path at all, on any Windows
+    /// version -- that sidesteps the documented pre-Windows-11-24H2
+    /// blocking-wait behavior of that function entirely, rather than
+    /// relying on it behaving safely when other handle-holders still
+    /// exist.
+    pub fn into_handoff_handles(self) -> PseudoConsoleHandoffHandles {
+        let handles = self.handoff_handles();
+        std::mem::forget(self);
+        handles
+    }
+
+    /// Reconstructs a `PsuedoCon` in this process from handles that were
+    /// already `DuplicateHandle`'d into this process's handle table by the
+    /// process that called [`Self::into_handoff_handles`] (or
+    /// [`Self::handoff_handles`]). The returned `PsuedoCon` behaves like any
+    /// other -- its `Drop` impl calls `ClosePseudoConsole` normally, because
+    /// this process is now the legitimate owner going forward.
+    ///
+    /// # Safety
+    /// `handles` must contain valid, already-duplicated-into-this-process
+    /// handle values that together describe a still-live pseudoconsole
+    /// (typically obtained via a prior [`Self::into_handoff_handles`] call
+    /// in another process, transported out-of-band, and duplicated in with
+    /// `DuplicateHandle`).
+    pub unsafe fn from_handoff_handles(handles: PseudoConsoleHandoffHandles) -> Self {
+        let internal = Box::new(PseudoConsoleInternal {
+            h_signal: handles.signal,
+            h_pty_reference: handles.pty_reference,
+            h_conpty_process: handles.conpty_process,
+        });
+        Self {
+            con: Box::into_raw(internal) as HPCON,
+        }
+    }
+}
+
 impl PsuedoCon {
     pub fn new(size: COORD, input: FileDescriptor, output: FileDescriptor) -> Result<Self, Error> {
         let mut con: HPCON = INVALID_HANDLE_VALUE;
@@ -164,5 +253,48 @@ impl PsuedoCon {
         Ok(WinChild {
             proc: Mutex::new(proc),
         })
+    }
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use super::*;
+    use filedescriptor::Pipe;
+
+    /// Same-process round-trip: extract handoff handles from a live
+    /// `PsuedoCon`, reconstruct a second `PsuedoCon` from those exact
+    /// values (valid here without `DuplicateHandle` because it's still the
+    /// same process/handle table), and confirm the reconstructed instance
+    /// can still resize the pseudoconsole. This doesn't exercise the
+    /// cross-process `DuplicateHandle` step (covered by the standalone
+    /// `conpty-handoff` scratch harness instead), but it does catch a
+    /// regression in the `PseudoConsoleInternal` field layout/order, which
+    /// is the part most likely to silently break on a future Windows
+    /// update.
+    #[test]
+    fn handoff_handles_round_trip_reconstructs_usable_hpcon() {
+        let stdin = Pipe::new().expect("stdin pipe");
+        let stdout = Pipe::new().expect("stdout pipe");
+        let con = PsuedoCon::new(COORD { X: 80, Y: 25 }, stdin.read, stdout.write)
+            .expect("CreatePseudoConsole");
+
+        let handles = con.handoff_handles();
+        assert!(!handles.signal.is_null());
+        assert!(!handles.pty_reference.is_null());
+        assert!(!handles.conpty_process.is_null());
+
+        let reconstructed = unsafe { PsuedoCon::from_handoff_handles(handles) };
+        reconstructed
+            .resize(COORD { X: 100, Y: 30 })
+            .expect("resize on reconstructed HPCON should succeed");
+
+        // Both `con` and `reconstructed` now think they own the same
+        // underlying handles. Forget one to avoid a double
+        // ClosePseudoConsole in this same-process test (in the real
+        // cross-process flow, only the successor ever holds a live
+        // PsuedoCon at this point -- the owner already forgot its own via
+        // into_handoff_handles).
+        std::mem::forget(con);
+        drop(reconstructed);
     }
 }

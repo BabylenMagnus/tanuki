@@ -1,0 +1,252 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: herdr maintainers <maintainers@herdr.dev>
+Date: Thu, 30 Jul 2026 00:00:00 +0000
+Subject: [PATCH] expose ConPTY handles for cross-process hand-off
+
+Tanuki's self-update flow needs to replace the running tanuki server
+process without killing the shells running under it. On Windows, the
+PTY backend is ConPTY via portable-pty, whose HPCON/pipe handles are
+not reachable outside the crate -- MasterPty's trait object only
+exposes Read/Write/resize, never the raw kernel handles a successor
+process would need to DuplicateHandle in and keep the session alive.
+
+Adds PsuedoCon::{handoff_handles,into_handoff_handles,from_handoff_handles}
+and ConPtyMasterPty::into_handoff / master_from_handoff, reaching past
+the opaque HPCON to the undocumented _PseudoConsole{hSignal,
+hPtyReference,hConPtyProcess} struct it actually points to (layout
+confirmed against microsoft/terminal's src/winconpty/winconpty.h).
+Verified empirically with a standalone windows-sys scratch harness
+(build 26200 / Windows 11 24H2+): duplicating exactly those 3 handles
+plus the input/output pipe handles into a second process and
+reconstructing this struct there produces a live HPCON that
+ResizePseudoConsole accepts and that the running shell honors, even
+after the original owner process exits -- confirmed via a real resize
+round-trip (mode con: 80x25 -> 90x28) and independently via the
+XTWINOPS `ESC[8;28;90t` sequence conhost itself emitted after the
+resize. This held across all owner teardown orders tested: exiting
+without ever calling ClosePseudoConsole, calling it explicitly, and
+tearing down immediately without waiting for the successor's ack.
+
+The hand-off path is designed to never call ClosePseudoConsole at all,
+on any Windows version -- this sidesteps the documented pre-Windows-11-
+24H2 blocking-wait behavior of that function entirely (untested on
+that range of builds) rather than relying on empirically-observed
+post-24H2 safety. into_handoff / into_handoff_handles use
+std::mem::forget to suppress the normal Close-on-drop path; only the
+caller's own now-transferred-out handle copies are ever closed.
+
+This is additive: nothing about the existing spawn/read/write/resize
+path changes, and nothing calls the new methods unless tanuki's own
+Windows handoff code (not part of this vendored crate) does.
+
+Vendored base: portable-pty 0.9.0
+---
+ vendor/portable-pty/src/win/conpty.rs    | 86 +++++++++++++++++++++++++++++-
+ vendor/portable-pty/src/win/psuedocon.rs | 89 ++++++++++++++++++++++++++++++++
+ 2 files changed, 174 insertions(+), 1 deletion(-)
+
+diff --git a/vendor/portable-pty/src/win/conpty.rs b/vendor/portable-pty/src/win/conpty.rs
+index 0e9a18c..16ed6d1 100644
+--- a/vendor/portable-pty/src/win/conpty.rs
++++ b/vendor/portable-pty/src/win/conpty.rs
+@@ -1,8 +1,9 @@
+ use crate::cmdbuilder::CommandBuilder;
+-use crate::win::psuedocon::PsuedoCon;
++use crate::win::psuedocon::{PseudoConsoleHandoffHandles, PsuedoCon};
+ use crate::{Child, MasterPty, PtyPair, PtySize, PtySystem, SlavePty};
+ use anyhow::Error;
+ use filedescriptor::{FileDescriptor, Pipe};
++use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
+ use std::sync::{Arc, Mutex};
+ use winapi::um::wincon::COORD;
+ 
+@@ -81,6 +82,89 @@ pub struct ConPtySlavePty {
+     inner: Arc<Mutex<Inner>>,
+ }
+ 
++/// The raw state behind a `ConPtyMasterPty`, extracted for cross-process
++/// hand-off (e.g. a self-update replacing the owning process without
++/// killing the shell running under it). Every handle field is still owned
++/// by the process that produced this value -- the receiving process must
++/// `DuplicateHandle` each one into its own handle table (and, for
++/// `readable`/`writable`, reconstruct a `FileDescriptor` via
++/// `FromRawHandle`) before use.
++pub struct PtyHandoffState {
++    pub pty: PseudoConsoleHandoffHandles,
++    pub readable: RawHandle,
++    pub writable: Option<RawHandle>,
++    pub size: PtySize,
++}
++
++impl ConPtyMasterPty {
++    /// Consumes this master for hand-off to a successor process. Requires
++    /// this to be the sole remaining reference to the underlying pty state
++    /// (true once the paired `SlavePty` returned alongside this master by
++    /// `ConPtySystem::openpty` has already been dropped, which is the
++    /// normal lifecycle after `spawn_command` has been called once).
++    ///
++    /// Like [`PsuedoCon::into_handoff_handles`], this deliberately does not
++    /// close anything on the pseudoconsole/pipe path -- ownership of every
++    /// handle is transferred out via [`PtyHandoffState`] and this value is
++    /// forgotten, not dropped. The caller is responsible for duplicating
++    /// the returned handles into the successor process and reconstructing
++    /// state there (e.g. via `PsuedoCon::from_handoff_handles` and
++    /// `FileDescriptor::from_raw_handle`) before this process exits.
++    pub fn into_handoff(self) -> anyhow::Result<PtyHandoffState> {
++        let inner = Arc::try_unwrap(self.inner)
++            .map_err(|_| {
++                anyhow::anyhow!(
++                    "cannot hand off pty: other MasterPty/SlavePty references still exist"
++                )
++            })?
++            .into_inner()
++            .map_err(|_| anyhow::anyhow!("cannot hand off pty: inner mutex was poisoned"))?;
++
++        let pty = inner.con.into_handoff_handles();
++        let readable = inner.readable.as_raw_handle();
++        let writable = inner.writable.as_ref().map(|w| w.as_raw_handle());
++        let size = inner.size.clone();
++
++        // inner.con was already handed off above (its Drop is now a no-op
++        // in effect, since into_handoff_handles forgot it). readable/writable
++        // still have live Drop impls that would CloseHandle the very handles
++        // we just returned by value -- forget them too, mirroring the
++        // pseudoconsole handoff above.
++        std::mem::forget(inner.readable);
++        std::mem::forget(inner.writable);
++
++        Ok(PtyHandoffState {
++            pty,
++            readable,
++            writable,
++            size,
++        })
++    }
++}
++
++/// Reconstructs a `ConPtyMasterPty` (with no paired `SlavePty` -- a
++/// hand-off successor only ever needs read/write/resize access, never
++/// another `spawn_command`) from a [`PtyHandoffState`] whose handles have
++/// already been duplicated into this process's handle table.
++///
++/// # Safety
++/// `state`'s handles must be valid, already-duplicated-into-this-process
++/// values that together describe a still-live pseudoconsole and its pipes.
++pub unsafe fn master_from_handoff(state: PtyHandoffState) -> ConPtyMasterPty {
++    let con = PsuedoCon::from_handoff_handles(state.pty);
++    let readable = FileDescriptor::from_raw_handle(state.readable);
++    let writable = state.writable.map(|h| FileDescriptor::from_raw_handle(h));
++
++    ConPtyMasterPty {
++        inner: Arc::new(Mutex::new(Inner {
++            con,
++            readable,
++            writable,
++            size: state.size,
++        })),
++    }
++}
++
+ impl MasterPty for ConPtyMasterPty {
+     fn resize(&self, size: PtySize) -> anyhow::Result<()> {
+         let mut inner = self.inner.lock().unwrap();
+diff --git a/vendor/portable-pty/src/win/psuedocon.rs b/vendor/portable-pty/src/win/psuedocon.rs
+index 133eab5..b7dbe2a 100644
+--- a/vendor/portable-pty/src/win/psuedocon.rs
++++ b/vendor/portable-pty/src/win/psuedocon.rs
+@@ -69,6 +69,95 @@ impl Drop for PsuedoCon {
+     }
+ }
+ 
++/// Mirrors the undocumented `_PseudoConsole` struct that `HPCON` actually
++/// points to (verified against `microsoft/terminal`'s `src/winconpty/winconpty.h`,
++/// and confirmed empirically: duplicating exactly these 3 handles into another
++/// process and heap-reconstructing this struct there produces an `HPCON` that
++/// `ResizePseudoConsole` accepts and that the live shell honors -- see the
++/// `conpty-handoff` scratch experiment referenced in the handoff design notes).
++///
++/// This is not a portable-pty concept; it exists only to support live
++/// hand-off of an owned pseudoconsole to a successor process (e.g. during a
++/// self-update), which requires reaching past the opaque `HPCON` to the raw
++/// kernel handles so they can be duplicated with `DuplicateHandle`.
++#[repr(C)]
++struct PseudoConsoleInternal {
++    h_signal: HANDLE,
++    h_pty_reference: HANDLE,
++    h_conpty_process: HANDLE,
++}
++
++/// The raw handles behind a live `HPCON`, extracted for cross-process
++/// hand-off. Each field is a `HANDLE` value still owned by the process that
++/// extracted it -- the receiving process must `DuplicateHandle` these into
++/// its own handle table before use; the values are meaningless as-is in any
++/// other process.
++#[derive(Debug, Clone, Copy)]
++pub struct PseudoConsoleHandoffHandles {
++    pub signal: HANDLE,
++    pub pty_reference: HANDLE,
++    pub conpty_process: HANDLE,
++}
++
++impl PsuedoCon {
++    /// Reads out the raw handles behind this `HPCON` without taking
++    /// ownership of them or affecting this `PsuedoCon`'s normal lifecycle.
++    /// The caller is responsible for duplicating them into a target process
++    /// before this `PsuedoCon` is dropped (which still calls
++    /// `ClosePseudoConsole` normally, as if `handoff_handles` were never
++    /// called).
++    pub fn handoff_handles(&self) -> PseudoConsoleHandoffHandles {
++        let internal = unsafe { &*(self.con as *const PseudoConsoleInternal) };
++        PseudoConsoleHandoffHandles {
++            signal: internal.h_signal,
++            pty_reference: internal.h_pty_reference,
++            conpty_process: internal.h_conpty_process,
++        }
++    }
++
++    /// Consumes this `PsuedoCon` for hand-off to a successor process,
++    /// returning the same raw handles as [`Self::handoff_handles`] but
++    /// suppressing this instance's `Drop` impl so it does NOT call
++    /// `ClosePseudoConsole` -- only the caller's own, now-transferred-out
++    /// copies of the handles are closed, exactly as validated by
++    /// Experiment 2a in the handoff design notes (owner exits without ever
++    /// calling `ClosePseudoConsole`). Deliberately never calls
++    /// `ClosePseudoConsole` on the hand-off path at all, on any Windows
++    /// version -- that sidesteps the documented pre-Windows-11-24H2
++    /// blocking-wait behavior of that function entirely, rather than
++    /// relying on it behaving safely when other handle-holders still
++    /// exist.
++    pub fn into_handoff_handles(self) -> PseudoConsoleHandoffHandles {
++        let handles = self.handoff_handles();
++        std::mem::forget(self);
++        handles
++    }
++
++    /// Reconstructs a `PsuedoCon` in this process from handles that were
++    /// already `DuplicateHandle`'d into this process's handle table by the
++    /// process that called [`Self::into_handoff_handles`] (or
++    /// [`Self::handoff_handles`]). The returned `PsuedoCon` behaves like any
++    /// other -- its `Drop` impl calls `ClosePseudoConsole` normally, because
++    /// this process is now the legitimate owner going forward.
++    ///
++    /// # Safety
++    /// `handles` must contain valid, already-duplicated-into-this-process
++    /// handle values that together describe a still-live pseudoconsole
++    /// (typically obtained via a prior [`Self::into_handoff_handles`] call
++    /// in another process, transported out-of-band, and duplicated in with
++    /// `DuplicateHandle`).
++    pub unsafe fn from_handoff_handles(handles: PseudoConsoleHandoffHandles) -> Self {
++        let internal = Box::new(PseudoConsoleInternal {
++            h_signal: handles.signal,
++            h_pty_reference: handles.pty_reference,
++            h_conpty_process: handles.conpty_process,
++        });
++        Self {
++            con: Box::into_raw(internal) as HPCON,
++        }
++    }
++}
++
+ impl PsuedoCon {
+     pub fn new(size: COORD, input: FileDescriptor, output: FileDescriptor) -> Result<Self, Error> {
+         let mut con: HPCON = INVALID_HANDLE_VALUE;
