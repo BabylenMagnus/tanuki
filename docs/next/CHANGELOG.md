@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Track terminal cwd changes to optimize rendering performance
+
 ## [0.1.35] - 2026-07-30
 
 ### Added
