@@ -24,6 +24,16 @@ ASSET_TARGETS = [
     "tanuki-macos-aarch64",
 ]
 
+PROTOCOL_SOURCE_PATH = pathlib.Path("src/protocol/wire.rs")
+
+
+def read_protocol_version() -> int:
+    content = PROTOCOL_SOURCE_PATH.read_text(encoding="utf-8")
+    match = re.search(r"pub const PROTOCOL_VERSION: u32 = (\d+);", content)
+    if not match:
+        raise SystemExit(f"could not read PROTOCOL_VERSION from {PROTOCOL_SOURCE_PATH}")
+    return int(match.group(1))
+
 
 def changelog_notes_for(version: str) -> str:
     text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -58,6 +68,7 @@ def main() -> None:
 
     manifest = {
         "version": version,
+        "protocol": read_protocol_version(),
         "notes": notes,
         "announcement": None,
         "assets": assets,
