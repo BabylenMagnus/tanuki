@@ -181,7 +181,11 @@ def normalize_assets(value: Any, label: str) -> dict[str, str]:
 
     normalized_assets: dict[str, str] = {}
     for target in ASSET_TARGETS:
-        url = value.get(target)
+        entry = value.get(target)
+        # Mirrors src/update.rs's AssetRef deserializer: an asset may be a
+        # plain URL string, or an object with a required "url" (and optional
+        # "sha256" used for download integrity checks).
+        url = entry.get("url") if isinstance(entry, dict) else entry
         if not isinstance(url, str) or not url.strip():
             raise ChangelogError(f"{label} is missing asset URL for {target}")
         normalized_assets[target] = url.strip()
