@@ -667,7 +667,11 @@ def cmd_verify_release_state(args: argparse.Namespace) -> int:
         expected_manifest,
         args.live_url,
     )
-    ensure_current_release_assets_are_mirrored(live_raw_manifest, args.live_url)
+    # No `ensure_current_release_assets_are_mirrored` here: unlike
+    # website/latest.json, the release-asset manifest.json (from
+    # .github/scripts/generate_release_manifest.py) is a bare per-release
+    # file with no "releases" archive — matches UpdateManifest's `releases`
+    # field in src/update.rs, which is `#[serde(default, ...)]` (optional).
     print(f"live manifest ({args.live_url}): OK")
 
     verify_asset_urls_resolve(dict(expected_manifest["assets"]), "release")
