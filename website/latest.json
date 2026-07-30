@@ -1,14 +1,24 @@
 {
-  "version": "0.1.8",
+  "version": "0.1.11",
   "protocol": 17,
-  "notes": "**Full Changelog**: https://github.com/BabylenMagnus/tanuki/compare/v0.1.7...v0.1.8",
+  "notes": "**Full Changelog**: https://github.com/BabylenMagnus/tanuki/compare/v0.1.10...v0.1.11",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.8/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.8/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.8/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.8/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.11": {
+      "notes": "**Full Changelog**: https://github.com/BabylenMagnus/tanuki/compare/v0.1.10...v0.1.11",
+      "protocol": 17,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.11/tanuki-macos-aarch64"
+      }
+    },
     "0.1.8": {
       "notes": "**Full Changelog**: https://github.com/BabylenMagnus/tanuki/compare/v0.1.7...v0.1.8",
       "protocol": 17,

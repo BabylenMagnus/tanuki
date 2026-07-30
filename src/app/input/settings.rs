@@ -772,7 +772,7 @@ mod tests {
         assert_eq!(
             action,
             Some(SettingsAction::SaveKeybind(
-                crate::app::state::KeybindSetting::PreviousAgent,
+                crate::app::state::KeybindSetting::Help,
                 "ctrl+alt+right".to_string()
             ))
         );
@@ -802,7 +802,7 @@ mod tests {
         assert_eq!(
             action,
             Some(SettingsAction::SaveKeybind(
-                crate::app::state::KeybindSetting::PreviousAgent,
+                crate::app::state::KeybindSetting::Help,
                 "prefix+n".to_string()
             ))
         );

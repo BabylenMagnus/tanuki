@@ -510,33 +510,95 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(search_line), search_area);
 
     let filtered = KeybindSetting::filtered(&app.settings.keybind_search);
-    let items: Vec<ListItem> = filtered
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(idx, setting)| {
-            let binding_label = setting
-                .current_binding(&app.keybinds)
-                .unwrap_or_else(|| "unset".to_string());
-            let value =
-                if app.settings.list.selected == idx && app.settings.keybind_capture.is_some() {
-                    "press a key…".to_string()
-                } else {
-                    binding_label
-                };
-            ListItem::new(Line::from(vec![
-                Span::raw(format!(" {:<24}", setting.label())),
-                Span::styled(value, Style::default().fg(p.accent)),
-            ]))
-        })
-        .collect();
 
-    if items.is_empty() {
+    if filtered.is_empty() && app.keybinds.custom_commands.is_empty() {
         frame.render_widget(
             Paragraph::new(" no matching keybinds").style(Style::default().fg(p.overlay1)),
             list_area,
         );
         return;
+    }
+
+    let header_style = Style::default().fg(p.accent).add_modifier(Modifier::BOLD);
+
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut render_selected = 0;
+    let mut current_group = None;
+    for (idx, setting) in filtered.iter().copied().enumerate() {
+        let group = setting.group();
+        if current_group != Some(group) {
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!(" {}", group.label()),
+                header_style,
+            ))));
+            current_group = Some(group);
+        }
+        if idx == app.settings.list.selected {
+            render_selected = items.len();
+        }
+        let binding_label = setting
+            .current_binding(&app.keybinds)
+            .unwrap_or_else(|| "unset".to_string());
+        let value = if app.settings.list.selected == idx && app.settings.keybind_capture.is_some() {
+            "press a key…".to_string()
+        } else {
+            binding_label
+        };
+        items.push(ListItem::new(Line::from(vec![
+            Span::raw(format!("   {:<22}", setting.label())),
+            Span::styled(value, Style::default().fg(p.accent)),
+        ])));
+    }
+
+    // Indexed 1..9 shortcuts and custom commands use a different editing
+    // model (a range binding, or their own dedicated capture flow) than the
+    // single-key-capture list above, so they're shown as read-only reference
+    // rows rather than folded into the selectable/editable set -- matching
+    // how the old standalone keybind-help overlay displayed them before it
+    // was unified into this tab. Only shown with no active search filter.
+    if app.settings.keybind_search.is_empty() {
+        items.push(ListItem::new(Line::from(Span::styled(
+            " workspaces / tabs (read-only)",
+            header_style,
+        ))));
+        items.push(ListItem::new(Line::from(vec![
+            Span::raw(format!("   {:<22}", "switch workspace 1-9")),
+            Span::styled(
+                indexed_keybind_label(&app.keybinds.switch_workspace),
+                Style::default().fg(p.overlay1),
+            ),
+        ])));
+        items.push(ListItem::new(Line::from(vec![
+            Span::raw(format!("   {:<22}", "focus agent 1-9")),
+            Span::styled(
+                indexed_keybind_label(&app.keybinds.focus_agent),
+                Style::default().fg(p.overlay1),
+            ),
+        ])));
+        items.push(ListItem::new(Line::from(vec![
+            Span::raw(format!("   {:<22}", "switch tab 1-9")),
+            Span::styled(
+                indexed_keybind_label(&app.keybinds.switch_tab),
+                Style::default().fg(p.overlay1),
+            ),
+        ])));
+
+        if !app.keybinds.custom_commands.is_empty() {
+            items.push(ListItem::new(Line::from(Span::styled(
+                " custom (read-only)",
+                header_style,
+            ))));
+            for command in &app.keybinds.custom_commands {
+                let description = command
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| command.command.clone());
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw(format!("   {:<22}", description)),
+                    Span::styled(command.label.clone(), Style::default().fg(p.overlay1)),
+                ])));
+            }
+        }
     }
 
     let list = List::new(items)
@@ -549,8 +611,46 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
         .highlight_symbol(" ▸ ")
         .style(Style::default().fg(p.subtext0));
 
-    let mut list_state = ListState::default().with_selected(Some(app.settings.list.selected));
+    let mut list_state = ListState::default();
+    if !filtered.is_empty() {
+        list_state = list_state.with_selected(Some(render_selected));
+    }
     frame.render_stateful_widget(list, list_area, &mut list_state);
+}
+
+/// Renders an indexed `1..9` keybind range (e.g. `switch_workspace`) the same
+/// way the old keybind-help overlay did: collapse a full `prefix+shift+1..9`
+/// run into `prefix+shift+1..9`, or fall back to listing each configured
+/// binding's label when the run isn't a clean `1..9` sequence.
+fn indexed_keybind_label(bindings: &[crate::config::IndexedKeybind]) -> String {
+    if bindings.is_empty() {
+        return "unset".to_string();
+    }
+
+    let mut parts = Vec::new();
+    let mut index = 0;
+    while index < bindings.len() {
+        if let Some(prefix) = indexed_range_prefix(&bindings[index..]) {
+            parts.push(format!("{prefix}1..9"));
+            index += 9;
+        } else {
+            parts.push(bindings[index].label.clone());
+            index += 1;
+        }
+    }
+    parts.join(" / ")
+}
+
+fn indexed_range_prefix(bindings: &[crate::config::IndexedKeybind]) -> Option<&str> {
+    let run = bindings.get(..9)?;
+    let prefix = run[0].label.strip_suffix('1')?;
+    for (offset, binding) in run.iter().enumerate() {
+        let digit = char::from(b'1' + offset as u8);
+        if binding.label.strip_suffix(digit) != Some(prefix) {
+            return None;
+        }
+    }
+    Some(prefix)
 }
 
 #[cfg(test)]

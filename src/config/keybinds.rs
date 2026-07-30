@@ -291,10 +291,8 @@ pub struct CustomCommandKeybind {
     pub label: String,
     pub command: String,
     pub action: CustomCommandAction,
-    /// Parsed from the user's `config.toml` but currently unread — the read-only
-    /// keybind help overlay that used to display it was removed (unified into
-    /// Settings → Keybinds). Kept on the struct so existing configs keep parsing.
-    #[allow(dead_code)]
+    /// Shown as the descriptive label next to the binding in the Settings →
+    /// Keybinds "custom" read-only rows; falls back to `command` when unset.
     pub description: Option<String>,
     pub width: Option<PopupSize>,
     pub height: Option<PopupSize>,

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.12] - 2026-07-30
+
+### Changed
+- Settings → Keybinds now groups shortcuts into sections (global, navigation, workspaces / tabs, panes) instead of one flat 42-item list, matching the grouping the old standalone read-only keybind-help overlay used before it was unified into this tab. Also added the navigate-mode focus/move bindings (previously not editable here at all), and read-only reference rows for the indexed `1..9` shortcuts (switch workspace/tab, focus agent) and any configured custom commands, so every shortcut that used to be visible in the old overlay is visible again — the indexed and custom-command entries keep their own binding models and aren't edited from this list.
+
 ## [0.1.11] - 2026-07-30
 
 ### Fixed

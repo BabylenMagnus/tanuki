@@ -1067,10 +1067,56 @@ pub(crate) enum KeybindSetting {
     Zoom,
     ResizeMode,
     ToggleSidebar,
+    NavigateWorkspaceUp,
+    NavigateWorkspaceDown,
+    NavigatePaneLeft,
+    NavigatePaneDown,
+    NavigatePaneUp,
+    NavigatePaneRight,
+}
+
+/// Section a `KeybindSetting` is displayed under in the Settings → Keybinds
+/// list. Mirrors the grouping the old standalone read-only keybind-help
+/// overlay used (`global` / `navigation` / `workspaces / tabs` / `panes`)
+/// before it was unified into this editable list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeybindGroup {
+    Global,
+    Navigation,
+    WorkspacesTabs,
+    Panes,
+}
+
+impl KeybindGroup {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Navigation => "navigation",
+            Self::WorkspacesTabs => "workspaces / tabs",
+            Self::Panes => "panes",
+        }
+    }
 }
 
 impl KeybindSetting {
-    pub(crate) const ALL: [Self; 42] = [
+    /// Declared in [`KeybindGroup`] order so a single pass over `ALL` (or a
+    /// filtered subset of it) can render contiguous group headers without
+    /// re-sorting -- see `render_settings_keybinds`.
+    pub(crate) const ALL: [Self; 48] = [
+        // KeybindGroup::Global
+        Self::Help,
+        Self::Settings,
+        Self::Detach,
+        Self::ReloadConfig,
+        Self::OpenNotificationTarget,
+        // KeybindGroup::Navigation
+        Self::NavigateWorkspaceUp,
+        Self::NavigateWorkspaceDown,
+        Self::NavigatePaneLeft,
+        Self::NavigatePaneDown,
+        Self::NavigatePaneUp,
+        Self::NavigatePaneRight,
+        // KeybindGroup::WorkspacesTabs
         Self::PreviousAgent,
         Self::NextAgent,
         Self::PreviousWorkspace,
@@ -1083,14 +1129,12 @@ impl KeybindSetting {
         Self::RenameWorkspace,
         Self::CloseWorkspace,
         Self::Goto,
-        Self::Detach,
-        Self::ReloadConfig,
-        Self::OpenNotificationTarget,
         Self::NewTab,
         Self::RenameTab,
         Self::PreviousTab,
         Self::NextTab,
         Self::CloseTab,
+        // KeybindGroup::Panes
         Self::RenamePane,
         Self::EditScrollback,
         Self::CopyMode,
@@ -1111,9 +1155,62 @@ impl KeybindSetting {
         Self::Zoom,
         Self::ResizeMode,
         Self::ToggleSidebar,
-        Self::Help,
-        Self::Settings,
     ];
+
+    /// Section this setting is displayed under in the Settings → Keybinds
+    /// list. See [`KeybindGroup`].
+    pub(crate) fn group(self) -> KeybindGroup {
+        match self {
+            Self::Help
+            | Self::Settings
+            | Self::Detach
+            | Self::ReloadConfig
+            | Self::OpenNotificationTarget => KeybindGroup::Global,
+            Self::NavigateWorkspaceUp
+            | Self::NavigateWorkspaceDown
+            | Self::NavigatePaneLeft
+            | Self::NavigatePaneDown
+            | Self::NavigatePaneUp
+            | Self::NavigatePaneRight => KeybindGroup::Navigation,
+            Self::PreviousAgent
+            | Self::NextAgent
+            | Self::PreviousWorkspace
+            | Self::NextWorkspace
+            | Self::WorkspacePicker
+            | Self::NewWorkspace
+            | Self::NewWorktree
+            | Self::OpenWorktree
+            | Self::RemoveWorktree
+            | Self::RenameWorkspace
+            | Self::CloseWorkspace
+            | Self::Goto
+            | Self::NewTab
+            | Self::RenameTab
+            | Self::PreviousTab
+            | Self::NextTab
+            | Self::CloseTab => KeybindGroup::WorkspacesTabs,
+            Self::RenamePane
+            | Self::EditScrollback
+            | Self::CopyMode
+            | Self::FocusPaneLeft
+            | Self::FocusPaneDown
+            | Self::FocusPaneUp
+            | Self::FocusPaneRight
+            | Self::SwapPaneLeft
+            | Self::SwapPaneDown
+            | Self::SwapPaneUp
+            | Self::SwapPaneRight
+            | Self::CyclePaneNext
+            | Self::CyclePanePrevious
+            | Self::LastPane
+            | Self::SplitVertical
+            | Self::SplitHorizontal
+            | Self::ClosePane
+            | Self::Zoom
+            | Self::ResizeMode
+            | Self::ToggleSidebar => KeybindGroup::Panes,
+        }
+    }
 
     /// Field name in `KeysConfig` / the `[keys]` TOML table — must match exactly.
     pub(crate) fn field_name(self) -> &'static str {
@@ -1160,6 +1257,12 @@ impl KeybindSetting {
             Self::Zoom => "zoom",
             Self::ResizeMode => "resize_mode",
             Self::ToggleSidebar => "toggle_sidebar",
+            Self::NavigateWorkspaceUp => "navigate_workspace_up",
+            Self::NavigateWorkspaceDown => "navigate_workspace_down",
+            Self::NavigatePaneLeft => "navigate_pane_left",
+            Self::NavigatePaneDown => "navigate_pane_down",
+            Self::NavigatePaneUp => "navigate_pane_up",
+            Self::NavigatePaneRight => "navigate_pane_right",
         }
     }
 
@@ -1207,6 +1310,12 @@ impl KeybindSetting {
             Self::Zoom => "zoom pane",
             Self::ResizeMode => "resize mode",
             Self::ToggleSidebar => "toggle sidebar",
+            Self::NavigateWorkspaceUp => "workspace list up",
+            Self::NavigateWorkspaceDown => "workspace list down",
+            Self::NavigatePaneLeft => "navigate: move focus left",
+            Self::NavigatePaneDown => "navigate: move focus down",
+            Self::NavigatePaneUp => "navigate: move focus up",
+            Self::NavigatePaneRight => "navigate: move focus right",
         }
     }
 
@@ -1254,6 +1363,12 @@ impl KeybindSetting {
             Self::Zoom => keybinds.zoom.label(),
             Self::ResizeMode => keybinds.resize_mode.label(),
             Self::ToggleSidebar => keybinds.toggle_sidebar.label(),
+            Self::NavigateWorkspaceUp => keybinds.navigate.workspace_up.label(),
+            Self::NavigateWorkspaceDown => keybinds.navigate.workspace_down.label(),
+            Self::NavigatePaneLeft => keybinds.navigate.pane_left.label(),
+            Self::NavigatePaneDown => keybinds.navigate.pane_down.label(),
+            Self::NavigatePaneUp => keybinds.navigate.pane_up.label(),
+            Self::NavigatePaneRight => keybinds.navigate.pane_right.label(),
         }
     }
 
