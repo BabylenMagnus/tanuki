@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+- Introduce MIN_FULL_RENDER_INTERVAL for throttling full renders
+- Add release 0.1.14 and update latest version
+
+### Changed
+- Bump version to 0.1.19 and update changelog
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.18 and update changelog
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.17 and update changelog
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.16 and update changelog
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.15 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.19] - 2026-07-30
 
 ### Added
