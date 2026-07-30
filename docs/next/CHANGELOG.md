@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Update version to 0.1.27 and enhance changelog notes
+
 ## [0.1.27] - 2026-07-30
 
 ### Added
