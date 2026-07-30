@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Read changelog notes from CHANGELOG.md in release manifest generation
+
 ## [0.1.26] - 2026-07-30
 
 ### Added
