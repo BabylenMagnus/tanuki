@@ -647,11 +647,17 @@ impl HeadlessServer {
 
             // 6. Handle scheduled tasks.
             let now = Instant::now();
-            if self.handle_scheduled_tasks_headless(now, needs_render) {
+            let (scheduled_changed, scheduled_needs_full) =
+                self.handle_scheduled_tasks_headless(now, needs_render);
+            if scheduled_changed {
                 needs_render = true;
-                needs_full_render = true;
-                needs_graphics_render = false;
-                crate::render_prof::event("full_render_cause.scheduled_tasks");
+                if scheduled_needs_full {
+                    needs_full_render = true;
+                    needs_graphics_render = false;
+                    crate::render_prof::event("full_render_cause.scheduled_tasks");
+                } else {
+                    crate::render_prof::event("render_cause.scheduled_tasks_animation_only");
+                }
             }
 
             if self.handle_deferred_requests_headless() {
@@ -3920,8 +3926,25 @@ impl HeadlessServer {
     ///
     /// Similar to `App::handle_scheduled_tasks` but without resize polling
     /// (the server doesn't have a terminal to resize).
-    fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
+    ///
+    /// Returns `(changed, needs_full)`. `needs_full` is deliberately narrower
+    /// than `changed`: the spinner animation tick fires every
+    /// `HEADLESS_ANIMATION_INTERVAL` (128ms, ~8x/sec) purely to advance
+    /// `spinner_tick`, a single-glyph-per-pane change. Forcing a full
+    /// clear-and-repaint on every tick (as this used to do by folding it into
+    /// the same `changed` flag the caller mapped 1:1 to `needs_full_render`)
+    /// meant any workspace with an actively "thinking" agent produced ~8 full
+    /// screen redraws per second, competing with each other and with PTY
+    /// output for the terminal's synchronized-output budget — the "staircase"
+    /// artifact. The spinner tick alone must only request a normal
+    /// (diff-based) render.
+    fn handle_scheduled_tasks_headless(
+        &mut self,
+        now: Instant,
+        geometry_dirty: bool,
+    ) -> (bool, bool) {
         let mut changed = false;
+        let mut needs_full = false;
 
         self.app.sync_headless_animation_timer(now);
 
@@ -3936,6 +3959,7 @@ impl HeadlessServer {
             self.app.config_diagnostic_deadline = None;
             self.app.state.config_diagnostic = None;
             changed = true;
+            needs_full = true;
         }
 
         if self
@@ -3946,6 +3970,7 @@ impl HeadlessServer {
             self.app.toast_deadline = None;
             self.app.state.toast = None;
             changed = true;
+            needs_full = true;
         }
 
         if self
@@ -3964,6 +3989,7 @@ impl HeadlessServer {
                     self.forward_agent_notification_delivery(delivery);
                 }
                 changed = true;
+                needs_full = true;
             }
         }
 
@@ -3975,6 +4001,7 @@ impl HeadlessServer {
             self.app.copy_feedback_deadline = None;
             self.app.state.copy_feedback = None;
             changed = true;
+            needs_full = true;
         }
 
         if self
@@ -3988,6 +4015,8 @@ impl HeadlessServer {
                 .spinner_tick
                 .wrapping_add(app::HEADLESS_ANIMATION_TICK_STEP);
             self.app.next_animation_tick = Some(now + app::HEADLESS_ANIMATION_INTERVAL);
+            // Spinner-only: a normal diff render repaints just the spinner
+            // glyph(s). Does NOT set `needs_full` -- see doc comment above.
             changed = true;
         }
 
@@ -3998,9 +4027,13 @@ impl HeadlessServer {
         {
             self.app.tick_selection_autoscroll(now);
             changed = true;
+            needs_full = true;
         }
 
-        changed |= self.app.clear_due_selection_highlight(now);
+        if self.app.clear_due_selection_highlight(now) {
+            changed = true;
+            needs_full = true;
+        }
 
         if self.has_app_client() {
             self.app.start_git_status_refresh_if_due(now);
@@ -4037,18 +4070,23 @@ impl HeadlessServer {
         {
             self.app.expire_metadata_at(deadline, now);
             changed = true;
+            needs_full = true;
         }
 
         if geometry_dirty || self.foreground_client_id.is_none() {
             self.app.pending_agent_resume_deadline = None;
         } else {
             self.app.sync_pending_agent_resume_deadline(now);
-            changed |= self
+            if self
                 .app
-                .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
+                .start_pending_agent_resumes(self.app.pending_agent_resume_due(now))
+            {
+                changed = true;
+                needs_full = true;
+            }
         }
         self.app.sync_headless_animation_timer(now);
-        changed
+        (changed, needs_full)
     }
 
     /// Initiates graceful shutdown.
@@ -5929,7 +5967,11 @@ next_tab = ""
             Some("short lived")
         );
 
-        assert!(server.handle_scheduled_tasks_headless(deadline + Duration::from_millis(1), false));
+        assert!(
+            server
+                .handle_scheduled_tasks_headless(deadline + Duration::from_millis(1), false)
+                .0
+        );
 
         assert_eq!(server.app.agent_metadata_deadline, None);
         assert_eq!(
@@ -5965,7 +6007,7 @@ next_tab = ""
         let now = Instant::now();
         server.app.next_agent_manifest_update_check = Some(now - Duration::from_millis(1));
 
-        assert!(!server.handle_scheduled_tasks_headless(now, false));
+        assert!(!server.handle_scheduled_tasks_headless(now, false).0);
         assert_eq!(server.app.next_agent_manifest_update_check, None);
     }
 
@@ -6020,7 +6062,11 @@ next_tab = ""
         });
         server.app.pending_agent_resume_deadline = Some(Instant::now() - Duration::from_millis(1));
 
-        assert!(!server.handle_scheduled_tasks_headless(Instant::now(), true));
+        assert!(
+            !server
+                .handle_scheduled_tasks_headless(Instant::now(), true)
+                .0
+        );
         assert!(server.app.terminal_runtimes.get(&terminal_id).is_none());
         assert!(server
             .app
@@ -6073,7 +6119,11 @@ next_tab = ""
         });
         server.app.pending_agent_resume_deadline = Some(Instant::now() - Duration::from_millis(1));
 
-        assert!(!server.handle_scheduled_tasks_headless(Instant::now(), false));
+        assert!(
+            !server
+                .handle_scheduled_tasks_headless(Instant::now(), false)
+                .0
+        );
         assert!(server.app.terminal_runtimes.get(&terminal_id).is_none());
         assert!(server
             .app
@@ -9179,7 +9229,7 @@ next_tab = ""
             }
         );
         let deadline = server.app.toast_deadline.expect("api toast deadline");
-        assert!(server.handle_scheduled_tasks_headless(deadline, false));
+        assert!(server.handle_scheduled_tasks_headless(deadline, false).0);
         assert!(server.app.state.toast.is_none());
         assert!(server.app.toast_deadline.is_none());
     }
@@ -9306,7 +9356,7 @@ next_tab = ""
             .state
             .next_pending_agent_notification_deadline()
             .expect("pending notification deadline");
-        assert!(server.handle_scheduled_tasks_headless(deadline, false));
+        assert!(server.handle_scheduled_tasks_headless(deadline, false).0);
 
         let first = read_server_message(
             client_control_rx
@@ -9394,7 +9444,7 @@ next_tab = ""
             .state
             .next_pending_agent_notification_deadline()
             .expect("pending notification deadline");
-        assert!(server.handle_scheduled_tasks_headless(deadline, false));
+        assert!(server.handle_scheduled_tasks_headless(deadline, false).0);
 
         let first = read_server_message(
             client_control_rx

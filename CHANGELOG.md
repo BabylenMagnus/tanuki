@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.11] - 2026-07-30
+
+### Fixed
+- Fixed the remaining cause of the "staircase" redraw artifact after 0.1.10: the headless server's scheduled-task handler forced a full clear-and-repaint (`needs_full_render = true`) on *every* kind of background state change, including the spinner animation tick that advances an agent's "thinking" indicator every 128ms (~8x/sec). With multiple panes/agents animating at once, this queued up several full-screen redraws per second that competed with each other and with PTY output for the terminal's synchronized-output budget, producing scattered partial repaints — worse the more panes/agents were active, matching what users reported. The spinner tick now only requests a normal diff-based render; other scheduled-task changes (toasts, notifications, metadata expiry, etc.) keep forcing a full redraw as before.
+
 ## [0.1.10] - 2026-07-30
 
 ### Fixed

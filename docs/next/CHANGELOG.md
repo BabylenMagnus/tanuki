@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Fixed
+- Fixed the remaining cause of the "staircase" redraw artifact after 0.1.10: the headless server's scheduled-task handler forced a full clear-and-repaint (`needs_full_render = true`) on *every* kind of background state change, including the spinner animation tick that advances an agent's "thinking" indicator every 128ms (~8x/sec). With multiple panes/agents animating at once, this queued up several full-screen redraws per second that competed with each other and with PTY output for the terminal's synchronized-output budget, producing scattered partial repaints — worse the more panes/agents were active, matching what users reported. The spinner tick now only requests a normal diff-based render; other scheduled-task changes (toasts, notifications, metadata expiry, etc.) keep forcing a full redraw as before.
+
+## [0.1.10] - 2026-07-30
+
+### Fixed
 - Fixed the root cause of the "staircase" redraw artifact (partial, top-to-bottom scattered repaints instead of an atomic full-screen paint), which could still appear when switching workspaces/tabs or after any large content change, especially with many panes/agents active. The server-to-client wire protocol (`FrameData`) never actually carried a "this is a full redraw" signal — the client's blit encoder always diffed incoming frames against its last locally cached frame regardless of server intent, so the earlier workspace/tab-switch fix (0.1.8) could never fully reach the client. Added a `FrameData::is_full` field, set it on the server for full-render frames, and made the client (and the server's own terminal-ANSI encoding path) honor it instead of hardcoding a diff-only blit.
 
 ## [0.1.9] - 2026-07-30
