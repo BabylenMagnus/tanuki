@@ -1,14 +1,24 @@
 {
-  "version": "0.1.31",
+  "version": "0.1.32",
   "protocol": 17,
-  "notes": "### Added\n- Add diagnostic logging for full render causes in headless server\n\n### Changed\n- Bump version to 0.1.30 and update changelog\n- Populate Unreleased changelog from commits",
+  "notes": "### Added\n- Add synchronized output support for frame rendering",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.31/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.31/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.31/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.31/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.32": {
+      "notes": "### Added\n- Add synchronized output support for frame rendering",
+      "protocol": 17,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.32/tanuki-macos-aarch64"
+      }
+    },
     "0.1.31": {
       "notes": "### Added\n- Add diagnostic logging for full render causes in headless server\n\n### Changed\n- Bump version to 0.1.30 and update changelog\n- Populate Unreleased changelog from commits",
       "protocol": 17,
