@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Fixed
+- `tanuki update` no longer fails with "The file or directory is not a reparse point" (os error 4390) when `current` or the visible bin dir is a plain directory rather than a junction (e.g. left over from before junction-based installs). The `junction` crate's `exists()` check errors instead of returning `false` for a plain, non-reparse-point directory that fully resolves; that specific error is now treated as "not a junction" so the existing plain-directory handling takes over.
+
+## [0.1.8] - 2026-07-30
+
+### Fixed
 - Workspace and tab switches now force a full redraw regardless of which code path triggered them (keybinding, navigator, remote API, worktree action), fixing a scattered "staircase" redraw that could appear when switching workspaces or tabs.
 
 ## [0.1.7] - 2026-07-30

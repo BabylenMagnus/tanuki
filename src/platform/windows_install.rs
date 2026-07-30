@@ -284,8 +284,23 @@ fn set_managed_junction(
         // install path).
         let target_resolves = link_path.exists();
         let is_junction = if target_resolves {
-            junction::exists(link_path)
-                .map_err(|err| format!("failed to inspect {}: {err}", link_path.display()))?
+            match junction::exists(link_path) {
+                Ok(is_junction) => is_junction,
+                // `junction::exists` opens the path as a reparse point and
+                // reads its reparse data; a plain directory that resolves
+                // fine via `Path::exists()` still fails that read with
+                // ERROR_NOT_A_REPARSE_POINT (raw os error 4390) instead of
+                // `Ok(false)`. Treat that specific error as "not a
+                // junction" so plain directories fall through to the
+                // `link_path.is_dir()` branch below, instead of hard-erroring
+                // out of every update whenever `current`/the bin dir was
+                // ever a real directory (e.g. from before junction-based
+                // installs existed).
+                Err(err) if err.raw_os_error() == Some(4390) => false,
+                Err(err) => {
+                    return Err(format!("failed to inspect {}: {err}", link_path.display()))
+                }
+            }
         } else {
             metadata.file_type().is_symlink()
         };
@@ -777,6 +792,29 @@ mod tests {
         set_managed_junction(&link_path, &new_target, &root, false)
             .expect("recreates a dangling junction instead of erroring");
         assert_eq!(junction::get_target(&link_path).unwrap(), new_target);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn set_managed_junction_replaces_plain_directory_not_created_as_junction() {
+        // Reproduces the real `tanuki update` failure: `current` is a plain
+        // (non-reparse-point) directory that fully resolves via
+        // `Path::exists()`, so `junction::exists` doesn't short-circuit on a
+        // missing path -- it opens the directory as a reparse point and
+        // fails to read reparse data with ERROR_NOT_A_REPARSE_POINT instead
+        // of returning `Ok(false)`. That must be treated as "not a
+        // junction," not propagated as a hard error.
+        let root = unique_temp_dir("junction-plain-dir");
+        let link_path = root.join("current");
+        fs::create_dir_all(&link_path).unwrap();
+
+        let target = root.join("release-0.1.8");
+        fs::create_dir_all(&target).unwrap();
+
+        set_managed_junction(&link_path, &target, &root, false)
+            .expect("replaces a plain, non-reparse-point directory with a junction");
+        assert_eq!(junction::get_target(&link_path).unwrap(), target);
 
         let _ = fs::remove_dir_all(&root);
     }

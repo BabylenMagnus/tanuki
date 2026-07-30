@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.9] - 2026-07-30
+
+### Fixed
+- `tanuki update` no longer fails with "The file or directory is not a reparse point" (os error 4390) when `current` or the visible bin dir is a plain directory rather than a junction (e.g. left over from before junction-based installs). The `junction` crate's `exists()` check errors instead of returning `false` for a plain, non-reparse-point directory that fully resolves; that specific error is now treated as "not a junction" so the existing plain-directory handling takes over.
+
 ## [0.1.8] - 2026-07-30
 
 ### Fixed
