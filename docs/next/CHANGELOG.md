@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.20] - 2026-07-30
+
 ### Added
 - Introduce MIN_FULL_RENDER_INTERVAL for throttling full renders
 - Add release 0.1.14 and update latest version
