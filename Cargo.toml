@@ -1,6 +1,6 @@
 [package]
 name = "tanuki"
-version = "0.1.46"
+version = "0.1.47"
 edition = "2021"
 build = "build.rs"
 description = "terminal workspace manager for AI coding agents"
@@ -86,3 +86,4 @@ junction = "1.2.0"
 # winreg is already resolved transitively (via vendor/portable-pty's Windows
 # deps); promoted to a direct dependency to read/write HKCU\Environment\Path.
 winreg = "0.10.1"
+
