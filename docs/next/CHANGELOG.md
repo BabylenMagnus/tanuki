@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Remove RenderedRowCache from GhosttyPaneCore struct
+
 ## [0.1.42] - 2026-07-31
 
 ### Added
