@@ -151,6 +151,11 @@ pub(crate) struct GhosttyPaneCore {
     pub terminal: crate::ghostty::Terminal,
     #[cfg(windows)]
     recent_fallback: windows_recent_fallback::Cache,
+    /// Ghostty dirty-tracking for this pane. Note: `RenderState::update()` also
+    /// consumes *terminal-page* dirty flags on the shared `Terminal`, so a second
+    /// RenderState instance does not fully isolate consumers. The full-render row
+    /// cache stays coherent via `RenderedRowCache::apply_patch_rows` when the
+    /// retained path patches first.
     pub render_state: crate::ghostty::RenderState,
     pub kitty_keyboard: KittyKeyboardTracker,
     pub initial_default_foreground: Option<crate::ghostty::RgbColor>,
@@ -192,6 +197,40 @@ impl RenderedRowCache {
     /// reads are safe to trust.
     fn matches(&self, width: u16, height: u16) -> bool {
         self.area_width == width && self.area_height == height && self.rows.len() == height as usize
+    }
+
+    /// Drop all cached rows so the next `render()` must rebuild from FFI.
+    fn invalidate(&mut self) {
+        self.area_width = 0;
+        self.area_height = 0;
+        self.rows.clear();
+    }
+
+    /// Apply rows produced by `collect_dirty_patch` so a later full `render()`
+    /// does not serve stale cells when ghostty's terminal dirty flags were
+    /// already consumed by the patch path's `RenderState::update()`.
+    fn apply_patch_rows(&mut self, area_width: u16, area_height: u16, patch_rows: &[(u16, Vec<CellData>)]) {
+        if patch_rows.is_empty() {
+            return;
+        }
+        if !self.matches(area_width, area_height) {
+            // Cache dimensions don't match this patch's viewport — safer to
+            // rebuild on the next full render than to write partial rows into
+            // an empty/mismatched cache.
+            self.invalidate();
+            return;
+        }
+        for (y, cells) in patch_rows {
+            let Some(cache_row) = self.rows.get_mut(usize::from(*y)) else {
+                continue;
+            };
+            for (x, cell_data) in cells.iter().enumerate() {
+                if x >= cache_row.len() {
+                    break;
+                }
+                cache_row[x] = ratatui_cell_from_cell_data(cell_data);
+            }
+        }
     }
 
     fn reset_for(&mut self, width: u16, height: u16) {
@@ -2070,21 +2109,25 @@ fn ghostty_collect_dirty_patch(
             return outcome;
         }};
     }
-    macro_rules! fallback {
-        ($reason:literal) => {{
-            crate::render_prof::event(concat!("dirty_fallback.", $reason));
-            finish!(TerminalDirtyPatchOutcome::Fallback);
-        }};
-    }
-
     let host_theme = core.host_terminal_theme;
     let initial_default_foreground = core.initial_default_foreground;
     let initial_default_background = core.initial_default_background;
     let GhosttyPaneCore {
         terminal,
         render_state,
+        rendered_row_cache,
         ..
     } = core;
+    macro_rules! fallback {
+        ($reason:literal) => {{
+            crate::render_prof::event(concat!("dirty_fallback.", $reason));
+            // update() already rebuilt render_state's private cells for the
+            // current Terminal content; only the full-render row cache is stale.
+            // Next full render will re-fill it from those private cells.
+            rendered_row_cache.invalidate();
+            finish!(TerminalDirtyPatchOutcome::Fallback);
+        }};
+    }
     if render_state.update(terminal).is_err() {
         fallback!("render_state_update_error");
     }
@@ -2168,6 +2211,35 @@ fn ghostty_collect_dirty_patch(
         }
         y += 1;
     }
+
+    let dirty_ys: std::collections::HashSet<u16> = patch_rows.iter().map(|(row, _)| *row).collect();
+    if !dirty_ys.is_empty() {
+        let Ok(mut clear_row_iterator) = crate::ghostty::RowIterator::new() else {
+            fallback!("clear_row_iterator_new_error");
+        };
+        let Ok(mut clear_rows) = render_state.populate_row_iterator(&mut clear_row_iterator) else {
+            fallback!("clear_populate_rows_error");
+        };
+        let mut clear_y = 0u16;
+        while clear_y < area_height && clear_rows.next() {
+            if dirty_ys.contains(&clear_y) && clear_rows.clear_dirty().is_err() {
+                fallback!("clear_dirty_error");
+            }
+            clear_y += 1;
+        }
+    }
+    if render_state
+        .set_dirty(crate::ghostty::Dirty::Clean)
+        .is_err()
+    {
+        fallback!("set_clean_error");
+    }
+
+    // Ghostty's RenderState::update() consumes *terminal-page* dirty flags
+    // (shared across all RenderState instances). Keep the full-render row
+    // cache coherent by writing the patched cells into it now — otherwise a
+    // later render() can see "clean" dirty bits and serve stale cache rows.
+    rendered_row_cache.apply_patch_rows(area_width, area_height, &patch_rows);
 
     finish!(TerminalDirtyPatchOutcome::Patch(TerminalDirtyPatch {
         rows: patch_rows
@@ -2602,6 +2674,59 @@ fn cell_data_from_style(symbol: String, style: Style) -> CellData {
         modifier: crate::protocol::modifier_to_u16(style.add_modifier),
         skip: false,
         hyperlink: None,
+    }
+}
+
+/// Inverse of `cell_data_from_style` for keeping `RenderedRowCache` in sync with
+/// the retained-patch path (see `RenderedRowCache::apply_patch_rows`).
+fn ratatui_cell_from_cell_data(data: &CellData) -> ratatui::buffer::Cell {
+    let mut cell = ratatui::buffer::Cell::default();
+    cell.set_symbol(if data.symbol.is_empty() {
+        " "
+    } else {
+        data.symbol.as_str()
+    });
+    cell.set_style(Style {
+        fg: Some(wire_u32_to_color(data.fg)),
+        bg: Some(wire_u32_to_color(data.bg)),
+        add_modifier: ratatui::style::Modifier::from_bits_truncate(data.modifier & !0xF000),
+        ..Style::default()
+    });
+    cell.skip = data.skip;
+    cell
+}
+
+/// Mirrors `protocol::wire::u32_to_color` (that helper is test-only / private).
+fn wire_u32_to_color(val: u32) -> Color {
+    match val >> 24 {
+        0x00 => match val & 0xFF {
+            0x00 => Color::Reset,
+            0x01 => Color::Black,
+            0x02 => Color::Red,
+            0x03 => Color::Green,
+            0x04 => Color::Yellow,
+            0x05 => Color::Blue,
+            0x06 => Color::Magenta,
+            0x07 => Color::Cyan,
+            0x08 => Color::Gray,
+            0x09 => Color::DarkGray,
+            0x0A => Color::LightRed,
+            0x0B => Color::LightGreen,
+            0x0C => Color::LightYellow,
+            0x0D => Color::LightBlue,
+            0x0E => Color::LightMagenta,
+            0x0F => Color::LightCyan,
+            0x10 => Color::White,
+            _ => Color::Reset,
+        },
+        0x01 => Color::Indexed((val & 0xFF) as u8),
+        0x02 => {
+            let r = ((val >> 16) & 0xFF) as u8;
+            let g = ((val >> 8) & 0xFF) as u8;
+            let b = (val & 0xFF) as u8;
+            Color::Rgb(r, g, b)
+        }
+        _ => Color::Reset,
     }
 }
 
@@ -4856,23 +4981,23 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(20, 5);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
 
-        // Initial render populates full_render_state and cache
+        // Initial render seeds render_state + rendered_row_cache.
         terminal
             .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
             .unwrap();
 
-        // Modify line two in PTY
+        // Modify line two in PTY.
         {
             let mut core = pane.core.lock().unwrap();
             core.terminal.write(b"\x1b[2;1Hupdated!");
         }
 
-        // Interleave a collect_dirty_patch call (which consumes render_state's dirty flags)
+        // Interleave collect_dirty_patch: it consumes terminal-page dirty inside
+        // RenderState::update() and must keep rendered_row_cache coherent
+        // (Patch → apply_patch_rows; Fallback → invalidate cache).
         let patch_outcome = pane.collect_dirty_patch(20, 5);
         assert!(!matches!(patch_outcome, TerminalDirtyPatchOutcome::Clean));
 
-        // Call render() again. Because full_render_state is isolated, render() must still see
-        // line two as dirty on full_render_state, updating the UI buffer correctly!
         terminal
             .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
             .unwrap();
@@ -4880,7 +5005,10 @@ mod tests {
         let after_row1: String = (0..20)
             .map(|x| terminal.backend().buffer()[(x, 1)].symbol().to_string())
             .collect();
-        assert!(after_row1.starts_with("updated!"));
+        assert!(
+            after_row1.starts_with("updated!"),
+            "render after collect_dirty_patch must reflect PTY update, got {after_row1:?}"
+        );
     }
 
     #[test]

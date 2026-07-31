@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+- Keep GhosttyPaneTerminal's per-row render cache coherent with `collect_dirty_patch`: successful retained patches now write updated cells into the cache, and fallbacks invalidate it, so full renders no longer serve stale rows after the retained path consumed shared terminal dirty flags (staircase / freeze regression from the v0.1.42–v0.1.45 cache)
+
+### Changed
+- Fall back to an existing prebuilt libghostty-vt artifact when the local Zig rebuild fails (and allow `LIBGHOSTTY_VT_USE_PREBUILT=1` to skip Zig entirely)
+
 ## [0.1.45] - 2026-07-31
 
 ### Added

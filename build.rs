@@ -57,30 +57,62 @@ fn main() {
         .trim()
         .to_string();
 
-    let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
-    let mut command = Command::new(zig);
-    command
-        .arg("build")
-        .arg("-Demit-lib-vt")
-        .arg(format!("-Doptimize={optimize}"))
-        .arg(format!("-Dsimd={simd}"))
-        .arg(format!("-Dtarget={zig_target}"))
-        .arg(format!("-Dversion-string={version_string}"))
-        .arg("-Demit-xcframework=false");
-    if let Ok(system_dir) = env::var("LIBGHOSTTY_VT_ZIG_SYSTEM_DIR") {
-        command.arg("--system").arg(system_dir);
+    let lib_dir = vendored_dir.join("zig-out/lib");
+    let prebuilt = if target.contains("apple-darwin") {
+        lib_dir.join("libghostty-vt.a")
+    } else if target.contains("windows-msvc") {
+        lib_dir.join("ghostty-vt-static.lib")
+    } else {
+        lib_dir.join("libghostty-vt.a")
+    };
+    // Prefer a successful zig rebuild; if zig is broken locally (known Windows path
+    // assertion on some network-drive layouts), fall back to an existing prebuilt.
+    let force_build = env_bool("LIBGHOSTTY_VT_FORCE_BUILD").unwrap_or(false);
+    let skip_if_prebuilt = env_bool("LIBGHOSTTY_VT_USE_PREBUILT").unwrap_or(false);
+    let should_try_zig = force_build || !skip_if_prebuilt || !prebuilt.exists();
+
+    if should_try_zig {
+        let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
+        let mut command = Command::new(zig);
+        command
+            .arg("build")
+            .arg("-Demit-lib-vt")
+            .arg(format!("-Doptimize={optimize}"))
+            .arg(format!("-Dsimd={simd}"))
+            .arg(format!("-Dtarget={zig_target}"))
+            .arg(format!("-Dversion-string={version_string}"))
+            .arg("-Demit-xcframework=false");
+        if let Ok(system_dir) = env::var("LIBGHOSTTY_VT_ZIG_SYSTEM_DIR") {
+            command.arg("--system").arg(system_dir);
+        }
+
+        let status = command
+            .current_dir(&vendored_dir)
+            .status()
+            .expect("failed to execute zig build for vendored libghostty-vt");
+        if !status.success() {
+            if prebuilt.exists() && !force_build {
+                println!(
+                    "cargo:warning=zig build failed ({status}); using prebuilt {}",
+                    prebuilt.display()
+                );
+            } else {
+                panic!("zig build for vendored libghostty-vt failed: {status}");
+            }
+        }
+    } else {
+        println!(
+            "cargo:warning=LIBGHOSTTY_VT_USE_PREBUILT=1; linking {}",
+            prebuilt.display()
+        );
     }
 
-    let status = command
-        .current_dir(&vendored_dir)
-        .status()
-        .expect("failed to execute zig build for vendored libghostty-vt");
     assert!(
-        status.success(),
-        "zig build for vendored libghostty-vt failed: {status}"
+        prebuilt.exists(),
+        "libghostty-vt artifact missing at {}",
+        prebuilt.display()
     );
 
-    let lib_dir = vendored_dir.join("zig-out/lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     if target.contains("apple-darwin") {
         let static_lib = lib_dir.join("libghostty-vt.a");
