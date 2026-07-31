@@ -1,14 +1,24 @@
 {
-  "version": "0.1.40",
+  "version": "0.1.41",
   "protocol": 17,
-  "notes": "### Fixed\n- Update clipboard and input source handling to reflect local effects\n\n### Changed\n- Bump version to 0.1.39 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.38 and update changelog\n- Populate Unreleased changelog from commits",
+  "notes": "### Added\n- Add performance profiling for terminal resize operations",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.40/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.40/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.40/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.40/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.41": {
+      "notes": "### Added\n- Add performance profiling for terminal resize operations",
+      "protocol": 17,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.41/tanuki-macos-aarch64"
+      }
+    },
     "0.1.40": {
       "notes": "### Fixed\n- Update clipboard and input source handling to reflect local effects\n\n### Changed\n- Bump version to 0.1.39 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.38 and update changelog\n- Populate Unreleased changelog from commits",
       "protocol": 17,
