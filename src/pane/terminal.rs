@@ -167,6 +167,40 @@ pub(crate) struct GhosttyPaneCore {
     decscusr_tracker: DecscusrTracker,
     cursor_settle_state: CursorPositionSettleState,
     windows_powershell_prompt_cwd_reporting: bool,
+    rendered_row_cache: RenderedRowCache,
+}
+
+/// Per-row cache of the last rendered `ratatui::buffer::Cell`s for a pane,
+/// consulted by `GhosttyPaneTerminal::render()` to skip the FFI cell walk
+/// for rows ghostty's own dirty-tracking says are unchanged since the last render.
+struct RenderedRowCache {
+    area_width: u16,
+    area_height: u16,
+    rows: Vec<Vec<ratatui::buffer::Cell>>,
+}
+
+impl RenderedRowCache {
+    fn empty() -> Self {
+        Self {
+            area_width: 0,
+            area_height: 0,
+            rows: Vec::new(),
+        }
+    }
+
+    /// Returns true if the cache's dimensions match `width`/`height` and cache-hit
+    /// reads are safe to trust.
+    fn matches(&self, width: u16, height: u16) -> bool {
+        self.area_width == width && self.area_height == height && self.rows.len() == height as usize
+    }
+
+    fn reset_for(&mut self, width: u16, height: u16) {
+        self.area_width = width;
+        self.area_height = height;
+        self.rows.clear();
+        self.rows
+            .resize_with(height as usize, || vec![ratatui::buffer::Cell::default(); width as usize]);
+    }
 }
 
 pub(crate) struct PaneTerminal {
@@ -920,6 +954,7 @@ impl GhosttyPaneTerminal {
                 decscusr_tracker: DecscusrTracker::default(),
                 cursor_settle_state: CursorPositionSettleState::default(),
                 windows_powershell_prompt_cwd_reporting: false,
+                rendered_row_cache: RenderedRowCache::empty(),
             }),
             key_encoder: Mutex::new(key_encoder),
             pending_pty_responses,
@@ -1777,6 +1812,7 @@ impl GhosttyPaneTerminal {
             terminal,
             render_state,
             decscusr_tracker,
+            rendered_row_cache,
             ..
         } = &mut *core;
         if render_state.update(terminal).is_err() {
@@ -1807,12 +1843,28 @@ impl GhosttyPaneTerminal {
             };
             let mut grapheme_bytes = Vec::new();
             let mut symbol_scratch = String::new();
+            let cache_usable = rendered_row_cache.matches(area.width, area.height);
+            if !cache_usable {
+                rendered_row_cache.reset_for(area.width, area.height);
+            }
             let mut y = 0u16;
             while y < area.height && rows.next() {
+                let row_dirty = rows.dirty().unwrap_or(true);
+                if cache_usable && !row_dirty {
+                    crate::render_prof::counter("pane.render.cache_hit_rows", 1);
+                    let cached_row = &rendered_row_cache.rows[y as usize];
+                    for x in 0..area.width {
+                        buf[(area.x + x, area.y + y)] = cached_row[x as usize].clone();
+                    }
+                    y += 1;
+                    continue;
+                }
+                crate::render_prof::counter("pane.render.cache_miss_rows", 1);
                 let mut cells = match rows.populate_cells(&mut row_cells) {
                     Ok(cells) => cells,
                     Err(_) => break,
                 };
+                let cache_row = &mut rendered_row_cache.rows[y as usize];
                 let mut x = 0u16;
                 while x < area.width && cells.next() {
                     let basic = cells.basic_data().unwrap_or_default();
@@ -1842,11 +1894,13 @@ impl GhosttyPaneTerminal {
                     cell.reset();
                     cell.set_symbol(symbol);
                     cell.set_style(style);
+                    cache_row[x as usize] = cell.clone();
                     x += 1;
                 }
                 while x < area.width {
                     let cell = &mut buf[(area.x + x, area.y + y)];
                     ghostty_reset_cell(cell, default_fg, default_bg);
+                    cache_row[x as usize] = cell.clone();
                     x += 1;
                 }
                 y += 1;
@@ -2113,29 +2167,6 @@ fn ghostty_collect_dirty_patch(
             patch_rows.push((y, patch_cells));
         }
         y += 1;
-    }
-
-    let dirty_ys: std::collections::HashSet<u16> = patch_rows.iter().map(|(row, _)| *row).collect();
-    if !dirty_ys.is_empty() {
-        let Ok(mut clear_row_iterator) = crate::ghostty::RowIterator::new() else {
-            fallback!("clear_row_iterator_new_error");
-        };
-        let Ok(mut clear_rows) = render_state.populate_row_iterator(&mut clear_row_iterator) else {
-            fallback!("clear_populate_rows_error");
-        };
-        let mut clear_y = 0u16;
-        while clear_y < area_height && clear_rows.next() {
-            if dirty_ys.contains(&clear_y) && clear_rows.clear_dirty().is_err() {
-                fallback!("clear_dirty_error");
-            }
-            clear_y += 1;
-        }
-    }
-    if render_state
-        .set_dirty(crate::ghostty::Dirty::Clean)
-        .is_err()
-    {
-        fallback!("set_clean_error");
     }
 
     finish!(TerminalDirtyPatchOutcome::Patch(TerminalDirtyPatch {
@@ -4717,6 +4748,139 @@ mod tests {
             assert_eq!(buffer[(x, 0)].symbol(), " ");
             assert_eq!(buffer[(x, 0)].style().bg, Some(Color::Rgb(17, 34, 51)));
         }
+    }
+
+    #[test]
+    fn render_cache_hit_reproduces_identical_frame_when_nothing_changed() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 100).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"line one\r\nline two\r\nline three");
+        }
+
+        let backend = ratatui::backend::TestBackend::new(20, 5);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+        let first: Vec<Vec<(String, ratatui::style::Style)>> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(20)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| (cell.symbol().to_string(), cell.style()))
+                    .collect()
+            })
+            .collect();
+
+        // Second render with no content change in between: every row should
+        // come from the cache-hit path and produce the exact same buffer.
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+        let second: Vec<Vec<(String, ratatui::style::Style)>> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(20)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| (cell.symbol().to_string(), cell.style()))
+                    .collect()
+            })
+            .collect();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn render_cache_hit_leaves_unchanged_rows_untouched_after_partial_update() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 100).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"line one\r\nline two\r\nline three");
+        }
+
+        let backend = ratatui::backend::TestBackend::new(20, 5);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+        let before_row0: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol().to_string())
+            .collect();
+        let before_row2: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 2)].symbol().to_string())
+            .collect();
+
+        // Only row 1 changes
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"\x1b[2;1Hchanged!");
+        }
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+
+        let after_row0: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol().to_string())
+            .collect();
+        let after_row1: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 1)].symbol().to_string())
+            .collect();
+        let after_row2: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 2)].symbol().to_string())
+            .collect();
+
+        assert_eq!(before_row0, after_row0);
+        assert_eq!(before_row2, after_row2);
+        assert!(after_row1.starts_with("changed!"));
+    }
+
+    #[test]
+    fn render_cache_is_isolated_from_collect_dirty_patch() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 100).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"line one\r\nline two\r\nline three");
+        }
+
+        let backend = ratatui::backend::TestBackend::new(20, 5);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+        // Initial render populates full_render_state and cache
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+
+        // Modify line two in PTY
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"\x1b[2;1Hupdated!");
+        }
+
+        // Interleave a collect_dirty_patch call (which consumes render_state's dirty flags)
+        let patch_outcome = pane.collect_dirty_patch(20, 5);
+        assert!(!matches!(patch_outcome, TerminalDirtyPatchOutcome::Clean));
+
+        // Call render() again. Because full_render_state is isolated, render() must still see
+        // line two as dirty on full_render_state, updating the UI buffer correctly!
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+
+        let after_row1: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 1)].symbol().to_string())
+            .collect();
+        assert!(after_row1.starts_with("updated!"));
     }
 
     #[test]
