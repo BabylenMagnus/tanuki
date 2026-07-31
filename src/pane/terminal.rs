@@ -167,6 +167,40 @@ pub(crate) struct GhosttyPaneCore {
     decscusr_tracker: DecscusrTracker,
     cursor_settle_state: CursorPositionSettleState,
     windows_powershell_prompt_cwd_reporting: bool,
+    rendered_row_cache: RenderedRowCache,
+}
+
+/// Per-row cache of the last rendered `ratatui::buffer::Cell`s for a pane,
+/// consulted by `GhosttyPaneTerminal::render()` to skip the FFI cell walk
+/// for rows ghostty's own dirty-tracking says are unchanged since the last render.
+struct RenderedRowCache {
+    area_width: u16,
+    area_height: u16,
+    rows: Vec<Vec<ratatui::buffer::Cell>>,
+}
+
+impl RenderedRowCache {
+    fn empty() -> Self {
+        Self {
+            area_width: 0,
+            area_height: 0,
+            rows: Vec::new(),
+        }
+    }
+
+    /// Returns true if the cache's dimensions match `width`/`height` and cache-hit
+    /// reads are safe to trust.
+    fn matches(&self, width: u16, height: u16) -> bool {
+        self.area_width == width && self.area_height == height && self.rows.len() == height as usize
+    }
+
+    fn reset_for(&mut self, width: u16, height: u16) {
+        self.area_width = width;
+        self.area_height = height;
+        self.rows.clear();
+        self.rows
+            .resize_with(height as usize, || vec![ratatui::buffer::Cell::default(); width as usize]);
+    }
 }
 
 pub(crate) struct PaneTerminal {
@@ -920,6 +954,7 @@ impl GhosttyPaneTerminal {
                 decscusr_tracker: DecscusrTracker::default(),
                 cursor_settle_state: CursorPositionSettleState::default(),
                 windows_powershell_prompt_cwd_reporting: false,
+                rendered_row_cache: RenderedRowCache::empty(),
             }),
             key_encoder: Mutex::new(key_encoder),
             pending_pty_responses,
@@ -1777,6 +1812,7 @@ impl GhosttyPaneTerminal {
             terminal,
             render_state,
             decscusr_tracker,
+            rendered_row_cache,
             ..
         } = &mut *core;
         if render_state.update(terminal).is_err() {
@@ -1807,12 +1843,28 @@ impl GhosttyPaneTerminal {
             };
             let mut grapheme_bytes = Vec::new();
             let mut symbol_scratch = String::new();
+            let cache_usable = rendered_row_cache.matches(area.width, area.height);
+            if !cache_usable {
+                rendered_row_cache.reset_for(area.width, area.height);
+            }
             let mut y = 0u16;
             while y < area.height && rows.next() {
+                let row_dirty = rows.dirty().unwrap_or(true);
+                if cache_usable && !row_dirty {
+                    crate::render_prof::counter("pane.render.cache_hit_rows", 1);
+                    let cached_row = &rendered_row_cache.rows[y as usize];
+                    for x in 0..area.width {
+                        buf[(area.x + x, area.y + y)] = cached_row[x as usize].clone();
+                    }
+                    y += 1;
+                    continue;
+                }
+                crate::render_prof::counter("pane.render.cache_miss_rows", 1);
                 let mut cells = match rows.populate_cells(&mut row_cells) {
                     Ok(cells) => cells,
                     Err(_) => break,
                 };
+                let cache_row = &mut rendered_row_cache.rows[y as usize];
                 let mut x = 0u16;
                 while x < area.width && cells.next() {
                     let basic = cells.basic_data().unwrap_or_default();
@@ -1842,11 +1894,13 @@ impl GhosttyPaneTerminal {
                     cell.reset();
                     cell.set_symbol(symbol);
                     cell.set_style(style);
+                    cache_row[x as usize] = cell.clone();
                     x += 1;
                 }
                 while x < area.width {
                     let cell = &mut buf[(area.x + x, area.y + y)];
                     ghostty_reset_cell(cell, default_fg, default_bg);
+                    cache_row[x as usize] = cell.clone();
                     x += 1;
                 }
                 y += 1;
@@ -4542,6 +4596,103 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let row = (0..16).map(|x| buffer[(x, 0)].symbol()).collect::<String>();
         assert_eq!(row, "restored history");
+    }
+
+    #[test]
+    fn render_cache_hit_reproduces_identical_frame_when_nothing_changed() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 100).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"line one\r\nline two\r\nline three");
+        }
+
+        let backend = ratatui::backend::TestBackend::new(20, 5);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+        let first: Vec<Vec<(String, ratatui::style::Style)>> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(20)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| (cell.symbol().to_string(), cell.style()))
+                    .collect()
+            })
+            .collect();
+
+        // Second render with no content change in between: every row should
+        // come from the cache-hit path (ghostty reports no rows dirty) and
+        // must reproduce the exact same buffer as the first, uncached render.
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+        let second: Vec<Vec<(String, ratatui::style::Style)>> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(20)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| (cell.symbol().to_string(), cell.style()))
+                    .collect()
+            })
+            .collect();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn render_cache_hit_leaves_unchanged_rows_untouched_after_partial_update() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 100).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"line one\r\nline two\r\nline three");
+        }
+
+        let backend = ratatui::backend::TestBackend::new(20, 5);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+        let before_row0: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol().to_string())
+            .collect();
+        let before_row2: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 2)].symbol().to_string())
+            .collect();
+
+        // Only row 1 (0-indexed) changes: move the cursor there and overwrite it.
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal.write(b"\x1b[2;1Hchanged!");
+        }
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+
+        let after_row0: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol().to_string())
+            .collect();
+        let after_row1: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 1)].symbol().to_string())
+            .collect();
+        let after_row2: String = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 2)].symbol().to_string())
+            .collect();
+
+        // Untouched rows must be byte-identical to before the partial update
+        // (proves the cache-hit path, not just "cache never breaks anything").
+        assert_eq!(before_row0, after_row0);
+        assert_eq!(before_row2, after_row2);
+        // The one dirty row must reflect the new content.
+        assert!(after_row1.starts_with("changed!"));
     }
 
     #[test]
