@@ -1,14 +1,24 @@
 {
-  "version": "0.1.43",
+  "version": "0.1.45",
   "protocol": 17,
-  "notes": "### Changed\n- Remove RenderedRowCache from GhosttyPaneCore struct",
+  "notes": "### Added\n- Add per-row cache for rendered cells in GhosttyPaneTerminal\n\n### Changed\n- Bump version to 0.1.44 and update changelog\n- Populate Unreleased changelog from commits",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.43/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.43/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.43/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.43/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.45": {
+      "notes": "### Added\n- Add per-row cache for rendered cells in GhosttyPaneTerminal\n\n### Changed\n- Bump version to 0.1.44 and update changelog\n- Populate Unreleased changelog from commits",
+      "protocol": 17,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.45/tanuki-macos-aarch64"
+      }
+    },
     "0.1.43": {
       "notes": "### Changed\n- Remove RenderedRowCache from GhosttyPaneCore struct",
       "protocol": 17,
