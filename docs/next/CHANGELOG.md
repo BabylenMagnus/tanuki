@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Add per-row cache for rendered cells in GhosttyPaneTerminal
+
+### Changed
+- Bump version to 0.1.44 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.44] - 2026-07-31
 
 ### Added
