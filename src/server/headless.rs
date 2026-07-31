@@ -2791,7 +2791,13 @@ impl HeadlessServer {
         })
     }
 
-    /// Handles a server event. Returns true if the event requires a re-render.
+    /// Handles client input. Returns true only when a **full** app re-render is
+    /// required (chrome/layout/mode/client surface), not for pure PTY keystrokes.
+    ///
+    /// Typing/paste into a live terminal does not set this: the PTY path sets
+    /// `render_dirty` and the retained renderer can patch. Returning true for
+    /// every `events_include_interaction` hit was the dominant source of
+    /// `render.full_cause.diag variant=ClientInputEvents` staircase frames.
     fn handle_client_input_events(
         &mut self,
         client_id: u64,
@@ -2802,25 +2808,35 @@ impl HeadlessServer {
             .clients
             .get(&client_id)
             .is_some_and(ClientConnection::is_full_app_client);
-        let host_surface_redraw = crate::raw_input::events_require_host_surface_redraw(
-            &events,
-            self.app.state.redraw_on_focus_gained,
-        );
-        if let Some(client) = self.clients.get_mut(&client_id) {
-            if host_surface_redraw {
+        // Host-surface focus redraw is only meaningful for full app clients.
+        // Terminal-attach / observe clients ignore outer focus for routing and
+        // must not pick up a free full-render request from it.
+        let host_surface_redraw = source_is_full_app
+            && crate::raw_input::events_require_host_surface_redraw(
+                &events,
+                self.app.state.redraw_on_focus_gained,
+            );
+        if host_surface_redraw {
+            if let Some(client) = self.clients.get_mut(&client_id) {
                 client.request_full_redraw();
                 client.defer_full_render();
-            } else {
-                // Ensure semantic clients receive one post-input frame even if the
-                // semantic buffer compares equal. Terminal-ANSI clients must keep their
-                // server-side blit baseline; resetting it here forces a full redraw on
-                // every keypress and makes remote sessions feel extremely slow.
-                client.request_semantic_redraw_after_input();
             }
         }
+        // Intentionally do NOT call `request_semantic_redraw_after_input` on
+        // every key: that cleared the per-client last_frame baseline and forced
+        // the next Frame to be treated as brand-new (and, with is_full, a CSI
+        // 2J clear on the client). Terminal content updates come from PTY dirty.
+
         if source_is_full_app {
             self.update_client_outer_focus_from_events(client_id, &events);
         }
+        let mouse_may_change_ui = events.iter().any(|event| {
+            matches!(
+                event,
+                crate::raw_input::RawInputEvent::Mouse(mouse)
+                    if !matches!(mouse.kind, MouseEventKind::Moved)
+            )
+        });
         let events = events_for_app_routing(events, source_was_foreground, source_is_full_app);
         let interaction = events_include_interaction(&events);
         let foreground_changed = if interaction {
@@ -2832,8 +2848,10 @@ impl HeadlessServer {
             self.resize_shared_runtime_to_effective_size_before_input();
         }
         let theme_changed = self.update_client_host_theme_from_events(client_id, &events);
+        let chrome_before = AppChromeSnapshot::capture(&self.app.state);
         self.app
             .route_client_events(events, self.foreground_client_id == Some(client_id));
+        let chrome_after = AppChromeSnapshot::capture(&self.app.state);
         if self.app.take_config_reloaded_from_disk() {
             self.reload_server_config(false);
         } else {
@@ -2858,7 +2876,15 @@ impl HeadlessServer {
 
             false
         } else {
-            foreground_changed || theme_changed || interaction
+            host_surface_redraw
+                || foreground_changed
+                || theme_changed
+                || chrome_before != chrome_after
+                || self.app.state.pending_full_redraw
+                // Selection / local scroll / scrollbar live partly outside the
+                // chrome snapshot (pane runtime scroll offsets); mouse non-move
+                // still needs an app paint so those updates are not dropped.
+                || mouse_may_change_ui
         }
     }
 
@@ -3825,7 +3851,7 @@ impl HeadlessServer {
         for (client_id, (cols, rows), cell_size, is_foreground, mode) in render_targets {
             let area = Rect::new(0, 0, cols, rows);
             let is_app_client = matches!(mode, ClientConnectionMode::App);
-            let mut frame = match mode {
+            let frame = match mode {
                 ClientConnectionMode::App => {
                     let render_started = crate::render_prof::timer();
                     let render_cell_size =
@@ -3856,12 +3882,11 @@ impl HeadlessServer {
                         hyperlinks_started,
                     );
                     let frame_started = crate::render_prof::timer();
-                    let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+                    let frame = FrameData::from_ratatui_buffer_with_hyperlinks(
                         &buffer,
                         cursor,
                         &hyperlinks,
                     );
-                    frame.is_full = true;
                     crate::render_prof::duration_since("full_render.frame_build", frame_started);
                     frame
                 }
@@ -3893,12 +3918,11 @@ impl HeadlessServer {
                         hyperlinks_started,
                     );
                     let frame_started = crate::render_prof::timer();
-                    let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+                    let frame = FrameData::from_ratatui_buffer_with_hyperlinks(
                         &buffer,
                         cursor,
                         &hyperlinks,
                     );
-                    frame.is_full = true;
                     crate::render_prof::duration_since("full_render.frame_build", frame_started);
                     frame
                 }
@@ -3906,6 +3930,15 @@ impl HeadlessServer {
 
             let Some(client) = self.clients.get_mut(&client_id) else {
                 continue;
+            };
+            // Only force a client-side clear+full paint when this client has no
+            // same-size baseline (first frame, resize, or request_full_redraw).
+            // Server still rebuilt the full FrameData; the client can diff cells
+            // and avoid CSI 2J staircase on every full_render.invoke.
+            let mut frame = frame;
+            frame.is_full = match client.render_state.last_frame() {
+                None => true,
+                Some(prev) => prev.width != frame.width || prev.height != frame.height,
             };
             let mut next_graphics_cache = client.graphics_cache.clone();
             let graphics_surface_reset_pending = client.graphics_surface_reset_pending;
@@ -4315,6 +4348,48 @@ impl HeadlessServer {
             }
         }
         Ok(())
+    }
+}
+
+/// Lightweight snapshot of app UI state that must trigger a full headless
+/// paint when it changes. Used so pure PTY-bound keystrokes do not force
+/// `needs_full_render` (and therefore block retained patches).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppChromeSnapshot {
+    mode: app::Mode,
+    active: Option<usize>,
+    selected: usize,
+    focused_pane: Option<crate::layout::PaneId>,
+    has_selection: bool,
+    has_copy_mode: bool,
+    has_popup: bool,
+    has_toast: bool,
+    has_context_menu: bool,
+    has_copy_feedback: bool,
+    outer_terminal_focus: Option<bool>,
+    view_layout: crate::app::state::ViewLayout,
+}
+
+impl AppChromeSnapshot {
+    fn capture(state: &app::state::AppState) -> Self {
+        let focused_pane = state
+            .active
+            .and_then(|idx| state.workspaces.get(idx))
+            .and_then(|ws| ws.focused_pane_id());
+        Self {
+            mode: state.mode,
+            active: state.active,
+            selected: state.selected,
+            focused_pane,
+            has_selection: state.selection.is_some(),
+            has_copy_mode: state.copy_mode.is_some(),
+            has_popup: state.popup_pane.is_some(),
+            has_toast: state.toast.is_some(),
+            has_context_menu: state.context_menu.is_some(),
+            has_copy_feedback: state.copy_feedback.is_some(),
+            outer_terminal_focus: state.outer_terminal_focus,
+            view_layout: state.view.layout,
+        }
     }
 }
 
@@ -7333,6 +7408,76 @@ next_tab = ""
         assert_eq!(
             server.app.state.settings.section,
             crate::app::state::SettingsSection::Integrations
+        );
+    }
+
+    #[test]
+    fn terminal_mode_keystroke_does_not_request_full_render() {
+        let mut server = test_headless_server();
+        server.app.state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
+        server.app.state.active = Some(0);
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                Some(true),
+                1,
+                RenderEncoding::SemanticFrame,
+                None,
+            ),
+        );
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+
+        // Pure key into an already-foreground terminal must not force full
+        // re-render (PTY dirty + retained handle content updates).
+        assert!(!server.handle_server_event(ServerEvent::ClientInputEvents {
+            client_id: 1,
+            events: vec![crate::protocol::ClientInputEvent::Key {
+                code: crate::protocol::ClientKeyCode::Char('a'),
+                modifiers: 0,
+                kind: crate::protocol::ClientKeyKind::Press,
+            }],
+        }));
+        assert!(!server.app.state.pending_full_redraw);
+    }
+
+    #[tokio::test]
+    async fn full_render_sets_is_full_only_without_same_size_baseline() {
+        let (mut server, client_rx, pane_id) = retained_test_server(b"hello");
+        server.render_and_stream();
+        let first = read_server_frame(
+            client_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("first full frame"),
+        );
+        assert!(
+            first.is_full,
+            "first frame for a client must force client clear"
+        );
+
+        // Content change + server full rebuild with same geometry: client should
+        // receive is_full=false and diff against the previous baseline.
+        let runtime = server
+            .app
+            .state
+            .runtime_for_pane_in_workspace(&server.app.terminal_runtimes, 0, pane_id)
+            .expect("runtime");
+        runtime.test_process_pty_bytes(b"!");
+        server.app.full_redraw_pending = true;
+        server.render_and_stream();
+        let second = read_server_frame(
+            client_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("second frame after content change"),
+        );
+        assert_eq!((second.width, second.height), (first.width, first.height));
+        assert!(
+            !second.is_full,
+            "same-size rebuild must not set is_full (avoid client CSI 2J staircase)"
         );
     }
 

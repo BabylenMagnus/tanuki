@@ -44,7 +44,10 @@ impl ClientRenderState {
     pub(crate) fn prepare_frame(&mut self, frame: FrameData) -> Option<PreparedRender> {
         match self {
             Self::Semantic { last_frame } => {
-                if last_frame.as_ref() == Some(&frame) {
+                if last_frame
+                    .as_ref()
+                    .is_some_and(|prev| prev.content_eq(&frame))
+                {
                     crate::render_prof::event("prepare_frame.semantic.skip_current");
                     return None;
                 }

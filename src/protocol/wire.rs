@@ -483,6 +483,21 @@ pub struct FrameData {
 }
 
 impl FrameData {
+    /// Content equality ignoring `is_full`.
+    ///
+    /// `is_full` is a wire/client-paint hint, not part of the visual buffer.
+    /// Server-side skip-identical checks must ignore it so a same-size full
+    /// rebuild (is_full=false for client diff) still matches the previous
+    /// baseline that was stored with is_full=true.
+    pub(crate) fn content_eq(&self, other: &Self) -> bool {
+        self.cells == other.cells
+            && self.width == other.width
+            && self.height == other.height
+            && self.cursor == other.cursor
+            && self.hyperlinks == other.hyperlinks
+            && self.graphics == other.graphics
+    }
+
     /// Creates a `FrameData` from a ratatui `Buffer` and optional cursor.
     ///
     /// This converts ratatui's internal cell representation into the

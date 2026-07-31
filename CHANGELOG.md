@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+- Stop forcing full-screen client clears on every keystroke: terminal input no longer requests full re-render (PTY retained path handles content), and same-size full rebuilds set is_full=false so the client diffs instead of CSI 2J
+- Do not reset the semantic last-frame baseline on every input event (was forcing non-skippable full paints)
+
 ## [0.1.46] - 2026-07-31
 
 ### Fixed
@@ -363,3 +367,4 @@
 
 ### Changed
 - Initial release under the Tanuki name (renamed from Tanuki Term).
+
