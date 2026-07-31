@@ -1368,6 +1368,7 @@ impl GhosttyPaneTerminal {
         cell_height_px: u32,
     ) -> Vec<Bytes> {
         if let Ok(mut core) = self.core.lock() {
+            let snapshot_started = crate::render_prof::timer();
             let offset_from_bottom = core
                 .terminal
                 .scrollbar()
@@ -1384,6 +1385,9 @@ impl GhosttyPaneTerminal {
             let resize_recovery_probe_lines = usize::from(rows)
                 .saturating_mul(8)
                 .max(DEFAULT_DETECTION_ROWS);
+            crate::render_prof::duration_since("pane.resize.snapshot", snapshot_started);
+
+            let replay_scan_started = crate::render_prof::timer();
             let replay_ansi = if core.terminal.active_screen().ok()
                 == Some(crate::ghostty::ActiveScreen::Primary)
                 && bottom_before_resize
@@ -1394,12 +1398,16 @@ impl GhosttyPaneTerminal {
             } else {
                 None
             };
+            crate::render_prof::duration_since("pane.resize.replay_scan", replay_scan_started);
 
+            let reflow_started = crate::render_prof::timer();
             let _ = core
                 .terminal
                 .resize(cols, rows, cell_width_px, cell_height_px);
+            crate::render_prof::duration_since("pane.resize.reflow", reflow_started);
             let terminal_responses = self.drain_pending_pty_responses();
 
+            let recovery_started = crate::render_prof::timer();
             let bottom_is_blank = ghostty_detection_text(&core)
                 .map(|text| text.trim().is_empty())
                 .unwrap_or(false);
@@ -1421,6 +1429,7 @@ impl GhosttyPaneTerminal {
                     remaining -= 1;
                 }
             }
+            crate::render_prof::duration_since("pane.resize.recovery", recovery_started);
             terminal_responses
         } else {
             Vec::new()
