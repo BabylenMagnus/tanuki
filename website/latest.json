@@ -1,14 +1,24 @@
 {
-  "version": "0.1.46",
+  "version": "0.1.47",
   "protocol": 17,
-  "notes": "### Fixed\n- Keep GhosttyPaneTerminal's per-row render cache coherent with `collect_dirty_patch`: successful retained patches now write updated cells into the cache, and fallbacks invalidate it, so full renders no longer serve stale rows after the retained path consumed shared terminal dirty flags (staircase / freeze regression from the v0.1.42\u2013v0.1.45 cache)\n\n### Changed\n- Fall back to an existing prebuilt libghostty-vt artifact when the local Zig rebuild fails (and allow `LIBGHOSTTY_VT_USE_PREBUILT=1` to skip Zig entirely)",
+  "notes": "### Fixed\n- Stop forcing full-screen client clears on every keystroke: terminal input no longer requests full re-render (PTY retained path handles content), and same-size full rebuilds set is_full=false so the client diffs instead of CSI 2J\n- Do not reset the semantic last-frame baseline on every input event (was forcing non-skippable full paints)",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.46/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.46/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.46/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.46/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.47": {
+      "notes": "### Fixed\n- Stop forcing full-screen client clears on every keystroke: terminal input no longer requests full re-render (PTY retained path handles content), and same-size full rebuilds set is_full=false so the client diffs instead of CSI 2J\n- Do not reset the semantic last-frame baseline on every input event (was forcing non-skippable full paints)",
+      "protocol": 17,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-macos-aarch64"
+      }
+    },
     "0.1.46": {
       "notes": "### Fixed\n- Keep GhosttyPaneTerminal's per-row render cache coherent with `collect_dirty_patch`: successful retained patches now write updated cells into the cache, and fallbacks invalidate it, so full renders no longer serve stale rows after the retained path consumed shared terminal dirty flags (staircase / freeze regression from the v0.1.42\u2013v0.1.45 cache)\n\n### Changed\n- Fall back to an existing prebuilt libghostty-vt artifact when the local Zig rebuild fails (and allow `LIBGHOSTTY_VT_USE_PREBUILT=1` to skip Zig entirely)",
       "protocol": 17,
