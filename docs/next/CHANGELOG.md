@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.40] - 2026-07-31
+
 ### Fixed
 - Update clipboard and input source handling to reflect local effects
 
