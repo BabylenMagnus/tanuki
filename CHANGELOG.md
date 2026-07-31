@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add performance profiling for terminal resize operations
+
 ## [0.1.40] - 2026-07-31
 
 ### Fixed
