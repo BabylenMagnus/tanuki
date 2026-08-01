@@ -498,6 +498,29 @@ impl FrameData {
             && self.graphics == other.graphics
     }
 
+    /// Applies `FramePatch` row segments into this frame in place.
+    ///
+    /// Used by both the server (to build the segment list it sends) and the
+    /// client (to reconstruct the full frame from its cached baseline).
+    /// Returns `false` if a segment falls outside the frame's bounds --
+    /// callers must treat that as a hard error (fall back to a full frame),
+    /// never apply partially.
+    pub(crate) fn apply_patch_segments(&mut self, segments: &[FramePatchSegment]) -> bool {
+        let width = usize::from(self.width);
+        for seg in segments {
+            if seg.y >= self.height || usize::from(seg.x) + seg.cells.len() > width {
+                return false;
+            }
+            let start = usize::from(seg.y) * width + usize::from(seg.x);
+            let end = start + seg.cells.len();
+            if end > self.cells.len() {
+                return false;
+            }
+            self.cells[start..end].clone_from_slice(&seg.cells);
+        }
+        true
+    }
+
     /// Creates a `FrameData` from a ratatui `Buffer` and optional cursor.
     ///
     /// This converts ratatui's internal cell representation into the
@@ -690,6 +713,38 @@ pub enum ServerMessage {
         /// Whether the ASCII input source should be active.
         active: bool,
     },
+
+    /// A sparse patch to the semantic-frame client's cached frame, sent
+    /// instead of a full `Frame` when only a few row segments changed
+    /// (e.g. echoing a single keystroke). Clients apply `segments` into
+    /// their locally cached frame at `(y, x)`, then treat the result exactly
+    /// as if a full `Frame` with that content had been received -- same
+    /// diffing/blitting/baseline-tracking downstream. Never sent for a
+    /// client's first frame or after a size change (those always use
+    /// `Frame`), so a client can assume its cached frame exists and matches
+    /// this patch's width/height. Appended at the end of the enum so its
+    /// discriminant never shifts on the wire.
+    FramePatch {
+        /// Contiguous row segments to overwrite in the client's cached frame.
+        segments: Vec<FramePatchSegment>,
+        /// Updated cursor state, meaningful only when `cursor_changed` is true.
+        cursor: Option<CursorState>,
+        /// Whether the cursor changed (disambiguates "cursor became hidden"
+        /// from "cursor field not part of this patch").
+        cursor_changed: bool,
+    },
+}
+
+/// One contiguous run of cells to overwrite within a cached frame, as part
+/// of a [`ServerMessage::FramePatch`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FramePatchSegment {
+    /// Row index (0-based) within the frame.
+    pub y: u16,
+    /// Starting column index (0-based) within the row.
+    pub x: u16,
+    /// Replacement cells, contiguous starting at `(x, y)`.
+    pub cells: Vec<CellData>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1851,6 +1906,164 @@ mod tests {
             graphics: Vec::new(),
         };
         assert!(frame.to_ratatui_buffer().is_none());
+    }
+
+    // ---- FramePatch ----
+
+    fn test_cell(symbol: &str) -> CellData {
+        CellData {
+            symbol: symbol.into(),
+            fg: 0,
+            bg: 0,
+            modifier: 0,
+            skip: false,
+            hyperlink: None,
+        }
+    }
+
+    fn filled_frame(width: u16, height: u16, symbol: &str) -> FrameData {
+        FrameData {
+            is_full: false,
+            cells: vec![test_cell(symbol); usize::from(width) * usize::from(height)],
+            width,
+            height,
+            cursor: None,
+            hyperlinks: Vec::new(),
+            graphics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn apply_patch_segments_overwrites_only_targeted_cells() {
+        let mut frame = filled_frame(5, 3, ".");
+        let segment = FramePatchSegment {
+            y: 1,
+            x: 1,
+            cells: vec![test_cell("A"), test_cell("B"), test_cell("C")],
+        };
+        assert!(frame.apply_patch_segments(&[segment]));
+
+        // Row 1, cols 1..4 changed; everything else untouched.
+        for y in 0..3u16 {
+            for x in 0..5u16 {
+                let idx = usize::from(y) * 5 + usize::from(x);
+                let expected = match (y, x) {
+                    (1, 1) => "A",
+                    (1, 2) => "B",
+                    (1, 3) => "C",
+                    _ => ".",
+                };
+                assert_eq!(frame.cells[idx].symbol, expected, "cell ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn apply_patch_segments_rejects_row_out_of_bounds() {
+        let mut frame = filled_frame(5, 3, ".");
+        let segment = FramePatchSegment {
+            y: 3, // height is 3, valid rows are 0..=2
+            x: 0,
+            cells: vec![test_cell("A")],
+        };
+        assert!(!frame.apply_patch_segments(&[segment]));
+    }
+
+    #[test]
+    fn apply_patch_segments_rejects_column_overrun() {
+        let mut frame = filled_frame(5, 3, ".");
+        let segment = FramePatchSegment {
+            y: 0,
+            x: 4,
+            cells: vec![test_cell("A"), test_cell("B")], // runs past width=5
+        };
+        assert!(!frame.apply_patch_segments(&[segment]));
+    }
+
+    #[test]
+    fn apply_patch_segments_matches_full_frame_reconstruction() {
+        // Property: patching a cloned baseline with the exact segments that
+        // describe the diff between baseline and target reproduces target
+        // exactly -- the equivalence the whole optimization depends on.
+        let baseline = filled_frame(8, 4, ".");
+        let mut target = baseline.clone();
+        // Simulate a one-row keystroke echo: overwrite row 2 entirely.
+        for x in 0..8usize {
+            target.cells[2 * 8 + x] = test_cell(&format!("{x}"));
+        }
+        let segment = FramePatchSegment {
+            y: 2,
+            x: 0,
+            cells: target.cells[2 * 8..2 * 8 + 8].to_vec(),
+        };
+
+        let mut reconstructed = baseline.clone();
+        assert!(reconstructed.apply_patch_segments(&[segment]));
+        assert_eq!(reconstructed, target);
+    }
+
+    #[test]
+    fn server_frame_patch_roundtrip() {
+        let msg = ServerMessage::FramePatch {
+            segments: vec![FramePatchSegment {
+                y: 0,
+                x: 0,
+                cells: vec![test_cell("x")],
+            }],
+            cursor: Some(CursorState {
+                x: 1,
+                y: 2,
+                visible: true,
+                shape: 0,
+            }),
+            cursor_changed: true,
+        };
+        let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
+        let (decoded, _): (ServerMessage, _) =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn frame_patch_message_is_far_smaller_than_full_frame_for_a_single_row_change() {
+        // The whole point of FramePatch: a single-row change on a large
+        // frame should serialize to a small fraction of a full-frame send.
+        // This is a byte-size regression guard (deterministic, unlike
+        // wall-clock timing) for the fix that replaced per-keystroke full
+        // semantic-frame sends with sparse patches.
+        let baseline = filled_frame(200, 60, ".");
+        let mut target = baseline.clone();
+        for x in 0..200usize {
+            target.cells[3 * 200 + x] = test_cell("x");
+        }
+        let segment = FramePatchSegment {
+            y: 3,
+            x: 0,
+            cells: target.cells[3 * 200..3 * 200 + 200].to_vec(),
+        };
+
+        let full_msg = ServerMessage::Frame(target.clone());
+        let patch_msg = ServerMessage::FramePatch {
+            segments: vec![segment],
+            cursor: None,
+            cursor_changed: false,
+        };
+
+        let full_bytes =
+            bincode::serde::encode_to_vec(&full_msg, bincode::config::standard()).unwrap();
+        let patch_bytes =
+            bincode::serde::encode_to_vec(&patch_msg, bincode::config::standard()).unwrap();
+
+        // Full frame has 200*60 = 12000 cells; the patch has 200. A generous
+        // 10x margin catches any regression that makes patches balloon back
+        // toward full-frame size without being sensitive to exact encoding
+        // overhead.
+        assert!(
+            patch_bytes.len() * 10 < full_bytes.len(),
+            "patch ({} bytes) should be far smaller than full frame ({} bytes)",
+            patch_bytes.len(),
+            full_bytes.len()
+        );
     }
 
     // ---- Color conversion coverage ----

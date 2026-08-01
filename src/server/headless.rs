@@ -174,28 +174,41 @@ fn rect_fits_frame(rect: Rect, frame: &FrameData) -> bool {
         && rect.y.saturating_add(rect.height) <= frame.height
 }
 
+/// Applies a per-pane dirty patch into the composited frame, and returns the
+/// wire-ready `FramePatchSegment`s for the cells it touched (`None` on any
+/// bounds mismatch, mirroring the previous `bool` failure contract).
+///
+/// The returned segments are consumed by the retained-render path to send a
+/// compact `ServerMessage::FramePatch` instead of the full frame -- see
+/// `render_retained_pty_update_and_stream`.
 fn apply_terminal_dirty_patch(
     frame: &mut FrameData,
     area: Rect,
     patch: crate::pane::TerminalDirtyPatch,
-) -> bool {
+) -> Option<Vec<protocol::FramePatchSegment>> {
     if !rect_fits_frame(area, frame) {
-        return false;
+        return None;
     }
     let width = usize::from(frame.width);
+    let mut segments = Vec::with_capacity(patch.rows.len());
     for (local_y, row_cells) in patch.rows {
         if local_y >= area.height || row_cells.len() != usize::from(area.width) {
-            return false;
+            return None;
         }
         let frame_y = area.y + local_y;
         let start = usize::from(frame_y) * width + usize::from(area.x);
         let end = start + usize::from(area.width);
         if end > frame.cells.len() {
-            return false;
+            return None;
         }
         frame.cells[start..end].clone_from_slice(&row_cells);
+        segments.push(protocol::FramePatchSegment {
+            y: frame_y,
+            x: area.x,
+            cells: row_cells,
+        });
     }
-    true
+    Some(segments)
 }
 
 fn dirty_patch_intersects_hyperlinks(
@@ -3679,6 +3692,7 @@ impl HeadlessServer {
         }
 
         let mut touched = false;
+        let mut segments: Vec<protocol::FramePatchSegment> = Vec::new();
         for info in pane_infos {
             if !rect_fits_frame(info.inner_rect, &frame) {
                 retained_fallback!("pane_rect_outside_frame");
@@ -3703,9 +3717,12 @@ impl HeadlessServer {
                     if dirty_patch_intersects_hyperlinks(&frame, info.inner_rect, &patch) {
                         retained_fallback!("hyperlink_intersection");
                     }
-                    if !apply_terminal_dirty_patch(&mut frame, info.inner_rect, patch) {
+                    let Some(pane_segments) =
+                        apply_terminal_dirty_patch(&mut frame, info.inner_rect, patch)
+                    else {
                         retained_fallback!("patch_apply_failed");
-                    }
+                    };
+                    segments.extend(pane_segments);
                     touched = true;
                 }
             }
@@ -3723,7 +3740,12 @@ impl HeadlessServer {
         }
 
         let mut broken_clients = Vec::new();
-        let sent = self.send_retained_frame_to_client(*client_id, frame, &mut broken_clients);
+        let sent = self.send_retained_frame_to_client(
+            *client_id,
+            frame,
+            Some((segments, cursor_changed)),
+            &mut broken_clients,
+        );
         for broken_client in broken_clients {
             self.remove_client_and_resize_if_needed(broken_client);
         }
@@ -3744,10 +3766,17 @@ impl HeadlessServer {
             && !self.app.full_redraw_pending
     }
 
+    /// `patch` carries the sparse segments the retained path already
+    /// computed while patching `frame` in memory, plus whether the cursor
+    /// changed. When present, `ClientRenderState::prepare_frame_with_patch`
+    /// may send a compact `FramePatch` instead of the full `frame` -- but
+    /// `frame` itself must still be the complete, correctly patched
+    /// composite, since it becomes the new baseline either way.
     fn send_retained_frame_to_client(
         &mut self,
         client_id: u64,
         frame: FrameData,
+        patch: Option<(Vec<protocol::FramePatchSegment>, bool)>,
         broken_clients: &mut Vec<u64>,
     ) -> bool {
         let Some(client) = self.clients.get_mut(&client_id) else {
@@ -3759,7 +3788,7 @@ impl HeadlessServer {
             return false;
         };
         let prepare_started = crate::render_prof::timer();
-        let Some(prepared) = client.render_state.prepare_frame(frame) else {
+        let Some(prepared) = client.render_state.prepare_frame_with_patch(frame, patch) else {
             client.clear_deferred_render();
             crate::render_prof::event("retained_send.skip_identical");
             crate::render_prof::duration_since("retained_send.prepare_frame", prepare_started);
@@ -4872,6 +4901,34 @@ mod tests {
         match read_server_message(bytes) {
             ServerMessage::Frame(frame) => frame,
             other => panic!("expected frame, got {other:?}"),
+        }
+    }
+
+    /// Like `read_server_frame`, but also accepts a `FramePatch` -- the
+    /// retained render path may send either, depending on whether a
+    /// same-size baseline already existed. `baseline` must be the frame the
+    /// patch (if any) was computed against, i.e. the frame most recently
+    /// read for this same client.
+    fn read_server_frame_patched(bytes: Vec<u8>, baseline: &FrameData) -> FrameData {
+        match read_server_message(bytes) {
+            ServerMessage::Frame(frame) => frame,
+            ServerMessage::FramePatch {
+                segments,
+                cursor,
+                cursor_changed,
+            } => {
+                let mut frame = baseline.clone();
+                assert!(
+                    frame.apply_patch_segments(&segments),
+                    "FramePatch segments must fit the baseline frame in tests"
+                );
+                if cursor_changed {
+                    frame.cursor = cursor;
+                }
+                frame.is_full = false;
+                frame
+            }
+            other => panic!("expected frame or frame patch, got {other:?}"),
         }
     }
 
@@ -8264,10 +8321,11 @@ next_tab = ""
         runtime.test_process_pty_bytes(b"\rZ");
 
         assert!(server.render_retained_pty_update_and_stream());
-        let patched = read_server_frame(
+        let patched = read_server_frame_patched(
             client_rx
                 .recv_timeout(Duration::from_millis(100))
                 .expect("retained frame"),
+            &first,
         );
         assert!(patched.cells.iter().any(|cell| cell.symbol == "Z"));
         assert_eq!((patched.width, patched.height), (80, 24));
@@ -8495,9 +8553,11 @@ next_tab = ""
         let (mut full_server, full_rx, full_pane_id) = retained_test_server(initial);
 
         retained_server.render_and_stream();
-        let _ = retained_rx
-            .recv_timeout(Duration::from_millis(100))
-            .expect("initial retained baseline");
+        let retained_baseline = read_server_frame(
+            retained_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("initial retained baseline"),
+        );
         full_server.render_and_stream();
         let _ = full_rx
             .recv_timeout(Duration::from_millis(100))
@@ -8523,10 +8583,11 @@ next_tab = ""
         assert!(retained_server.render_retained_pty_update_and_stream());
         full_server.render_and_stream();
 
-        let retained_frame = read_server_frame(
+        let retained_frame = read_server_frame_patched(
             retained_rx
                 .recv_timeout(Duration::from_millis(100))
                 .expect("retained frame"),
+            &retained_baseline,
         );
         let full_frame = read_server_frame(
             full_rx
@@ -8544,9 +8605,11 @@ next_tab = ""
         let (mut full_server, full_rx, full_pane_id) = retained_test_server(initial);
 
         retained_server.render_and_stream();
-        let _ = retained_rx
-            .recv_timeout(Duration::from_millis(100))
-            .expect("initial retained baseline");
+        let retained_baseline = read_server_frame(
+            retained_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("initial retained baseline"),
+        );
         full_server.render_and_stream();
         let _ = full_rx
             .recv_timeout(Duration::from_millis(100))
@@ -8572,10 +8635,11 @@ next_tab = ""
         assert!(retained_server.render_retained_pty_update_and_stream());
         full_server.render_and_stream();
 
-        let retained_frame = read_server_frame(
+        let retained_frame = read_server_frame_patched(
             retained_rx
                 .recv_timeout(Duration::from_millis(100))
                 .expect("retained cursor frame"),
+            &retained_baseline,
         );
         let full_frame = read_server_frame(
             full_rx
@@ -8589,9 +8653,11 @@ next_tab = ""
     async fn retained_pty_update_declines_unsafe_mode_without_consuming_dirty_rows() {
         let (mut server, client_rx, pane_id) = retained_test_server(b"aaaa");
         server.render_and_stream();
-        let _ = client_rx
-            .recv_timeout(Duration::from_millis(100))
-            .expect("initial frame");
+        let initial = read_server_frame(
+            client_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("initial frame"),
+        );
 
         let runtime = server
             .app
@@ -8606,10 +8672,11 @@ next_tab = ""
 
         server.app.state.mode = crate::app::Mode::Terminal;
         assert!(server.render_retained_pty_update_and_stream());
-        let patched = read_server_frame(
+        let patched = read_server_frame_patched(
             client_rx
                 .recv_timeout(Duration::from_millis(100))
                 .expect("retained frame after safe mode"),
+            &initial,
         );
         assert!(patched.cells.iter().any(|cell| cell.symbol == "Z"));
     }
@@ -8681,9 +8748,11 @@ next_tab = ""
     async fn retained_pty_update_allows_dirty_row_that_creates_plain_url() {
         let (mut server, client_rx, pane_id) = retained_test_server(b"plain");
         server.render_and_stream();
-        let _ = client_rx
-            .recv_timeout(Duration::from_millis(100))
-            .expect("initial frame");
+        let initial = read_server_frame(
+            client_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("initial frame"),
+        );
 
         let runtime = server
             .app
@@ -8693,10 +8762,11 @@ next_tab = ""
         runtime.test_process_pty_bytes(b"\rhttps://example.com/new");
 
         assert!(server.render_retained_pty_update_and_stream());
-        let patched = read_server_frame(
+        let patched = read_server_frame_patched(
             client_rx
                 .recv_timeout(Duration::from_millis(100))
                 .expect("retained frame after plain URL"),
+            &initial,
         );
         assert!(
             patched.hyperlinks.is_empty(),
@@ -8714,9 +8784,11 @@ next_tab = ""
         };
 
         server.render_and_stream();
-        let _ = client_rx
-            .recv_timeout(Duration::from_millis(100))
-            .expect("initial frame");
+        let initial = read_server_frame(
+            client_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("initial frame"),
+        );
 
         let runtime = server
             .app
@@ -8726,10 +8798,11 @@ next_tab = ""
         runtime.test_process_pty_bytes(b"\rZ");
 
         assert!(server.render_retained_pty_update_and_stream());
-        let retained = read_server_frame(
+        let retained = read_server_frame_patched(
             client_rx
                 .recv_timeout(Duration::from_millis(100))
                 .expect("retained frame with kitty enabled"),
+            &initial,
         );
         assert!(retained.cells.iter().any(|cell| cell.symbol == "Z"));
     }

@@ -42,6 +42,23 @@ impl ClientRenderState {
     }
 
     pub(crate) fn prepare_frame(&mut self, frame: FrameData) -> Option<PreparedRender> {
+        self.prepare_frame_with_patch(frame, None)
+    }
+
+    /// Like [`Self::prepare_frame`], but for `Semantic` clients may send a
+    /// compact `FramePatch` instead of the full frame when `patch` carries
+    /// segments computed against the client's existing baseline (same size,
+    /// baseline present). `frame` is always the complete, correctly patched
+    /// composite regardless of what gets sent -- it becomes the new
+    /// baseline either way, exactly as a full `Frame` send would.
+    ///
+    /// `TerminalAnsi` clients ignore `patch`: they always derive their own
+    /// diff via `BlitEncoder`, which needs the full frame anyway.
+    pub(crate) fn prepare_frame_with_patch(
+        &mut self,
+        frame: FrameData,
+        patch: Option<(Vec<crate::protocol::FramePatchSegment>, bool)>,
+    ) -> Option<PreparedRender> {
         match self {
             Self::Semantic { last_frame } => {
                 if last_frame
@@ -52,9 +69,27 @@ impl ClientRenderState {
                     return None;
                 }
                 crate::render_prof::event("prepare_frame.semantic.changed");
-                Some(PreparedRender::Semantic {
-                    message: ServerMessage::Frame(frame),
-                })
+                let message = match (patch, last_frame.as_ref()) {
+                    (Some((segments, cursor_changed)), Some(prev))
+                        if prev.width == frame.width && prev.height == frame.height =>
+                    {
+                        crate::render_prof::event("prepare_frame.semantic.patch");
+                        crate::render_prof::counter(
+                            "prepare_frame.semantic.patch_segments",
+                            segments.len() as u64,
+                        );
+                        ServerMessage::FramePatch {
+                            segments,
+                            cursor: frame.cursor.clone(),
+                            cursor_changed,
+                        }
+                    }
+                    _ => {
+                        crate::render_prof::event("prepare_frame.semantic.full");
+                        ServerMessage::Frame(frame.clone())
+                    }
+                };
+                Some(PreparedRender::Semantic { message, frame })
             }
             Self::TerminalAnsi { blit_encoder, seq } => {
                 if blit_encoder.is_current(&frame) {
@@ -98,12 +133,9 @@ impl ClientRenderState {
 
     pub(crate) fn commit_sent_frame(&mut self, prepared: PreparedRender) {
         match (self, prepared) {
-            (
-                Self::Semantic { last_frame },
-                PreparedRender::Semantic {
-                    message: ServerMessage::Frame(frame),
-                },
-            ) => *last_frame = Some(frame),
+            (Self::Semantic { last_frame }, PreparedRender::Semantic { frame, .. }) => {
+                *last_frame = Some(frame)
+            }
             (
                 Self::TerminalAnsi { blit_encoder, seq },
                 PreparedRender::TerminalAnsi {
@@ -156,6 +188,10 @@ fn rfind_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 pub(crate) enum PreparedRender {
     Semantic {
         message: ServerMessage,
+        /// The complete, correctly patched composite frame -- this is the
+        /// new baseline regardless of whether `message` is a full `Frame`
+        /// or a compact `FramePatch`.
+        frame: FrameData,
     },
     TerminalAnsi {
         message: ServerMessage,
@@ -167,17 +203,14 @@ pub(crate) enum PreparedRender {
 impl PreparedRender {
     pub(crate) fn message(&self) -> &ServerMessage {
         match self {
-            Self::Semantic { message } | Self::TerminalAnsi { message, .. } => message,
+            Self::Semantic { message, .. } | Self::TerminalAnsi { message, .. } => message,
         }
     }
 
     pub(crate) fn into_frame(self) -> Option<FrameData> {
         match self {
-            Self::Semantic {
-                message: ServerMessage::Frame(frame),
-            } => Some(frame),
+            Self::Semantic { frame, .. } => Some(frame),
             Self::TerminalAnsi { frame, .. } => Some(frame),
-            _ => None,
         }
     }
 }
@@ -457,4 +490,157 @@ fn focused_terminal_suppresses_host_cursor(
     app_state
         .runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id)
         .is_some_and(crate::terminal::TerminalRuntime::synchronized_output_active)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{CellData, FramePatchSegment};
+    use std::time::Instant;
+
+    fn test_cell(symbol: &str) -> CellData {
+        CellData {
+            symbol: symbol.into(),
+            fg: 0,
+            bg: 0,
+            modifier: 0,
+            skip: false,
+            hyperlink: None,
+        }
+    }
+
+    fn filled_frame(width: u16, height: u16, symbol: &str) -> FrameData {
+        FrameData {
+            is_full: false,
+            cells: vec![test_cell(symbol); usize::from(width) * usize::from(height)],
+            width,
+            height,
+            cursor: None,
+            hyperlinks: Vec::new(),
+            graphics: Vec::new(),
+        }
+    }
+
+    fn one_row_patch(frame: &FrameData, row: u16, symbol: &str) -> (FrameData, Vec<FramePatchSegment>) {
+        let width = usize::from(frame.width);
+        let mut target = frame.clone();
+        for x in 0..width {
+            target.cells[usize::from(row) * width + x] = test_cell(symbol);
+        }
+        let start = usize::from(row) * width;
+        let segment = FramePatchSegment {
+            y: row,
+            x: 0,
+            cells: target.cells[start..start + width].to_vec(),
+        };
+        (target, vec![segment])
+    }
+
+    #[test]
+    fn prepare_frame_with_patch_sends_patch_when_baseline_matches() {
+        let mut state = ClientRenderState::new(RenderEncoding::SemanticFrame);
+        let baseline = filled_frame(10, 4, ".");
+        // Prime the baseline via a plain full-frame send, as the first
+        // frame to any client always is.
+        let prepared = state
+            .prepare_frame(baseline.clone())
+            .expect("first frame always changed");
+        state.commit_sent_frame(prepared);
+
+        let (target, segments) = one_row_patch(&baseline, 1, "x");
+        let prepared = state
+            .prepare_frame_with_patch(target.clone(), Some((segments.clone(), false)))
+            .expect("changed frame should produce a prepared render");
+        assert!(
+            matches!(prepared.message(), ServerMessage::FramePatch { .. }),
+            "expected a compact FramePatch once a matching baseline exists"
+        );
+
+        // Baseline must converge to the full target frame either way --
+        // this is the invariant the whole optimization depends on.
+        state.commit_sent_frame(prepared);
+        assert_eq!(state.last_frame(), Some(&target));
+    }
+
+    #[test]
+    fn prepare_frame_with_patch_falls_back_to_full_frame_without_baseline() {
+        let mut state = ClientRenderState::new(RenderEncoding::SemanticFrame);
+        let baseline = filled_frame(10, 4, ".");
+        let (target, segments) = one_row_patch(&baseline, 1, "x");
+
+        // No prior frame committed -- must never claim to patch nothing.
+        let prepared = state
+            .prepare_frame_with_patch(target.clone(), Some((segments, false)))
+            .expect("first frame always changed");
+        assert!(
+            matches!(prepared.message(), ServerMessage::Frame(_)),
+            "must send a full frame when there is no baseline to patch"
+        );
+        state.commit_sent_frame(prepared);
+        assert_eq!(state.last_frame(), Some(&target));
+    }
+
+    #[test]
+    fn prepare_frame_with_patch_falls_back_to_full_frame_on_size_mismatch() {
+        let mut state = ClientRenderState::new(RenderEncoding::SemanticFrame);
+        let baseline = filled_frame(10, 4, ".");
+        let prepared = state.prepare_frame(baseline.clone()).unwrap();
+        state.commit_sent_frame(prepared);
+
+        // A resized frame with segments computed against the old size must
+        // never be sent as a patch against the new baseline.
+        let resized = filled_frame(12, 4, "y");
+        let bogus_segments = vec![FramePatchSegment {
+            y: 0,
+            x: 0,
+            cells: vec![test_cell("y"); 12],
+        }];
+        let prepared = state
+            .prepare_frame_with_patch(resized.clone(), Some((bogus_segments, false)))
+            .expect("changed frame should produce a prepared render");
+        assert!(
+            matches!(prepared.message(), ServerMessage::Frame(_)),
+            "must not send a patch when frame size differs from the baseline"
+        );
+        state.commit_sent_frame(prepared);
+        assert_eq!(state.last_frame(), Some(&resized));
+    }
+
+    #[test]
+    fn frame_patch_encode_is_much_cheaper_than_full_frame_encode() {
+        // Wall-clock companion to the byte-size regression test in
+        // protocol::wire -- directly validates the reported symptom
+        // (per-keystroke serialize cost in the retained render path), not
+        // just payload size. Uses a large relative margin and averages
+        // several iterations to stay stable on slow/shared machines.
+        let baseline = filled_frame(200, 60, ".");
+        let (target, segments) = one_row_patch(&baseline, 30, "x");
+
+        const ITERS: u32 = 200;
+
+        let full_started = Instant::now();
+        for _ in 0..ITERS {
+            let msg = ServerMessage::Frame(target.clone());
+            let _ = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
+        }
+        let full_elapsed = full_started.elapsed();
+
+        let patch_started = Instant::now();
+        for _ in 0..ITERS {
+            let msg = ServerMessage::FramePatch {
+                segments: segments.clone(),
+                cursor: None,
+                cursor_changed: false,
+            };
+            let _ = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
+        }
+        let patch_elapsed = patch_started.elapsed();
+
+        assert!(
+            patch_elapsed * 5 < full_elapsed,
+            "expected patch encoding to be at least 5x faster than full-frame encoding \
+             (full: {full_elapsed:?}, patch: {patch_elapsed:?}) -- \
+             regression in the FramePatch fast path"
+        );
+    }
 }

@@ -39,7 +39,7 @@ use crate::protocol::render_ansi;
 use crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD;
 use crate::protocol::{
     self, AttachScrollDirection, AttachScrollSource, ClientKeybindings, ClientLaunchMode,
-    ClientMessage, NotifyKind, RenderEncoding, ServerMessage, MAX_FRAME_SIZE,
+    ClientMessage, FrameData, NotifyKind, RenderEncoding, ServerMessage, MAX_FRAME_SIZE,
     MAX_GRAPHICS_FRAME_SIZE, PROTOCOL_VERSION,
 };
 use crate::server::socket_paths::client_socket_path;
@@ -1343,6 +1343,55 @@ fn run_client_with_mode(
     Ok(())
 }
 
+/// Diffs a fully-reconstructed semantic frame against the client's blit
+/// baseline and writes the resulting bytes to stdout.
+///
+/// Shared by `ServerMessage::Frame` (frame arrives complete) and
+/// `ServerMessage::FramePatch` (frame is reconstructed from the cached
+/// baseline plus a handful of changed row segments) -- once `frame_data` is
+/// assembled, both cases blit identically.
+fn write_semantic_frame(state: &mut ClientState, frame_data: FrameData) {
+    let frame_data = if state.draw_host_cursor {
+        render_ansi::frame_with_drawn_cursor(frame_data)
+    } else {
+        frame_data
+    };
+    let force_full = frame_data.is_full;
+    let encoded = if state.draw_host_cursor {
+        state
+            .blit_encoder
+            .encode_with_suppressed_visible_cursor(&frame_data, force_full)
+    } else {
+        state.blit_encoder.encode(&frame_data, force_full)
+    };
+    // TEMPORARY diagnostic: pinpoint how often the client
+    // actually blits a full clear+redraw (as opposed to a
+    // cell-level diff), independent of server-side render
+    // classification -- see `render.full_cause.diag` on the
+    // server for the counterpart. The server-side fixes
+    // (throttle/coalesce/git-status classification) did not
+    // change the visible "staircase" symptom, so the next
+    // step is confirming whether the client itself is being
+    // asked to full-redraw far more often than the server's
+    // own render.prof counters would suggest.
+    if force_full {
+        info!(
+            event = "client.render.full_cause.diag",
+            bytes = encoded.bytes.len(),
+            "client full redraw"
+        );
+    }
+    let mut stdout = io::stdout();
+    let graphics = if state.kitty_graphics_enabled {
+        frame_data.graphics.as_slice()
+    } else {
+        &[]
+    };
+    let _ = write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics, force_full);
+    let _ = stdout.flush();
+    state.blit_encoder.commit(frame_data, encoded);
+}
+
 /// The main client event loop.
 ///
 /// Uses a threaded architecture:
@@ -1585,50 +1634,39 @@ async fn run_client_loop(
             }
             ClientLoopEvent::ServerMessage(msg) => match msg {
                 ServerMessage::Frame(frame_data) => {
-                    let frame_data = if state.draw_host_cursor {
-                        render_ansi::frame_with_drawn_cursor(frame_data)
-                    } else {
-                        frame_data
+                    write_semantic_frame(&mut state, frame_data);
+                }
+                ServerMessage::FramePatch {
+                    segments,
+                    cursor,
+                    cursor_changed,
+                } => {
+                    // Reconstruct the full frame from our own diff baseline
+                    // (the same frame the server patched from) plus the
+                    // changed segments -- see `write_semantic_frame` for why
+                    // the rest of the pipeline doesn't need to know the
+                    // difference between this and a full `Frame`. If we have
+                    // no baseline or the patch doesn't fit, the server and
+                    // client have desynced (should not happen: the server
+                    // only sends a patch against a same-size, already-sent
+                    // baseline) -- drop it rather than risk corrupting the
+                    // screen; the next full render will resync.
+                    let Some(mut frame_data) = state.blit_encoder.last_frame().cloned() else {
+                        warn!("received FramePatch with no cached baseline frame; dropping");
+                        continue;
                     };
-                    let force_full = frame_data.is_full;
-                    let encoded = if state.draw_host_cursor {
-                        state
-                            .blit_encoder
-                            .encode_with_suppressed_visible_cursor(&frame_data, force_full)
-                    } else {
-                        state.blit_encoder.encode(&frame_data, force_full)
-                    };
-                    // TEMPORARY diagnostic: pinpoint how often the client
-                    // actually blits a full clear+redraw (as opposed to a
-                    // cell-level diff), independent of server-side render
-                    // classification -- see `render.full_cause.diag` on the
-                    // server for the counterpart. The server-side fixes
-                    // (throttle/coalesce/git-status classification) did not
-                    // change the visible "staircase" symptom, so the next
-                    // step is confirming whether the client itself is being
-                    // asked to full-redraw far more often than the server's
-                    // own render.prof counters would suggest.
-                    if force_full {
-                        info!(
-                            event = "client.render.full_cause.diag",
-                            bytes = encoded.bytes.len(),
-                            "client full redraw"
+                    if !frame_data.apply_patch_segments(&segments) {
+                        warn!(
+                            segments = segments.len(),
+                            "FramePatch segments do not fit cached baseline frame; dropping"
                         );
+                        continue;
                     }
-                    let mut stdout = io::stdout();
-                    let graphics = if state.kitty_graphics_enabled {
-                        frame_data.graphics.as_slice()
-                    } else {
-                        &[]
-                    };
-                    let _ = write_encoded_frame_with_graphics(
-                        &mut stdout,
-                        &encoded.bytes,
-                        graphics,
-                        force_full,
-                    );
-                    let _ = stdout.flush();
-                    state.blit_encoder.commit(frame_data, encoded);
+                    if cursor_changed {
+                        frame_data.cursor = cursor;
+                    }
+                    frame_data.is_full = false;
+                    write_semantic_frame(&mut state, frame_data);
                 }
                 ServerMessage::Terminal(frame) => {
                     if state.kitty_graphics_enabled && contains_kitty_graphics_bytes(&frame.bytes) {
