@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Implement semantic frame writing and patch handling in client
+
+### Changed
+- Bump version to 0.1.48 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.48] - 2026-08-01
 
 ### Added
