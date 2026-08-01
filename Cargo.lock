@@ -3416,7 +3416,7 @@ dependencies = [
 
 [[package]]
 name = "tanuki"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "base64 0.22.1",
  "bincode",
