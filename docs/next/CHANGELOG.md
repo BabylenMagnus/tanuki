@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.49] - 2026-08-01
+
 ### Added
 - Implement semantic frame writing and patch handling in client
 

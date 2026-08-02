@@ -337,7 +337,12 @@ fn capture_tab(
                 )
             })
             .unwrap_or_default();
-        let launch_argv = terminal.and_then(|terminal| terminal.launch_argv.clone());
+        let launch_argv = terminal
+            .and_then(|terminal| terminal.launch_argv.clone())
+            .or_else(|| {
+                let pane = tab.panes.get(id)?;
+                live_agent_launch_argv(terminal_runtimes, &pane.attached_terminal_id)
+            });
         let agent_session = terminal.and_then(|terminal| {
             if let Some(authority) = terminal.hook_authority.as_ref() {
                 if let Some(session_ref) = authority.session_ref.as_ref() {
@@ -379,6 +384,23 @@ fn capture_tab(
         focused: Some(tab.layout.focused().raw()),
         root_pane: Some(tab.root_pane.raw()),
     }
+}
+
+/// Best-effort fallback for panes that were never spawned with an explicit
+/// argv (i.e. a plain shell pane where the user typed an agent command by
+/// hand, so `TerminalState.launch_argv` is `None`). Reads the pane's live
+/// foreground process tree and, if it recognizes a running agent, returns
+/// that process's actual argv (including any extra CLI flags) so it can be
+/// persisted and later merged back in on restore -- see
+/// `merge_persisted_launch_flags` in `persist::restore`.
+fn live_agent_launch_argv(
+    terminal_runtimes: &TerminalRuntimeRegistry,
+    terminal_id: &crate::terminal::TerminalId,
+) -> Option<Vec<String>> {
+    let pid = terminal_runtimes.get(terminal_id)?.child_pid()?;
+    let job = crate::detect::foreground_job(pid)?;
+    let (_, _, process) = crate::detect::identify_agent_process_in_job(&job)?;
+    process.argv
 }
 
 /// Capture pane screen history separately from the structural session snapshot.

@@ -550,6 +550,9 @@ impl WindowsInputMapper {
                 code,
                 modifiers: modifiers.bits(),
                 kind,
+                // Reached only when `key.virtual_key_code == 0`: no physical
+                // key identity is available for this record.
+                physical_char: None,
             },
         ))
     }
@@ -622,6 +625,11 @@ impl WindowsInputMapper {
         kind: crate::protocol::ClientKeyKind,
     ) -> Option<crate::protocol::ClientInputEvent> {
         let modifiers = windows_key_modifiers(key.control_key_state);
+        // Layout-independent, by OS design: Windows VK codes for letters,
+        // digits, and OEM punctuation always identify the same physical key
+        // position regardless of the active keyboard layout (the same reason
+        // native Windows apps' Ctrl+C shortcut works under any layout).
+        let physical_char = windows_virtual_key_to_physical_ascii(key.virtual_key_code);
         if modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
             && key.unicode == 0x000a
             && (key.virtual_key_code == 0x4a || key.virtual_scan_code == 0x24)
@@ -631,6 +639,7 @@ impl WindowsInputMapper {
                 code: crate::protocol::ClientKeyCode::Char('j'),
                 modifiers: modifiers.bits(),
                 kind,
+                physical_char,
             });
         }
 
@@ -650,6 +659,7 @@ impl WindowsInputMapper {
                         code,
                         modifiers: modifiers.bits(),
                         kind,
+                        physical_char,
                     });
                 }
             }
@@ -665,6 +675,7 @@ impl WindowsInputMapper {
             code,
             modifiers: modifiers.bits(),
             kind,
+            physical_char,
         })
     }
 
@@ -921,6 +932,30 @@ fn windows_virtual_key_to_key_code(
         0x2d => ClientKeyCode::Insert,
         0x2e => ClientKeyCode::Delete,
         0x70..=0x87 => ClientKeyCode::F((vk - 0x6f) as u8),
+        _ => return None,
+    })
+}
+
+/// Maps a Windows virtual-key code to the ASCII character its position
+/// produces on a base/US-QWERTY layout, independent of the active OS
+/// keyboard layout. VK_A..VK_Z and VK_0..VK_9 are layout-independent by
+/// Windows OS design; the OEM codes cover the punctuation keys used by
+/// Tanuki's default and common custom keybindings (`[`, `-`, etc.).
+fn windows_virtual_key_to_physical_ascii(vk: u16) -> Option<char> {
+    Some(match vk {
+        0x30..=0x39 => char::from_u32(vk as u32)?,
+        0x41..=0x5a => char::from_u32(vk as u32 + 32)?,
+        0xba => ';',
+        0xbb => '=',
+        0xbc => ',',
+        0xbd => '-',
+        0xbe => '.',
+        0xbf => '/',
+        0xc0 => '`',
+        0xdb => '[',
+        0xdc => '\\',
+        0xdd => ']',
+        0xde => '\'',
         _ => return None,
     })
 }
@@ -1267,6 +1302,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Char('c'),
                 modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1279,6 +1315,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Char('j'),
                 modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: Some('j'),
             }]
         );
     }
@@ -1305,20 +1342,21 @@ mod tests {
     #[test]
     fn vti_real_non_letter_control_records_are_preserved() {
         let cases = [
-            (0x20, 0x00, ' '),
-            (0xdc, 0x1c, '\\'),
-            (0xdd, 0x1d, ']'),
-            (0x36, 0x1e, '^'),
-            (0xbd, 0x1f, '-'),
+            (0x20, 0x00, ' ', None),
+            (0xdc, 0x1c, '\\', Some('\\')),
+            (0xdd, 0x1d, ']', Some(']')),
+            (0x36, 0x1e, '^', Some('6')),
+            (0xbd, 0x1f, '-', Some('-')),
         ];
 
-        for (vk, unicode, expected) in cases {
+        for (vk, unicode, expected, expected_physical) in cases {
             assert_eq!(
                 translate([key_vk_with_utf16_mods(vk, unicode, 0x0008)]),
                 vec![crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Char(expected),
                     modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: expected_physical,
                 }],
                 "vk={vk:#x} unicode={unicode:#x}"
             );
@@ -1337,6 +1375,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1353,6 +1392,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1366,6 +1406,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1379,16 +1420,19 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Esc,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Esc,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Repeat,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Esc,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Repeat,
+                    physical_char: None,
                 },
             ]
         );
@@ -1402,6 +1446,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1420,6 +1465,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Enter,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1433,16 +1479,19 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Backspace,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Backspace,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Repeat,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Backspace,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Repeat,
+                    physical_char: None,
                 },
             ]
         );
@@ -1456,6 +1505,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Enter,
                 modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1468,6 +1518,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Char('j'),
                 modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                 kind: crate::protocol::ClientKeyKind::Release,
+                physical_char: Some('j'),
             }]
         );
     }
@@ -1480,6 +1531,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Enter,
                 modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1493,16 +1545,19 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                     kind: crate::protocol::ClientKeyKind::Repeat,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                     kind: crate::protocol::ClientKeyKind::Repeat,
+                    physical_char: None,
                 },
             ]
         );
@@ -1564,11 +1619,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: None,
                 },
             ]
         );
@@ -1587,11 +1644,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: None,
                 },
             ]
         );
@@ -1608,11 +1667,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Backspace,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Backspace,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: None,
                 },
             ]
         );
@@ -1631,11 +1692,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Char('j'),
                     modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: Some('j'),
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Char('j'),
                     modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: Some('j'),
                 },
             ]
         );
@@ -1653,11 +1716,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Char('j'),
                     modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Char('j'),
                     modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: None,
                 },
             ]
         );
@@ -1675,11 +1740,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: None,
                 },
             ]
         );
@@ -1698,11 +1765,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Char('a'),
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Char('a'),
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: Some('a'),
                 },
             ]
         );
@@ -1796,6 +1865,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1821,6 +1891,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1847,6 +1918,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Up,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1861,6 +1933,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1876,11 +1949,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Esc,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Enter,
                     modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
             ]
         );
@@ -1897,11 +1972,13 @@ mod tests {
                     code: crate::protocol::ClientKeyCode::Esc,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::Key {
                     code: crate::protocol::ClientKeyCode::Up,
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Press,
+                    physical_char: None,
                 },
             ]
         );
@@ -1915,6 +1992,26 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Char('c'),
                 modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: Some('c'),
+            }]
+        );
+    }
+
+    #[test]
+    fn vti_ctrl_c_on_cyrillic_layout_reports_physical_c() {
+        // Simulates Ctrl+C typed on a Russian keyboard layout: Windows still
+        // reports VK_C (0x43, layout-independent) for the physical key, but
+        // the mapped Unicode payload is whatever the active layout produces
+        // (here simulated as Cyrillic 'с', U+0441) — `code` stays
+        // layout-dependent, `physical_char` is the layout-independent value
+        // keybind matching should actually use.
+        assert_eq!(
+            translate([key_vk_with_unicode(0x43, 'с', 0x0008)]),
+            vec![crate::protocol::ClientInputEvent::Key {
+                code: crate::protocol::ClientKeyCode::Char('с'),
+                modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
+                kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: Some('c'),
             }]
         );
     }
@@ -1927,6 +2024,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Up,
                 modifiers: crossterm::event::KeyModifiers::ALT.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1939,6 +2037,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Char('@'),
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: Some('2'),
             }]
         );
     }
@@ -1951,6 +2050,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Char('é'),
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }
@@ -1968,6 +2068,7 @@ mod tests {
                 code: crate::protocol::ClientKeyCode::Char('🙂'),
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }]
         );
     }

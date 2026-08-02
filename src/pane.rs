@@ -1536,6 +1536,19 @@ impl PaneRuntime {
         self.terminal.apply_host_terminal_theme(theme);
     }
 
+    /// Mirrors `try_send_focus_event`'s immediate-delivery path: a report
+    /// generated outside the normal pty-read cycle must not wait for the
+    /// next byte from the child to be flushed (see
+    /// `GhosttyPaneTerminal::apply_host_color_scheme`).
+    pub fn apply_host_color_scheme(&self, appearance: crate::terminal_theme::HostAppearance) {
+        let Some(bytes) = self.terminal.apply_host_color_scheme(appearance) else {
+            return;
+        };
+        if let Err(err) = self.try_send_bytes(Bytes::from(bytes)) {
+            warn!(err = %err, ?appearance, "failed to forward pane color-scheme report");
+        }
+    }
+
     pub fn spawn(
         pane_id: PaneId,
         rows: u16,
@@ -3320,6 +3333,41 @@ mod tests {
 
         assert!(runtime.try_send_focus_event(crate::ghostty::FocusEvent::Gained));
         assert_eq!(rx.recv().await.unwrap(), Bytes::from_static(b"\x1b[I"));
+    }
+
+    #[tokio::test]
+    async fn color_scheme_report_is_forwarded_immediately_without_waiting_for_pty_read() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let (resize_tx, _resize_rx) = watch::channel((80, 24, 0, 0));
+        let mut terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        terminal
+            .mode_set(crate::ghostty::MODE_REPORT_COLOR_SCHEME, true)
+            .unwrap();
+        let runtime = PaneRuntime {
+            pane_id: PaneId::from_raw(0),
+            terminal: Arc::new(PaneTerminal::new(
+                GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap(),
+            )),
+            io: PaneRuntimeIo::TestChannel {
+                sender: tx,
+                resize_tx,
+            },
+            current_size: Cell::new((80, 24, 0, 0)),
+            child_pid: Arc::new(AtomicU32::new(0)),
+            reported_cwd: Arc::new(Mutex::new(None)),
+            child_wait_completed: None,
+            kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
+            detection_content_seq: Arc::new(AtomicU64::new(0)),
+            full_lifecycle_authority_active: Arc::new(AtomicBool::new(false)),
+            detect_reset_notify: Arc::new(Notify::new()),
+            pending_release: Arc::new(Mutex::new(None)),
+            preserve_processes_on_drop: true,
+            detect_handle: Some(tokio::spawn(async {}).abort_handle()),
+        };
+
+        // No prior pty read/write happened — this must not depend on one.
+        runtime.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Dark);
+        assert_eq!(rx.recv().await.unwrap(), Bytes::from_static(b"\x1b[?997;1n"));
     }
 
     #[tokio::test]

@@ -41,6 +41,7 @@ impl App {
         }
         self.state.host_terminal_appearance = Some(appearance);
         self.state.host_terminal_appearance_explicit = explicit;
+        self.push_host_color_scheme_to_panes();
         self.refresh_effective_app_theme()
     }
 
@@ -56,6 +57,7 @@ impl App {
         }
         self.state.host_terminal_appearance = appearance;
         self.state.host_terminal_appearance_explicit = explicit;
+        self.push_host_color_scheme_to_panes();
         self.refresh_effective_app_theme()
     }
 
@@ -90,8 +92,25 @@ impl App {
         for runtime in self.terminal_runtimes.values() {
             runtime.apply_host_terminal_theme(self.state.host_terminal_theme);
         }
+        self.push_host_color_scheme_to_panes();
 
         self.render_dirty.store(true, Ordering::Release);
         self.render_notify.notify_one();
+    }
+
+    /// Pushes the current `host_terminal_appearance` to every pane as a CSI
+    /// 997 report (subscribed panes only, no-op for unchanged/unsubscribed
+    /// ones — see `GhosttyPaneTerminal::apply_host_color_scheme`). Called
+    /// from both the OSC 10/11-inferred path (`apply_host_terminal_theme_to_panes`)
+    /// and the explicit mode-2031-client-report path (`set_host_terminal_appearance`/
+    /// `_state`), since only the latter reliably fires when the host's outer
+    /// terminal reports an appearance flip with no matching background-color OSC.
+    fn push_host_color_scheme_to_panes(&self) {
+        let Some(appearance) = self.state.host_terminal_appearance else {
+            return;
+        };
+        for runtime in self.terminal_runtimes.values() {
+            runtime.apply_host_color_scheme(appearance);
+        }
     }
 }

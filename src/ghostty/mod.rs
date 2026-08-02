@@ -163,6 +163,16 @@ pub const MODE_MOUSE_SGR_PIXELS: u16 = 1016;
 pub const MODE_BRACKETED_PASTE: u16 = 2004;
 pub const MODE_SYNCHRONIZED_OUTPUT: u16 = 2026;
 pub const MODE_GRAPHEME_CLUSTER: u16 = 2027;
+/// DEC private mode 2031: color-scheme change reports (CSI ?2031h/l). When a
+/// pane's child process subscribes, libghostty-vt expects an unsolicited
+/// CSI 997 report pushed via the write-pty callback whenever the reported
+/// scheme changes — see `GhosttyPaneTerminal::apply_host_color_scheme`.
+pub const MODE_REPORT_COLOR_SCHEME: u16 = 2031;
+
+pub const COLOR_SCHEME_LIGHT: ffi::GhosttyColorScheme =
+    ffi::GhosttyColorScheme_GHOSTTY_COLOR_SCHEME_LIGHT;
+pub const COLOR_SCHEME_DARK: ffi::GhosttyColorScheme =
+    ffi::GhosttyColorScheme_GHOSTTY_COLOR_SCHEME_DARK;
 // These are documented in vendor/libghostty-vt/include/ghostty/vt/terminal.h,
 // but the generated bindings do not currently expose named constants for them.
 const TERMINAL_DATA_COLOR_FOREGROUND: ffi::GhosttyTerminalData = 18;
@@ -442,6 +452,7 @@ impl CellWide {
 }
 
 type WritePtyCallback = dyn FnMut(&[u8]) + Send;
+type ColorSchemeCallback = dyn FnMut() -> Option<ffi::GhosttyColorScheme> + Send;
 
 const MAX_CLIPBOARD_BYTES: usize = 192 * 1024;
 
@@ -450,6 +461,7 @@ struct TerminalCallbackState {
     write_pty: Option<Box<WritePtyCallback>>,
     pwd_changes: Vec<Vec<u8>>,
     clipboard_writes: Vec<Vec<u8>>,
+    color_scheme: Option<Box<ColorSchemeCallback>>,
 }
 
 unsafe extern "C" fn write_pty_trampoline(
@@ -581,6 +593,35 @@ unsafe extern "C" fn pwd_changed_trampoline(terminal: ffi::GhosttyTerminal, user
     state.pwd_changes.push(bytes);
 }
 
+// Answers a CSI ?996n color-scheme query. Unlike pwd/clipboard (queued events
+// pushed by the library), this is a synchronous pull: libghostty-vt calls this
+// whenever it needs the current scheme (a 996 query, or a DECRQM ?2031$p —
+// mode-support probe — that libghostty-vt answers from its own mode table
+// without invoking this callback at all). Returning false means "ignore",
+// matching GHOSTTY_TERMINAL_OPT_COLOR_SCHEME's documented contract.
+unsafe extern "C" fn color_scheme_trampoline(
+    _terminal: ffi::GhosttyTerminal,
+    userdata: *mut c_void,
+    out_scheme: *mut ffi::GhosttyColorScheme,
+) -> bool {
+    if userdata.is_null() || out_scheme.is_null() {
+        return false;
+    }
+    let state = unsafe { &mut *(userdata.cast::<TerminalCallbackState>()) };
+    let Some(callback) = state.color_scheme.as_mut() else {
+        return false;
+    };
+    match callback() {
+        Some(scheme) => {
+            unsafe {
+                *out_scheme = scheme;
+            }
+            true
+        }
+        None => false,
+    }
+}
+
 fn install_png_decoder_once() {
     INSTALL_PNG_DECODER.call_once(|| unsafe {
         let _ = ffi::ghostty_sys_set(
@@ -696,6 +737,34 @@ pub fn encode_focus(event: FocusEvent) -> Result<Vec<u8>, Error> {
     unsafe {
         ffi::ghostty_focus_encode(
             event.as_raw(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &mut required,
+        )
+        .into_result()?;
+    }
+    buffer.truncate(required);
+    Ok(buffer)
+}
+
+/// Encodes an unsolicited CSI 997 color-scheme report (the same bytes a
+/// CSI ?996n query would receive) for pushing into a pane's pty when the
+/// host's scheme changes while mode 2031 is subscribed.
+pub fn encode_color_scheme_report(scheme: ffi::GhosttyColorScheme) -> Result<Vec<u8>, Error> {
+    let mut required = 0usize;
+    // SAFETY: null buffer + out len is the documented way to query required size.
+    let result = unsafe {
+        ffi::ghostty_color_scheme_report_encode(scheme, ptr::null_mut(), 0, &mut required)
+    };
+    if result != ffi::GhosttyResult_GHOSTTY_OUT_OF_SPACE {
+        result.into_result()?;
+    }
+
+    let mut buffer = vec![0u8; required];
+    // SAFETY: buffer is allocated for required size; function writes at most that many bytes.
+    unsafe {
+        ffi::ghostty_color_scheme_report_encode(
+            scheme,
             buffer.as_mut_ptr().cast(),
             buffer.len(),
             &mut required,
@@ -844,6 +913,25 @@ impl Terminal {
             .into_result()?;
         }
         self.callback_state.write_pty = Some(Box::new(callback));
+        Ok(())
+    }
+
+    /// Registers the CSI ?996n color-scheme query handler. `callback` is
+    /// polled synchronously by libghostty-vt whenever it needs the pane's
+    /// current color scheme; return `None` to leave the query unanswered.
+    pub fn set_color_scheme_callback<F>(&mut self, callback: F) -> Result<(), Error>
+    where
+        F: FnMut() -> Option<ffi::GhosttyColorScheme> + Send + 'static,
+    {
+        unsafe {
+            ffi::ghostty_terminal_set(
+                self.raw,
+                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
+                (color_scheme_trampoline as *const ()).cast(),
+            )
+            .into_result()?;
+        }
+        self.callback_state.color_scheme = Some(Box::new(callback));
         Ok(())
     }
 

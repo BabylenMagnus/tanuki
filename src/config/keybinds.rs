@@ -357,6 +357,7 @@ pub struct Keybinds {
     pub close_pane: ActionKeybinds,
     pub zoom: ActionKeybinds,
     pub resize_mode: ActionKeybinds,
+    pub equalize_splits: ActionKeybinds,
     pub toggle_sidebar: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
 }
@@ -519,6 +520,7 @@ impl Config {
             close_pane: empty_action!(),
             zoom: empty_action!(),
             resize_mode: empty_action!(),
+            equalize_splits: empty_action!(),
             toggle_sidebar: empty_action!(),
             custom_commands: Vec::new(),
         };
@@ -660,6 +662,7 @@ impl Config {
             apply_action!(keybinds.close_pane, close_pane, source);
             apply_action!(keybinds.zoom, zoom, source);
             apply_action!(keybinds.resize_mode, resize_mode, source);
+            apply_action!(keybinds.equalize_splits, equalize_splits, source);
             apply_action!(keybinds.toggle_sidebar, toggle_sidebar, source);
 
             if source == field_source!(indexed) {
@@ -1307,30 +1310,37 @@ pub fn normalize_key_combo((mut code, mut modifiers): KeyCombo) -> KeyCombo {
 
 #[cfg(test)]
 pub fn key_event_matches_combo(key: &KeyEvent, combo: KeyCombo) -> bool {
-    key_parts_match_combo(key.code, key.modifiers, None, combo)
+    key_parts_match_combo(key.code, key.modifiers, None, None, combo)
 }
 
 pub fn terminal_key_matches_combo(key: TerminalKey, combo: KeyCombo) -> bool {
-    key_parts_match_combo(key.code, key.modifiers, key.shifted_codepoint, combo)
+    key_parts_match_combo(
+        key.code,
+        key.modifiers,
+        key.shifted_codepoint,
+        key.physical_char,
+        combo,
+    )
 }
 
 fn key_parts_match_combo(
     actual_code: KeyCode,
     actual_modifiers: KeyModifiers,
     shifted_codepoint: Option<u32>,
+    physical_char: Option<char>,
     combo: KeyCombo,
 ) -> bool {
     let (actual_code, actual_modifiers) = normalize_key_combo((actual_code, actual_modifiers));
     let (expected_code, expected_modifiers) = normalize_key_combo(combo);
 
     if actual_modifiers == expected_modifiers
-        && key_codes_match(
+        && (key_codes_match(
             actual_code,
             actual_modifiers,
             expected_code,
             expected_modifiers,
             shifted_codepoint,
-        )
+        ) || physical_key_matches_expected(physical_char, expected_code))
     {
         return true;
     }
@@ -1345,6 +1355,21 @@ fn key_parts_match_combo(
             expected_code,
             expected_modifiers,
         )
+}
+
+/// Matches a keybinding independent of the OS/host keyboard layout: `true`
+/// when `physical_char` (the ASCII character this key's physical position
+/// produces on a base/US layout — see `TerminalKey::physical_char`) matches
+/// the configured binding's character, regardless of what the layout-mapped
+/// `actual_code` happens to be. This is what makes e.g. `ctrl+c` fire from
+/// the physical C key under a Russian keyboard layout, where the mapped
+/// character crossterm/the host reports for that key is Cyrillic 'с', not
+/// 'c'.
+fn physical_key_matches_expected(physical_char: Option<char>, expected_code: KeyCode) -> bool {
+    let (Some(physical_char), KeyCode::Char(expected)) = (physical_char, expected_code) else {
+        return false;
+    };
+    physical_char.eq_ignore_ascii_case(&expected)
 }
 
 fn key_codes_match(
@@ -1510,6 +1535,50 @@ prefix = "ö"
             (KeyCode::Char('ö'), KeyModifiers::empty())
         );
         assert!(config.collect_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn physical_char_matches_ctrl_c_typed_on_russian_layout() {
+        // Simulates Ctrl+C typed on a Russian keyboard layout: the host
+        // reports the layout-mapped Cyrillic 'с' (U+0441) as `code`, but the
+        // physical C key position is carried separately in `physical_char`
+        // (from the kitty protocol's base-layout-key field or, on Windows,
+        // the VK code).
+        let key = TerminalKey::new(KeyCode::Char('с'), KeyModifiers::CONTROL)
+            .with_physical_char('c');
+        assert!(terminal_key_matches_combo(
+            key,
+            (KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ));
+    }
+
+    #[test]
+    fn unicode_prefix_config_still_matches_without_physical_char() {
+        // A custom non-Latin prefix key (already covered by
+        // `unicode_prefix_config_is_valid` above) must keep matching by
+        // mapped character when no physical-key data is present at all —
+        // the physical-char branch must never replace mapped-char matching.
+        let key = TerminalKey::new(KeyCode::Char('ö'), KeyModifiers::empty());
+        assert!(terminal_key_matches_combo(
+            key,
+            (KeyCode::Char('ö'), KeyModifiers::empty())
+        ));
+    }
+
+    #[test]
+    fn mismatched_physical_char_does_not_create_false_match() {
+        let key = TerminalKey::new(KeyCode::Char('q'), KeyModifiers::CONTROL)
+            .with_physical_char('q');
+        assert!(!terminal_key_matches_combo(
+            key,
+            (KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ));
+
+        let key_no_physical = TerminalKey::new(KeyCode::Char('с'), KeyModifiers::CONTROL);
+        assert!(!terminal_key_matches_combo(
+            key_no_physical,
+            (KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ));
     }
 
     #[test]

@@ -208,6 +208,17 @@ pub fn identify_agent(process_name: &str) -> Option<Agent> {
 }
 
 pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Agent, String)> {
+    identify_agent_process_in_job(job).map(|(agent, name, _)| (agent, name))
+}
+
+/// Same match as [`identify_agent_in_job`], but also returns the specific
+/// [`ForegroundProcess`](crate::platform::ForegroundProcess) that was
+/// recognized as the agent -- callers that need its live `argv` (e.g.
+/// snapshot capture reconstructing `launch_argv` for a pane that was never
+/// spawned with an explicit argv) use this instead of re-deriving the match.
+pub fn identify_agent_process_in_job(
+    job: &crate::platform::ForegroundJob,
+) -> Option<(Agent, String, crate::platform::ForegroundProcess)> {
     if let Some(process) = job
         .processes
         .iter()
@@ -215,11 +226,11 @@ pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Ag
     {
         let candidate = normalized_process_name(process);
         if let Some(agent) = identify_agent(&candidate) {
-            return Some((agent, candidate));
+            return Some((agent, candidate, process.clone()));
         }
     }
 
-    let mut best: Option<(u8, Agent, String)> = None;
+    let mut best: Option<(u8, Agent, String, crate::platform::ForegroundProcess)> = None;
 
     for process in &job.processes {
         let candidate = normalized_process_name(process);
@@ -229,12 +240,12 @@ pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Ag
         let score = process_priority(process, &candidate);
 
         match &best {
-            Some((best_score, _, _)) if *best_score >= score => {}
-            _ => best = Some((score, agent, candidate)),
+            Some((best_score, _, _, _)) if *best_score >= score => {}
+            _ => best = Some((score, agent, candidate, process.clone())),
         }
     }
 
-    best.map(|(_, agent, name)| (agent, name))
+    best.map(|(_, agent, name, process)| (agent, name, process))
 }
 
 /// Detect the state of an agent from the live terminal tail snapshot.
@@ -638,6 +649,48 @@ mod tests {
                 .as_nanos()
         );
         std::env::temp_dir().join(unique)
+    }
+
+    #[test]
+    fn identify_agent_process_in_job_returns_the_matched_process_with_its_live_argv() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 42,
+            processes: vec![
+                foreground_process(42, "bash", &["bash"]),
+                foreground_process(
+                    43,
+                    "claude",
+                    &["claude", "--dangerously-skip-permissions"],
+                ),
+            ],
+        };
+
+        let (agent, name, process) =
+            identify_agent_process_in_job(&job).expect("expected a recognized agent process");
+
+        assert_eq!(agent, Agent::Claude);
+        assert_eq!(name, "claude");
+        assert_eq!(process.pid, 43);
+        assert_eq!(
+            process.argv,
+            Some(vec![
+                "claude".to_string(),
+                "--dangerously-skip-permissions".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn identify_agent_process_in_job_agrees_with_identify_agent_in_job() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 123,
+            processes: vec![foreground_process(1, "codex", &["codex", "--model", "gpt-5"])],
+        };
+
+        assert_eq!(
+            identify_agent_in_job(&job),
+            identify_agent_process_in_job(&job).map(|(agent, name, _)| (agent, name))
+        );
     }
 
     #[test]

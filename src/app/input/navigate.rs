@@ -373,6 +373,15 @@ impl App {
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::EnterResizeMode => self.state.mode = Mode::Resize,
+            NavigateAction::EqualizeSplits => {
+                if let Some(ws) = self.state.active.and_then(|idx| self.state.workspaces.get_mut(idx))
+                {
+                    if let Some(tab) = ws.active_tab_mut() {
+                        tab.layout.equalize();
+                    }
+                }
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::ToggleSidebar => {
                 self.state.sidebar_collapsed = !self.state.sidebar_collapsed;
                 leave_navigate_mode(&mut self.state);
@@ -1322,6 +1331,7 @@ pub(crate) enum NavigateAction {
     CopyMode,
     Zoom,
     EnterResizeMode,
+    EqualizeSplits,
     ToggleSidebar,
     CyclePaneNext,
     CyclePanePrevious,
@@ -1458,6 +1468,7 @@ fn non_indexed_action_for_key(
         (&kb.close_pane, NavigateAction::ClosePane),
         (&kb.zoom, NavigateAction::Zoom),
         (&kb.resize_mode, NavigateAction::EnterResizeMode),
+        (&kb.equalize_splits, NavigateAction::EqualizeSplits),
         (&kb.toggle_sidebar, NavigateAction::ToggleSidebar),
         (&kb.reload_config, NavigateAction::ReloadConfig),
         (
@@ -1689,6 +1700,14 @@ pub(super) fn execute_navigate_action_in_context(
             leave_navigate_mode(state);
         }
         NavigateAction::EnterResizeMode => state.mode = Mode::Resize,
+        NavigateAction::EqualizeSplits => {
+            if let Some(ws) = state.active.and_then(|idx| state.workspaces.get_mut(idx)) {
+                if let Some(tab) = ws.active_tab_mut() {
+                    tab.layout.equalize();
+                }
+            }
+            leave_navigate_mode(state);
+        }
         NavigateAction::ToggleSidebar => {
             state.sidebar_collapsed = !state.sidebar_collapsed;
             leave_navigate_mode(state);
@@ -2242,6 +2261,40 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Resize);
+    }
+
+    #[test]
+    fn custom_equalize_key_equalizes_active_tab_and_exits_navigate() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds.equalize_splits = crate::config::ActionKeybinds::prefix("g");
+        {
+            let ws = state.workspaces.get_mut(0).expect("workspace");
+            let tab = ws.active_tab_mut().expect("active tab");
+            tab.layout.focus_pane(tab.layout.focused());
+            let second = tab.layout.split_focused_with_ratio(Direction::Horizontal, 0.9);
+            tab.layout.focus_pane(second);
+            tab.layout.split_focused_with_ratio(Direction::Horizontal, 0.9);
+        }
+
+        handle_navigate_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+        );
+
+        let ws = state.workspaces.get(0).expect("workspace");
+        let tab = ws.active_tab().expect("active tab");
+        let widths: Vec<u16> = tab
+            .layout
+            .panes(ratatui::layout::Rect::new(0, 0, 90, 40))
+            .into_iter()
+            .map(|info| info.rect.width)
+            .collect();
+        assert_eq!(widths.len(), 3);
+        assert!(
+            widths.iter().max().unwrap() - widths.iter().min().unwrap() <= 1,
+            "expected near-equal widths after equalize, got {widths:?}"
+        );
+        assert_eq!(state.mode, Mode::Terminal);
     }
 
     #[test]

@@ -9,6 +9,12 @@ pub struct TerminalKey {
     pub modifiers: KeyModifiers,
     pub kind: crossterm::event::KeyEventKind,
     pub shifted_codepoint: Option<u32>,
+    /// The ASCII character this key's physical position produces on a base/US
+    /// layout, independent of the active OS/host keyboard layout. `None` when
+    /// the producer (Windows VK code, kitty protocol `base-layout-key` field)
+    /// doesn't have this information, e.g. a host terminal without kitty
+    /// keyboard protocol support.
+    pub physical_char: Option<char>,
 }
 
 impl TerminalKey {
@@ -18,6 +24,7 @@ impl TerminalKey {
             modifiers,
             kind: crossterm::event::KeyEventKind::Press,
             shifted_codepoint: None,
+            physical_char: None,
         }
     }
 
@@ -29,6 +36,11 @@ impl TerminalKey {
     #[allow(dead_code)] // Reserved for the upcoming raw input parser to preserve shifted/base key pairs.
     pub fn with_shifted_codepoint(mut self, shifted_codepoint: u32) -> Self {
         self.shifted_codepoint = Some(shifted_codepoint);
+        self
+    }
+
+    pub fn with_physical_char(mut self, physical_char: char) -> Self {
+        self.physical_char = Some(physical_char);
         self
     }
 

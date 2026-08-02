@@ -2840,9 +2840,19 @@ impl HeadlessServer {
         // the next Frame to be treated as brand-new (and, with is_full, a CSI
         // 2J clear on the client). Terminal content updates come from PTY dirty.
 
+        let outer_focus_before = self.app.state.outer_terminal_focus;
         if source_is_full_app {
             self.update_client_outer_focus_from_events(client_id, &events);
         }
+        // Tracked separately from `chrome_before`/`chrome_after` below: this
+        // mutates app.state.outer_terminal_focus immediately, before that
+        // snapshot pair is even taken, so a plain diff would never see it.
+        // Only a transition to *gained* is treated as visible -- losing
+        // outer focus intentionally does not need a render on its own (see
+        // `foreground_client_focus_event_updates_app_focus_state` and
+        // `foreground_focus_gained_reaches_pane_with_focus_reporting`).
+        let outer_focus_changed = self.app.state.outer_terminal_focus != outer_focus_before
+            && self.app.state.outer_terminal_focus == Some(true);
         let mouse_may_change_ui = events.iter().any(|event| {
             matches!(
                 event,
@@ -2864,12 +2874,16 @@ impl HeadlessServer {
         let chrome_before = AppChromeSnapshot::capture(&self.app.state);
         self.app
             .route_client_events(events, self.foreground_client_id == Some(client_id));
-        let chrome_after = AppChromeSnapshot::capture(&self.app.state);
-        if self.app.take_config_reloaded_from_disk() {
+        let config_reloaded_from_disk = self.app.take_config_reloaded_from_disk();
+        if config_reloaded_from_disk {
             self.reload_server_config(false);
         } else {
             self.sync_foreground_client_state();
         }
+        // Captured after sync_foreground_client_state()/reload_server_config():
+        // both propagate per-client fields (e.g. outer_terminal_focus) into
+        // app.state, so snapshotting before them would miss those changes.
+        let chrome_after = AppChromeSnapshot::capture(&self.app.state);
 
         if self.app.state.detach_requested {
             self.app.state.detach_requested = false;
@@ -2892,12 +2906,19 @@ impl HeadlessServer {
             host_surface_redraw
                 || foreground_changed
                 || theme_changed
+                || outer_focus_changed
                 || chrome_before != chrome_after
                 || self.app.state.pending_full_redraw
                 // Selection / local scroll / scrollbar live partly outside the
                 // chrome snapshot (pane runtime scroll offsets); mouse non-move
                 // still needs an app paint so those updates are not dropped.
                 || mouse_may_change_ui
+                // A config reload (e.g. Settings-screen Enter writing to disk)
+                // is a deliberate, rare user action, not a hot per-keystroke
+                // path -- its effects (theme, keybindings, settings display)
+                // are not reliably captured by AppChromeSnapshot, so treat it
+                // as always visible rather than risk a dropped redraw.
+                || config_reloaded_from_disk
         }
     }
 
@@ -7285,6 +7306,7 @@ next_tab = ""
                     code: crate::protocol::ClientKeyCode::Char('x'),
                     modifiers: 0,
                     kind: crate::protocol::ClientKeyKind::Release,
+                    physical_char: None,
                 },
                 crate::protocol::ClientInputEvent::FocusLost,
             ],
@@ -7335,6 +7357,7 @@ next_tab = ""
                 code: crate::protocol::ClientKeyCode::Char('x'),
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Release,
+                physical_char: None,
             }],
         }));
         assert_eq!(server.foreground_client_id, Some(3));
@@ -7458,6 +7481,7 @@ next_tab = ""
                 code: crate::protocol::ClientKeyCode::Enter,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }],
         }));
 
@@ -7497,6 +7521,7 @@ next_tab = ""
                 code: crate::protocol::ClientKeyCode::Char('a'),
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }],
         }));
         assert!(!server.app.state.pending_full_redraw);
@@ -7565,6 +7590,7 @@ next_tab = ""
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }],
         }));
 

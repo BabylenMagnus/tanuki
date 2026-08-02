@@ -210,6 +210,17 @@ impl TileLayout {
         set_ratio_at(&mut self.root, path, ratio.clamp(0.1, 0.9))
     }
 
+    /// Resize every split in the tree so all panes end up equal-sized.
+    ///
+    /// Each split's ratio is set to the leaf-count fraction on its first
+    /// side (e.g. a split with 1 pane on the first side and 3 on the second
+    /// gets `ratio = 0.25`), computed bottom-up so this produces equal-area
+    /// panes regardless of the tree's shape (a straight chain of splits, a
+    /// balanced grid, or anything in between).
+    pub fn equalize(&mut self) {
+        equalize_node(&mut self.root);
+    }
+
     /// Adjust the nearest split in the given direction for the focused pane.
     /// `delta` is positive to grow, negative to shrink.
     pub fn resize_focused(&mut self, nav: NavDirection, delta: f32, area: Rect) {
@@ -407,6 +418,25 @@ fn count_panes(node: &Node) -> usize {
     match node {
         Node::Pane(_) => 1,
         Node::Split { first, second, .. } => count_panes(first) + count_panes(second),
+    }
+}
+
+/// Bottom-up equalize pass: sets every split's ratio from its children's
+/// leaf counts and returns this node's own leaf count to its caller.
+fn equalize_node(node: &mut Node) -> usize {
+    match node {
+        Node::Pane(_) => 1,
+        Node::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } => {
+            let first_count = equalize_node(first);
+            let second_count = equalize_node(second);
+            *ratio = (first_count as f32 / (first_count + second_count) as f32).clamp(0.1, 0.9);
+            first_count + second_count
+        }
     }
 }
 
@@ -781,6 +811,101 @@ mod tests {
         let split = split_snapshot(&layout)[0];
         assert_eq!(split.0, Direction::Horizontal);
         assert!((split.1 - 0.35).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn equalize_is_noop_for_single_pane() {
+        let (mut layout, root) = TileLayout::new();
+        layout.equalize();
+        assert_eq!(pane_rect(&layout, root), Rect::new(0, 0, 100, 40));
+    }
+
+    #[test]
+    fn equalize_sets_leaf_weighted_ratios_for_mixed_tree() {
+        let mut layout = sample_layout();
+
+        layout.equalize();
+
+        let splits = split_snapshot(&layout);
+        // Root: 1 pane vs 3 panes {2,3,4}.
+        assert!((splits[0].1 - 0.25).abs() < f32::EPSILON);
+        // Second level: 1 pane (2) vs 2 panes {3,4}.
+        assert!((splits[1].1 - (1.0 / 3.0)).abs() < f32::EPSILON);
+        // Third level: 1 pane (3) vs 1 pane (4).
+        assert!((splits[2].1 - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn equalize_is_idempotent() {
+        let mut layout = sample_layout();
+        layout.equalize();
+        let once = split_snapshot(&layout);
+
+        layout.equalize();
+
+        assert_eq!(split_snapshot(&layout), once);
+    }
+
+    #[test]
+    fn equalize_produces_equal_width_rects_for_horizontal_chain() {
+        let (mut layout, first) = TileLayout::new();
+        layout.focus_pane(first);
+        let second = layout.split_focused_with_ratio(Direction::Horizontal, 0.8);
+        layout.focus_pane(second);
+        let third = layout.split_focused_with_ratio(Direction::Horizontal, 0.2);
+        layout.focus_pane(third);
+        let _fourth = layout.split_focused_with_ratio(Direction::Horizontal, 0.9);
+
+        layout.equalize();
+
+        let widths: Vec<u16> = pane_rects(&layout)
+            .into_iter()
+            .map(|(_, rect)| rect.width)
+            .collect();
+        assert_eq!(widths.len(), 4);
+        let (min, max) = (
+            *widths.iter().min().unwrap(),
+            *widths.iter().max().unwrap(),
+        );
+        // Ratatui's integer layout rounding can differ by at most one column
+        // between panes when 100 doesn't divide evenly by 4.
+        assert!(max - min <= 1, "expected near-equal widths, got {widths:?}");
+    }
+
+    #[test]
+    fn equalize_produces_equal_rects_for_2x2_grid() {
+        let (mut layout, top_left) = TileLayout::new();
+        layout.focus_pane(top_left);
+        let top_right = layout.split_focused_with_ratio(Direction::Horizontal, 0.7);
+        layout.focus_pane(top_left);
+        let bottom_left = layout.split_focused_with_ratio(Direction::Vertical, 0.3);
+        layout.focus_pane(top_right);
+        let bottom_right = layout.split_focused_with_ratio(Direction::Vertical, 0.6);
+
+        layout.equalize();
+
+        let area = Rect::new(0, 0, 100, 40);
+        let rects: std::collections::HashMap<_, _> = layout
+            .panes(area)
+            .into_iter()
+            .map(|info| (info.id, info.rect))
+            .collect();
+        let widths: Vec<u16> = [top_left, top_right, bottom_left, bottom_right]
+            .iter()
+            .map(|id| rects[id].width)
+            .collect();
+        let heights: Vec<u16> = [top_left, top_right, bottom_left, bottom_right]
+            .iter()
+            .map(|id| rects[id].height)
+            .collect();
+        assert!(
+            widths.iter().max().unwrap() - widths.iter().min().unwrap() <= 1,
+            "expected near-equal widths, got {widths:?}"
+        );
+        assert!(
+            heights.iter().max().unwrap() - heights.iter().min().unwrap() <= 1,
+            "expected near-equal heights, got {heights:?}"
+        );
     }
 
     #[test]

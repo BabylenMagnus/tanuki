@@ -1066,6 +1066,7 @@ pub(crate) enum KeybindSetting {
     ClosePane,
     Zoom,
     ResizeMode,
+    EqualizeSplits,
     ToggleSidebar,
     NavigateWorkspaceUp,
     NavigateWorkspaceDown,
@@ -1102,7 +1103,7 @@ impl KeybindSetting {
     /// Declared in [`KeybindGroup`] order so a single pass over `ALL` (or a
     /// filtered subset of it) can render contiguous group headers without
     /// re-sorting -- see `render_settings_keybinds`.
-    pub(crate) const ALL: [Self; 48] = [
+    pub(crate) const ALL: [Self; 49] = [
         // KeybindGroup::Global
         Self::Help,
         Self::Settings,
@@ -1154,6 +1155,7 @@ impl KeybindSetting {
         Self::ClosePane,
         Self::Zoom,
         Self::ResizeMode,
+        Self::EqualizeSplits,
         Self::ToggleSidebar,
     ];
 
@@ -1208,6 +1210,7 @@ impl KeybindSetting {
             | Self::ClosePane
             | Self::Zoom
             | Self::ResizeMode
+            | Self::EqualizeSplits
             | Self::ToggleSidebar => KeybindGroup::Panes,
         }
     }
@@ -1256,6 +1259,7 @@ impl KeybindSetting {
             Self::ClosePane => "close_pane",
             Self::Zoom => "zoom",
             Self::ResizeMode => "resize_mode",
+            Self::EqualizeSplits => "equalize_splits",
             Self::ToggleSidebar => "toggle_sidebar",
             Self::NavigateWorkspaceUp => "navigate_workspace_up",
             Self::NavigateWorkspaceDown => "navigate_workspace_down",
@@ -1309,6 +1313,7 @@ impl KeybindSetting {
             Self::ClosePane => "close pane",
             Self::Zoom => "zoom pane",
             Self::ResizeMode => "resize mode",
+            Self::EqualizeSplits => "equalize splits",
             Self::ToggleSidebar => "toggle sidebar",
             Self::NavigateWorkspaceUp => "workspace list up",
             Self::NavigateWorkspaceDown => "workspace list down",
@@ -1362,6 +1367,7 @@ impl KeybindSetting {
             Self::ClosePane => keybinds.close_pane.label(),
             Self::Zoom => keybinds.zoom.label(),
             Self::ResizeMode => keybinds.resize_mode.label(),
+            Self::EqualizeSplits => keybinds.equalize_splits.label(),
             Self::ToggleSidebar => keybinds.toggle_sidebar.label(),
             Self::NavigateWorkspaceUp => keybinds.navigate.workspace_up.label(),
             Self::NavigateWorkspaceDown => keybinds.navigate.workspace_down.label(),

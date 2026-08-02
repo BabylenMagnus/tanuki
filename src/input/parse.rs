@@ -30,6 +30,16 @@ fn parse_kitty_key_sequence(data: &str) -> Option<TerminalKey> {
         .next()
         .filter(|field| !field.is_empty())
         .and_then(|field| field.parse::<u32>().ok());
+    // The kitty keyboard protocol's 3rd `key_part` field is `base-layout-key`:
+    // the codepoint this key position would produce on a base/US layout,
+    // independent of the host's active keyboard layout. Only useful to us as
+    // an ASCII physical-key identity for keybind matching.
+    let physical_char = key_fields
+        .next()
+        .filter(|field| !field.is_empty())
+        .and_then(|field| field.parse::<u32>().ok())
+        .and_then(char::from_u32)
+        .filter(char::is_ascii);
 
     if let Some(text) = associated_text {
         if text.parse::<u32>().ok()? != codepoint {
@@ -45,6 +55,7 @@ fn parse_kitty_key_sequence(data: &str) -> Option<TerminalKey> {
         modifiers: key_modifiers_from_u8(modifier),
         kind,
         shifted_codepoint,
+        physical_char,
     })
 }
 
@@ -588,6 +599,19 @@ mod tests {
         assert_eq!(key.modifiers, KeyModifiers::SHIFT);
         assert_eq!(key.kind, crossterm::event::KeyEventKind::Press);
         assert_eq!(key.shifted_codepoint, Some('!' as u32));
+    }
+
+    #[test]
+    fn parse_kitty_sequence_preserves_base_layout_physical_key() {
+        // Simulates Ctrl+C typed on a Russian keyboard layout: the host's
+        // mapped codepoint is Cyrillic 'с' (U+0441 = 1089), but the kitty
+        // protocol's 3rd `base-layout-key` field reports the physical/US
+        // position ('c' = 99), independent of the active layout.
+        let key = parse_terminal_key_sequence("\x1b[1089::99;5u").unwrap();
+        assert_eq!(key.code, KeyCode::Char('с'));
+        assert_eq!(key.modifiers, KeyModifiers::CONTROL);
+        assert_eq!(key.shifted_codepoint, None);
+        assert_eq!(key.physical_char, Some('c'));
     }
 
     #[test]

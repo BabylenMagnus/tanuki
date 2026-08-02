@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -43,6 +44,9 @@ const MODE_MOUSE_X10: u16 = 9;
 const MODE_MOUSE_PRESS_RELEASE: u16 = 1000;
 const MODE_MOUSE_BUTTON_MOTION: u16 = 1002;
 const MODE_MOUSE_ANY_MOTION: u16 = 1003;
+/// Sentinel for `GhosttyPaneCore::host_color_scheme` before the app has ever
+/// reported a host appearance — distinct from the real LIGHT(0)/DARK(1) values.
+const COLOR_SCHEME_UNSET: u8 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScrollMetrics {
@@ -161,6 +165,11 @@ pub(crate) struct GhosttyPaneCore {
     pub initial_default_foreground: Option<crate::ghostty::RgbColor>,
     pub initial_default_background: Option<crate::ghostty::RgbColor>,
     pub host_terminal_theme: crate::terminal_theme::TerminalTheme,
+    /// Last color scheme reported to this pane's child process via CSI 997,
+    /// shared with the `set_color_scheme_callback` closure so it can answer
+    /// CSI ?996n queries without re-locking this `Mutex<GhosttyPaneCore>`
+    /// from inside a callback that may already be running under that lock.
+    pub host_color_scheme: Arc<AtomicU8>,
     pub transient_default_color_owner_pgid: Option<u32>,
     pub default_color_tracker: DefaultColorOscTracker,
     pub default_color_event_tracker: DefaultColorEventTracker,
@@ -505,6 +514,13 @@ impl PaneTerminal {
 
     pub fn apply_host_terminal_theme(&self, theme: crate::terminal_theme::TerminalTheme) {
         self.ghostty.apply_host_terminal_theme(theme);
+    }
+
+    pub fn apply_host_color_scheme(
+        &self,
+        appearance: crate::terminal_theme::HostAppearance,
+    ) -> Option<Vec<u8>> {
+        self.ghostty.apply_host_color_scheme(appearance)
     }
 
     pub fn has_transient_default_color_override(&self) -> bool {
@@ -961,6 +977,20 @@ impl GhosttyPaneTerminal {
             })
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
+        let host_color_scheme = Arc::new(AtomicU8::new(COLOR_SCHEME_UNSET));
+        let color_scheme_state = Arc::clone(&host_color_scheme);
+        terminal
+            .set_color_scheme_callback(move || match color_scheme_state.load(Ordering::Acquire) {
+                v if v == crate::ghostty::COLOR_SCHEME_LIGHT as u8 => {
+                    Some(crate::ghostty::COLOR_SCHEME_LIGHT)
+                }
+                v if v == crate::ghostty::COLOR_SCHEME_DARK as u8 => {
+                    Some(crate::ghostty::COLOR_SCHEME_DARK)
+                }
+                _ => None,
+            })
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+
         let mut render_state =
             crate::ghostty::RenderState::new().map_err(|e| std::io::Error::other(e.to_string()))?;
         let initial_colors = render_state
@@ -982,6 +1012,7 @@ impl GhosttyPaneTerminal {
                 initial_default_foreground,
                 initial_default_background,
                 host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
+                host_color_scheme,
                 transient_default_color_owner_pgid: None,
                 default_color_tracker: DefaultColorOscTracker::default(),
                 default_color_event_tracker: DefaultColorEventTracker::default(),
@@ -1021,6 +1052,48 @@ impl GhosttyPaneTerminal {
                 background_unowned,
             );
         }
+    }
+
+    /// Computes the unsolicited CSI 997 color-scheme report to push into
+    /// this pane's pty, if the reported scheme actually changed and the
+    /// pane's child process has subscribed via CSI ?2031h — mirroring
+    /// Ghostty's own `colorSchemeCallback`/`colorSchemeReportLocked`
+    /// (force: false) and tmux's `window_pane_send_theme_update`. CSI
+    /// ?996n queries and CSI ?2031$p (DECRQM) probes are answered
+    /// automatically by libghostty-vt via the `set_color_scheme_callback`
+    /// registered in `new()` and the existing write-pty callback — this
+    /// method only handles the push.
+    ///
+    /// Returns the encoded bytes rather than writing them into
+    /// `pending_pty_responses` itself: that queue is only drained as a
+    /// byproduct of processing real incoming pty bytes (see
+    /// `write_pty_bytes_with_ordered_responses`), so on an idle pane with
+    /// no pty traffic a report queued there could sit undelivered
+    /// indefinitely. The caller (`PaneRuntime::apply_host_color_scheme`)
+    /// pushes the returned bytes immediately via `try_send_bytes`, the
+    /// same immediate-delivery path `try_send_focus_event` uses for mode
+    /// 1004 focus reports.
+    pub fn apply_host_color_scheme(
+        &self,
+        appearance: crate::terminal_theme::HostAppearance,
+    ) -> Option<Vec<u8>> {
+        let scheme = match appearance {
+            crate::terminal_theme::HostAppearance::Light => crate::ghostty::COLOR_SCHEME_LIGHT,
+            crate::terminal_theme::HostAppearance::Dark => crate::ghostty::COLOR_SCHEME_DARK,
+        };
+
+        let should_push = if let Ok(core) = self.core.lock() {
+            let previous = core.host_color_scheme.swap(scheme as u8, Ordering::AcqRel);
+            let changed = previous != scheme as u8;
+            changed && core.terminal.mode_get(crate::ghostty::MODE_REPORT_COLOR_SCHEME).unwrap_or(false)
+        } else {
+            false
+        };
+
+        if !should_push {
+            return None;
+        }
+        crate::ghostty::encode_color_scheme_report(scheme).ok()
     }
 
     pub fn has_transient_default_color_override(&self) -> bool {
@@ -5036,6 +5109,61 @@ mod tests {
         assert_eq!(result.terminal_responses.len(), 1);
         assert!(String::from_utf8_lossy(&result.terminal_responses[0]).contains('R'));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn process_pty_bytes_answers_color_scheme_query_after_appearance_set() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+        let pane_id = PaneId::from_raw(1);
+
+        // Before any appearance is known, the CSI ?996n query must be
+        // silently ignored (the color-scheme callback returns None).
+        let result = pane.process_pty_bytes(pane_id, 0, b"\x1b[?996n", &tx);
+        assert!(result.terminal_responses.is_empty());
+
+        pane.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Dark);
+        let result = pane.process_pty_bytes(pane_id, 0, b"\x1b[?996n", &tx);
+        assert_eq!(result.terminal_responses, vec![Bytes::from_static(b"\x1b[?997;1n")]);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn apply_host_color_scheme_returns_report_only_when_subscribed_and_changed() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+        let pane_id = PaneId::from_raw(1);
+
+        // Not subscribed (no CSI ?2031h from the child yet) — no report,
+        // even though the scheme is newly known.
+        assert_eq!(
+            pane.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Dark),
+            None
+        );
+
+        // Subscribe, then flip the appearance — expect exactly one report.
+        let result = pane.process_pty_bytes(pane_id, 0, b"\x1b[?2031h", &tx);
+        assert!(result.terminal_responses.is_empty());
+        assert_eq!(
+            pane.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Light),
+            Some(b"\x1b[?997;2n".to_vec())
+        );
+
+        // Same appearance again — no duplicate report.
+        assert_eq!(
+            pane.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Light),
+            None
+        );
+
+        // Unsubscribe, then flip again — no report once unsubscribed.
+        let result = pane.process_pty_bytes(pane_id, 0, b"\x1b[?2031l", &tx);
+        assert!(result.terminal_responses.is_empty());
+        assert_eq!(
+            pane.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Dark),
+            None
+        );
     }
 
     #[test]

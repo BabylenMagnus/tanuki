@@ -312,6 +312,7 @@ fn windows_client_input_event_from_raw(
             code: crate::protocol::ClientKeyCode::from_crossterm(key.code)?,
             modifiers: key.modifiers.bits(),
             kind: crate::protocol::ClientKeyKind::from_crossterm(key.kind),
+            physical_char: key.physical_char,
         }),
         crate::raw_input::RawInputEvent::Mouse(mouse) => {
             Some(crate::protocol::ClientInputEvent::Mouse {
@@ -564,6 +565,7 @@ mod windows_tests {
                 code: crate::protocol::ClientKeyCode::Char('d'),
                 modifiers: KeyModifiers::CONTROL.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }
         );
     }
@@ -584,6 +586,7 @@ mod windows_tests {
                 code: crate::protocol::ClientKeyCode::Up,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }
         );
     }
@@ -603,6 +606,7 @@ mod windows_tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             }
         );
     }

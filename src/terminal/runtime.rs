@@ -209,6 +209,10 @@ impl TerminalRuntime {
         self.0.apply_host_terminal_theme(theme);
     }
 
+    pub fn apply_host_color_scheme(&self, appearance: crate::terminal_theme::HostAppearance) {
+        self.0.apply_host_color_scheme(appearance);
+    }
+
     pub fn begin_graceful_release(&self, agent: crate::detect::Agent) {
         self.0.begin_graceful_release(agent);
     }

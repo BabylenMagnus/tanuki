@@ -1394,6 +1394,7 @@ new_tab = "ctrl+notakey"
                 code: crate::protocol::ClientKeyCode::Enter,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                physical_char: None,
             },
             ClientInputEvent::FocusGained,
         ];

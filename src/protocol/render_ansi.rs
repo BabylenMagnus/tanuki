@@ -125,7 +125,15 @@ impl BlitEncoder {
     }
 
     pub(crate) fn is_current(&self, frame: &FrameData) -> bool {
-        self.last_frame.as_ref() == Some(frame)
+        // `FrameData::is_full` is a transport hint recomputed fresh on every
+        // render (true only when the client has no same-size baseline yet),
+        // not part of the visible content -- comparing it via derived
+        // `PartialEq` would spuriously treat two visually-identical frames
+        // as changed once a baseline exists. Use `content_eq`, same as the
+        // `Semantic` render path already does.
+        self.last_frame
+            .as_ref()
+            .is_some_and(|last| last.content_eq(frame))
     }
 
     pub(crate) fn last_frame(&self) -> Option<&FrameData> {

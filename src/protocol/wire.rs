@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -115,6 +115,12 @@ pub enum ClientInputEvent {
         code: ClientKeyCode,
         modifiers: u8,
         kind: ClientKeyKind,
+        /// The ASCII character this key's physical position produces on a
+        /// base/US layout, independent of the client's active keyboard
+        /// layout (from the Windows VK code). `None` when the client backend
+        /// doesn't have this information (e.g. the crossterm-fallback
+        /// Windows input backend).
+        physical_char: Option<char>,
     },
     Mouse {
         kind: ClientMouseKind,
@@ -258,6 +264,10 @@ impl ClientInputEvent {
                 code: ClientKeyCode::from_crossterm(key.code)?,
                 modifiers: key.modifiers.bits(),
                 kind: ClientKeyKind::from_crossterm(key.kind),
+                // crossterm exposes no scancode/VK info on any platform, so
+                // this backend (the Windows crossterm-fallback path) has no
+                // physical-key data to offer.
+                physical_char: None,
             }),
             crossterm::event::Event::Mouse(mouse) => Some(Self::Mouse {
                 kind: ClientMouseKind::from_crossterm(mouse.kind)?,
@@ -278,13 +288,18 @@ impl ClientInputEvent {
                 code,
                 modifiers,
                 kind,
-            } => crate::raw_input::RawInputEvent::Key(
-                crate::input::TerminalKey::new(
+                physical_char,
+            } => crate::raw_input::RawInputEvent::Key({
+                let mut key = crate::input::TerminalKey::new(
                     code.to_crossterm(),
                     crossterm::event::KeyModifiers::from_bits_truncate(*modifiers),
                 )
-                .with_kind(kind.to_crossterm()),
-            ),
+                .with_kind(kind.to_crossterm());
+                if let Some(physical_char) = physical_char {
+                    key = key.with_physical_char(*physical_char);
+                }
+                key
+            }),
             Self::Mouse {
                 kind,
                 column,
@@ -1134,11 +1149,13 @@ mod tests {
                     code: ClientKeyCode::Char('N'),
                     modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
                     kind: ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 ClientInputEvent::Key {
                     code: ClientKeyCode::Backspace,
                     modifiers: 0,
                     kind: ClientKeyKind::Press,
+                    physical_char: None,
                 },
                 ClientInputEvent::Mouse {
                     kind: ClientMouseKind::Down(ClientMouseButton::Left),
@@ -1160,6 +1177,7 @@ mod tests {
             code: ClientKeyCode::Char('N'),
             modifiers: crossterm::event::KeyModifiers::SHIFT.bits(),
             kind: ClientKeyKind::Press,
+            physical_char: None,
         }
         .to_raw_input_event();
         match shifted {
@@ -1167,6 +1185,7 @@ mod tests {
                 assert_eq!(key.code, crossterm::event::KeyCode::Char('N'));
                 assert_eq!(key.modifiers, crossterm::event::KeyModifiers::SHIFT);
                 assert_eq!(key.kind, crossterm::event::KeyEventKind::Press);
+                assert_eq!(key.physical_char, None);
             }
             other => panic!("expected shifted key event, got {other:?}"),
         }
@@ -1175,6 +1194,7 @@ mod tests {
             code: ClientKeyCode::Backspace,
             modifiers: 0,
             kind: ClientKeyKind::Press,
+            physical_char: None,
         }
         .to_raw_input_event();
         match backspace {
@@ -1184,6 +1204,22 @@ mod tests {
                 assert_eq!(key.kind, crossterm::event::KeyEventKind::Press);
             }
             other => panic!("expected backspace key event, got {other:?}"),
+        }
+
+        let physical = ClientInputEvent::Key {
+            code: ClientKeyCode::Char('с'),
+            modifiers: crossterm::event::KeyModifiers::CONTROL.bits(),
+            kind: ClientKeyKind::Press,
+            physical_char: Some('c'),
+        }
+        .to_raw_input_event();
+        match physical {
+            crate::raw_input::RawInputEvent::Key(key) => {
+                assert_eq!(key.code, crossterm::event::KeyCode::Char('с'));
+                assert_eq!(key.modifiers, crossterm::event::KeyModifiers::CONTROL);
+                assert_eq!(key.physical_char, Some('c'));
+            }
+            other => panic!("expected physical key event, got {other:?}"),
         }
     }
 
