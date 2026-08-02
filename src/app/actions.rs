@@ -191,7 +191,7 @@ pub fn notification_toast_for_pane_state_update(
 }
 
 fn toast_agent_label(agent_label: &str) -> &str {
-    agent_label
+    crate::detect::display_agent_label(agent_label)
 }
 
 fn toast_event_text(kind: ToastKind) -> &'static str {
@@ -544,19 +544,25 @@ impl AppState {
                     terminal.and_then(|terminal| terminal.agent_name.as_deref().map(str::to_string))
                 })
                 .or_else(|| {
-                    terminal
-                        .and_then(|terminal| terminal.effective_agent_label().map(str::to_string))
+                    terminal.and_then(|terminal| {
+                        terminal
+                            .effective_agent_label()
+                            .map(|label| crate::detect::display_agent_label(label).to_string())
+                    })
                 })
                 .or_else(|| {
                     launch_label(terminal.and_then(|terminal| terminal.launch_argv.as_ref()))
                 })
                 .unwrap_or_else(|| format!("pane {pane_number}"));
             let display_agent = terminal.and_then(|terminal| terminal.effective_display_agent());
-            let agent_label = display_agent.as_deref().or_else(|| {
-                terminal
-                    .and_then(|terminal| terminal.agent_name.as_deref())
-                    .or_else(|| terminal.and_then(|terminal| terminal.effective_agent_label()))
-            });
+            let agent_label = display_agent
+                .as_deref()
+                .or_else(|| terminal.and_then(|terminal| terminal.agent_name.as_deref()))
+                .or_else(|| {
+                    terminal
+                        .and_then(|terminal| terminal.effective_agent_label())
+                        .map(crate::detect::display_agent_label)
+                });
             let state = terminal
                 .map(|terminal| terminal.state)
                 .unwrap_or(AgentState::Unknown);

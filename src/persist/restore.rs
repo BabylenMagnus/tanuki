@@ -568,6 +568,16 @@ fn restore_tab(
             continue;
         }
 
+        // Only used when this pane isn't a live Unix hand-off import: a cold restart
+        // (no native agent-resume plan either, that case already `continue`d above)
+        // should still spawn with any saved custom launch flags instead of a bare
+        // default shell -- see `live_agent_launch_argv` (persist/snapshot.rs) for how
+        // this gets captured in the first place.
+        let cold_restart_argv: Option<&[String]> = if was_imported {
+            None
+        } else {
+            saved_launch_argv.as_deref()
+        };
         let runtime_result = {
             #[cfg(unix)]
             if let Some(imported) = imported_runtime {
@@ -578,6 +588,22 @@ fn restore_tab(
                     },
                     runtime_context.scrollback_limit_bytes,
                     crate::terminal_theme::TerminalTheme::default(),
+                    runtime_context.events.clone(),
+                    runtime_context.render_notify.clone(),
+                    runtime_context.render_dirty.clone(),
+                )
+            } else if let Some(argv) = cold_restart_argv {
+                TerminalRuntime::spawn_argv_command_with_initial_history(
+                    *id,
+                    rows,
+                    cols,
+                    cwd.clone(),
+                    argv,
+                    &launch_env,
+                    crate::pane::AgentDetection::Enabled,
+                    runtime_context.scrollback_limit_bytes,
+                    crate::terminal_theme::TerminalTheme::default(),
+                    startup.initial_history_ansi,
                     runtime_context.events.clone(),
                     runtime_context.render_notify.clone(),
                     runtime_context.render_dirty.clone(),
@@ -601,20 +627,38 @@ fn restore_tab(
 
             #[cfg(not(unix))]
             {
-                TerminalRuntime::spawn_with_initial_history(
-                    *id,
-                    rows,
-                    cols,
-                    cwd.clone(),
-                    runtime_context.scrollback_limit_bytes,
-                    crate::terminal_theme::TerminalTheme::default(),
-                    runtime_context.shell_config,
-                    &launch_env,
-                    startup.initial_history_ansi,
-                    runtime_context.events.clone(),
-                    runtime_context.render_notify.clone(),
-                    runtime_context.render_dirty.clone(),
-                )
+                if let Some(argv) = cold_restart_argv {
+                    TerminalRuntime::spawn_argv_command_with_initial_history(
+                        *id,
+                        rows,
+                        cols,
+                        cwd.clone(),
+                        argv,
+                        &launch_env,
+                        crate::pane::AgentDetection::Enabled,
+                        runtime_context.scrollback_limit_bytes,
+                        crate::terminal_theme::TerminalTheme::default(),
+                        startup.initial_history_ansi,
+                        runtime_context.events.clone(),
+                        runtime_context.render_notify.clone(),
+                        runtime_context.render_dirty.clone(),
+                    )
+                } else {
+                    TerminalRuntime::spawn_with_initial_history(
+                        *id,
+                        rows,
+                        cols,
+                        cwd.clone(),
+                        runtime_context.scrollback_limit_bytes,
+                        crate::terminal_theme::TerminalTheme::default(),
+                        runtime_context.shell_config,
+                        &launch_env,
+                        startup.initial_history_ansi,
+                        runtime_context.events.clone(),
+                        runtime_context.render_notify.clone(),
+                        runtime_context.render_dirty.clone(),
+                    )
+                }
             }
         };
 
@@ -626,6 +670,15 @@ fn restore_tab(
                     if let Some(argv) = saved_launch_argv {
                         terminal = terminal.with_launch_argv(argv).with_respawn_shell_on_exit();
                     }
+                } else if let Some(argv) = saved_launch_argv {
+                    // Cold restart, no native-resume plan: the runtime above was already
+                    // spawned with this argv (`cold_restart_argv`) -- just record it on
+                    // the terminal so future snapshots keep seeing it. No
+                    // `with_respawn_shell_on_exit()` here: unlike the hand-off case, this
+                    // is a fresh process, so re-launching it again if the agent exits
+                    // would be a bigger, separate behavior change than restoring flags
+                    // on restart.
+                    terminal = terminal.with_launch_argv(argv);
                 }
                 if let Some(label) = saved_label {
                     terminal.set_manual_label(label);
@@ -1299,6 +1352,74 @@ mod tests {
                 "--dangerously-skip-permissions"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn restore_spawns_with_saved_launch_argv_on_cold_restart_without_native_resume() {
+        let cwd = std::env::current_dir().unwrap();
+        let argv = vec![test_restore_shell().to_string(), "--saved-flag".into()];
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(
+                        0,
+                        super::super::snapshot::PaneSnapshot {
+                            cwd,
+                            label: None,
+                            agent_name: None,
+                            managed_agent_kind: None,
+                            agent_session: None,
+                            launch_argv: Some(argv.clone()),
+                        },
+                    )]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        assert!(
+            terminal.pending_agent_resume_plan.is_none(),
+            "no native-resume plan should exist for this pane"
+        );
+        assert_eq!(terminal.launch_argv, Some(argv));
     }
 
     #[tokio::test]

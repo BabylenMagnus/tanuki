@@ -1701,6 +1701,58 @@ impl PaneRuntime {
         )
     }
 
+    // Same as `spawn_argv_command`, but also seeds scrollback history into the pane's
+    // terminal-emulator state before the process is spawned -- used when restoring a
+    // pane's saved launch flags on a cold restart (no native agent-resume plan).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn spawn_argv_command_with_initial_history(
+        pane_id: PaneId,
+        rows: u16,
+        cols: u16,
+        cwd: std::path::PathBuf,
+        argv: &[String],
+        launch_env: &PaneLaunchEnv,
+        agent_detection: AgentDetection,
+        scrollback_limit_bytes: usize,
+        host_terminal_theme: crate::terminal_theme::TerminalTheme,
+        initial_history_ansi: Option<&str>,
+        events: mpsc::Sender<AppEvent>,
+        render_notify: Arc<Notify>,
+        render_dirty: Arc<AtomicBool>,
+    ) -> std::io::Result<Self> {
+        let Some((program, args)) = argv.split_first() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "argv must not be empty",
+            ));
+        };
+        let mut cmd = CommandBuilder::new(program);
+        for arg in args {
+            cmd.arg(arg);
+        }
+        cmd.cwd(cwd);
+        apply_pane_terminal_env(&mut cmd);
+        apply_pane_launch_env(&mut cmd, launch_env);
+        Self::spawn_command_builder(
+            pane_id,
+            rows,
+            cols,
+            scrollback_limit_bytes,
+            host_terminal_theme,
+            events,
+            render_notify,
+            render_dirty,
+            cmd,
+            "failed to spawn argv command pane",
+            SpawnInitialState {
+                detected_agent: None,
+                history_ansi: initial_history_ansi,
+                windows_powershell_prompt_cwd_reporting: false,
+            },
+            agent_detection,
+        )
+    }
+
     #[cfg(unix)]
     pub fn from_handoff_fd(
         import: crate::handoff_runtime::ImportedHandoffRuntime,

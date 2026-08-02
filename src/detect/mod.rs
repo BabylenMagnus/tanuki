@@ -138,6 +138,20 @@ pub fn agent_label(agent: Agent) -> &'static str {
     }
 }
 
+/// Human-facing display label for an agent, as shown in the sidebar and
+/// toasts. Distinct from [`agent_label`], which is the canonical machine id
+/// used for config keys, manifest filenames, and protocol round-tripping —
+/// changing that would break existing configs and persisted state. OpenCode
+/// is the platform's bundled agent, so it is white-labeled as "Tanuki" here
+/// without touching its underlying "opencode" identity.
+pub fn display_agent_label(label: &str) -> &str {
+    if label == agent_label(Agent::OpenCode) {
+        "Tanuki"
+    } else {
+        label
+    }
+}
+
 pub fn interactive_agent_executable(agent: Agent) -> &'static str {
     match agent {
         Agent::Pi => "pi",

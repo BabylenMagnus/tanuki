@@ -92,6 +92,14 @@ pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Op
 
 fn powershell_agent_script(argv: &[String]) -> Option<String> {
     let (program, args) = argv.split_first()?;
+    if args.is_empty() {
+        // Start-Process rejects an empty/null -ArgumentList value, so omit the
+        // flag entirely rather than passing a quoted empty string.
+        return Some(format!(
+            "$p=Start-Process -FilePath {} -NoNewWindow -Wait -PassThru",
+            super::quote_powershell_arg(program),
+        ));
+    }
     let command_line = args
         .iter()
         .map(|arg| quote_windows_command_line_arg(arg))
@@ -825,6 +833,20 @@ mod tests {
             String::from_utf16(&utf16).unwrap(),
             "$p=Start-Process -FilePath pi -ArgumentList '\"\" \"two words\" 100% wow! a''b' -NoNewWindow -Wait -PassThru"
         );
+    }
+
+    #[test]
+    fn powershell_agent_script_omits_argument_list_when_agent_takes_no_args() {
+        // Start-Process rejects an empty/null -ArgumentList value (e.g. `opencode`
+        // launched with zero CLI args), so the flag must be omitted entirely
+        // rather than passed as a quoted empty string.
+        let argv = vec!["opencode".to_string()];
+        let script = super::interactive_shell_command(&argv, "powershell.exe").unwrap();
+        assert_eq!(
+            script,
+            "$p=Start-Process -FilePath opencode -NoNewWindow -Wait -PassThru"
+        );
+        assert!(!script.contains("-ArgumentList"));
     }
 
     #[test]
