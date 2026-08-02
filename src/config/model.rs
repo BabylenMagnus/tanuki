@@ -827,7 +827,9 @@ pub struct UiConfig {
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
     pub sound: SoundConfig,
-    /// UI language: "auto" (detect from OS locale), "en", or "ru". Default: auto.
+    /// UI language: "auto" (detect from OS locale) or a code from
+    /// `crate::app::SUPPORTED_LOCALES` (currently "en", "ru", "ru-pre1918").
+    /// Default: auto.
     pub language: String,
 }
 

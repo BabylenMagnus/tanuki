@@ -27,25 +27,42 @@ mod worktrees;
 use std::collections::{HashMap, HashSet};
 use rust_i18n::t;
 
-/// Resolve a configured language preference ("auto", "en", "ru") to a concrete
-/// locale code. "auto" checks `LANG`/`LC_ALL`/`LANGUAGE` for a `ru` prefix
+/// Locales the UI ships translations for, in display order. Each entry is
+/// `(locale code — stored in config and passed to `rust_i18n::set_locale`,
+/// i18n key for the locale's own name in the language picker)`.
+///
+/// To add a new locale: add one entry here, add a `ru-newlocale:`-style key
+/// under every entry in `locales/en.yml`, and add the code to the
+/// `ui.language` `values` array in `docs/next/website/src/data/config-reference.json`.
+/// Nothing else needs to change — the language picker in `src/ui/settings.rs`
+/// and `resolve_locale` below both derive their option list from this array.
+pub(crate) const SUPPORTED_LOCALES: &[(&str, &str)] = &[
+    ("en", "settings.language.english"),
+    ("ru", "settings.language.russian"),
+    ("ru-pre1918", "settings.language.russian_pre1918"),
+];
+
+/// Resolve a configured language preference ("auto" or a code from
+/// [`SUPPORTED_LOCALES`]) to a concrete locale code. "auto" checks
+/// `LANG`/`LC_ALL`/`LANGUAGE` for a prefix match against a supported locale
 /// (Unix/WSL convention); on native Windows those are typically unset, so
 /// "auto" falls back to English there — a known limitation, not a bug.
 pub(crate) fn resolve_locale(language: &str) -> String {
-    match language {
-        "ru" => "ru".to_string(),
-        "en" => "en".to_string(),
-        _ => {
-            for var in ["LC_ALL", "LANG", "LANGUAGE"] {
-                if let Ok(val) = std::env::var(var) {
-                    if val.to_lowercase().starts_with("ru") {
-                        return "ru".to_string();
-                    }
-                }
+    if let Some((code, _)) = SUPPORTED_LOCALES.iter().find(|(code, _)| *code == language) {
+        return code.to_string();
+    }
+    for var in ["LC_ALL", "LANG", "LANGUAGE"] {
+        if let Ok(val) = std::env::var(var) {
+            let val = val.to_lowercase();
+            if let Some((code, _)) = SUPPORTED_LOCALES
+                .iter()
+                .find(|(code, _)| val.starts_with(code))
+            {
+                return code.to_string();
             }
-            "en".to_string()
         }
     }
+    "en".to_string()
 }
 use std::future::pending;
 use std::io::{self, Write};

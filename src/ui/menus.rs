@@ -262,7 +262,7 @@ pub(super) fn render_global_launcher_menu(app: &AppState, frame: &mut Frame) {
                 .add_modifier(Modifier::BOLD)
         };
 
-        let line = if app.global_menu_item_has_badge(item) {
+        let line = if app.global_menu_item_has_badge(idx) {
             Line::from(vec![
                 Span::styled(" ●", badge_style),
                 Span::styled(format!(" {item} "), item_style),
@@ -317,7 +317,7 @@ pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {
     let items: Vec<ListItem> = menu
         .items()
         .iter()
-        .map(|item| ListItem::new(Line::from(*item)))
+        .map(|item| ListItem::new(Line::from(item.label())))
         .collect();
     let list = List::new(items)
         .style(Style::default().fg(p.text))

@@ -485,7 +485,7 @@ impl AppState {
             } else {
                 0
             };
-            let width = section.label().len() as u16 + 2 + badge_width;
+            let width = section.translated_label().chars().count() as u16 + 2 + badge_width;
             if col >= x && col < x + width {
                 return Some(*section);
             }
@@ -997,6 +997,10 @@ mod tests {
 
     #[test]
     fn settings_tab_hit_area_includes_integration_update_badge() {
+        // Tab widths are computed from the localized label; pin the locale so
+        // this test's pixel math doesn't depend on global locale state left
+        // behind by another test running earlier in the same process.
+        rust_i18n::set_locale("en");
         let mut state = state_with_workspaces(&["test"]);
         state.integration_recommendations = vec![integration_recommendation(
             crate::integration::IntegrationStatusKind::Outdated,
@@ -1019,10 +1023,10 @@ mod tests {
                     } else {
                         0
                     };
-                    section.label().len() as u16 + 3 + badge_width
+                    section.translated_label().chars().count() as u16 + 3 + badge_width
                 })
                 .sum::<u16>();
-        let dotted_width = SettingsSection::Integrations.label().len() as u16 + 4;
+        let dotted_width = SettingsSection::Integrations.translated_label().chars().count() as u16 + 4;
 
         assert_eq!(
             state.settings_tab_at(integrations_x + dotted_width - 1, tab_y),

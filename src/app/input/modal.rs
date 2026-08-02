@@ -6,7 +6,8 @@ use ratatui::layout::Rect;
 use crate::{
     app::{
         state::{
-            AppState, ContextMenuKind, ContextMenuState, MenuListState, Mode, NavigatorStateFilter,
+            AppState, ContextMenuItem, ContextMenuKind, ContextMenuState, MenuListState, Mode,
+            NavigatorStateFilter,
         },
         App,
     },
@@ -682,15 +683,15 @@ pub(super) fn apply_context_menu_action(
 ) {
     let item = menu.items().get(idx).copied();
     match (menu.kind, item) {
-        (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("New worktree")) => {
+        (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::NewWorktree)) => {
             state.request_new_linked_worktree = Some(ws_idx);
             leave_modal(state);
         }
-        (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("Delete worktree checkout...")) => {
+        (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::DeleteWorktreeCheckout)) => {
             state.request_remove_linked_worktree = Some(ws_idx);
             leave_modal(state);
         }
-        (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("Open worktree...")) => {
+        (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::OpenWorktree)) => {
             state.request_open_existing_worktree = Some(ws_idx);
             leave_modal(state);
         }
@@ -698,7 +699,7 @@ pub(super) fn apply_context_menu_action(
             ContextMenuKind::GitWorkspace {
                 ws_idx, collapsed, ..
             },
-            Some("Collapse" | "Expand"),
+            Some(ContextMenuItem::Collapse | ContextMenuItem::Expand),
         ) => {
             if let Some(key) = state
                 .workspaces
@@ -717,13 +718,13 @@ pub(super) fn apply_context_menu_action(
         }
         (
             ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
-            Some("Rename"),
+            Some(ContextMenuItem::Rename),
         ) => {
             open_rename_workspace(state, terminal_runtimes, ws_idx);
         }
         (
             ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
-            Some("Close" | "Close group"),
+            Some(ContextMenuItem::Close | ContextMenuItem::CloseGroup),
         ) => {
             state.selected = ws_idx;
             if state.confirm_close {
@@ -733,19 +734,19 @@ pub(super) fn apply_context_menu_action(
                 state.mode = Mode::Navigate;
             }
         }
-        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("New tab")) => {
+        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some(ContextMenuItem::NewTab)) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
             open_new_tab_dialog(state);
         }
-        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Rename")) => {
+        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some(ContextMenuItem::Rename)) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
             open_rename_active_tab(state, false);
         }
-        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Close")) => {
+        (ContextMenuKind::Tab { ws_idx, tab_idx }, Some(ContextMenuItem::Close)) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
@@ -757,14 +758,14 @@ pub(super) fn apply_context_menu_action(
                 };
             }
         }
-        (ContextMenuKind::Pane { pane_id, .. }, Some("Rename pane")) => {
+        (ContextMenuKind::Pane { pane_id, .. }, Some(ContextMenuItem::RenamePane)) => {
             open_rename_pane(state, pane_id);
         }
         (
             ContextMenuKind::Pane {
                 ws_idx, pane_id, ..
             },
-            Some("Clear pane name"),
+            Some(ContextMenuItem::ClearPaneName),
         ) => {
             if let Some(ws) = state.workspaces.get(ws_idx) {
                 if let Some(pane) = ws.pane_state(pane_id) {
@@ -785,7 +786,7 @@ pub(super) fn apply_context_menu_action(
                 source_pane_id,
                 ..
             },
-            Some("Swap with focused pane"),
+            Some(ContextMenuItem::SwapWithFocusedPane),
         ) => {
             if let Some(source_pane_id) = source_pane_id {
                 state.selected = ws_idx;
@@ -811,7 +812,7 @@ pub(super) fn apply_context_menu_action(
                 pane_id,
                 ..
             },
-            Some("Split right"),
+            Some(ContextMenuItem::SplitRight),
         ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
@@ -827,7 +828,7 @@ pub(super) fn apply_context_menu_action(
                 pane_id,
                 ..
             },
-            Some("Split down"),
+            Some(ContextMenuItem::SplitDown),
         ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
@@ -843,7 +844,7 @@ pub(super) fn apply_context_menu_action(
                 pane_id,
                 ..
             },
-            Some("Zoom"),
+            Some(ContextMenuItem::Zoom),
         ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
@@ -859,7 +860,7 @@ pub(super) fn apply_context_menu_action(
                 pane_id,
                 ..
             },
-            Some("Close pane"),
+            Some(ContextMenuItem::ClosePane),
         ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
@@ -1111,15 +1112,15 @@ impl App {
     pub(crate) fn apply_context_menu_action_via_api(&mut self, menu: ContextMenuState, idx: usize) {
         let item = menu.items().get(idx).copied();
         match (menu.kind, item) {
-            (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("New worktree")) => {
+            (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::NewWorktree)) => {
                 self.state.request_new_linked_worktree = Some(ws_idx);
                 leave_modal(&mut self.state);
             }
-            (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("Delete worktree checkout...")) => {
+            (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::DeleteWorktreeCheckout)) => {
                 self.state.request_remove_linked_worktree = Some(ws_idx);
                 leave_modal(&mut self.state);
             }
-            (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("Open worktree...")) => {
+            (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::OpenWorktree)) => {
                 self.state.request_open_existing_worktree = Some(ws_idx);
                 leave_modal(&mut self.state);
             }
@@ -1127,7 +1128,7 @@ impl App {
                 ContextMenuKind::GitWorkspace {
                     ws_idx, collapsed, ..
                 },
-                Some("Collapse" | "Expand"),
+                Some(ContextMenuItem::Collapse | ContextMenuItem::Expand),
             ) => {
                 if let Some(key) = self
                     .state
@@ -1148,12 +1149,12 @@ impl App {
             (
                 ContextMenuKind::Workspace { ws_idx }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
-                Some("Rename"),
+                Some(ContextMenuItem::Rename),
             ) => open_rename_workspace(&mut self.state, &self.terminal_runtimes, ws_idx),
             (
                 ContextMenuKind::Workspace { ws_idx }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
-                Some("Close" | "Close group"),
+                Some(ContextMenuItem::Close | ContextMenuItem::CloseGroup),
             ) => {
                 self.state.selected = ws_idx;
                 if self.state.confirm_close {
@@ -1163,31 +1164,31 @@ impl App {
                     self.state.mode = Mode::Navigate;
                 }
             }
-            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("New tab")) => {
+            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some(ContextMenuItem::NewTab)) => {
                 self.focus_workspace_idx_via_api(ws_idx);
                 self.focus_tab_idx_via_api(tab_idx);
                 open_new_tab_dialog(&mut self.state);
             }
-            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Rename")) => {
+            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some(ContextMenuItem::Rename)) => {
                 self.focus_workspace_idx_via_api(ws_idx);
                 self.focus_tab_idx_via_api(tab_idx);
                 open_rename_active_tab(&mut self.state, false);
             }
-            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("Close")) => {
+            (ContextMenuKind::Tab { ws_idx, tab_idx }, Some(ContextMenuItem::Close)) => {
                 self.focus_workspace_idx_via_api(ws_idx);
                 self.focus_tab_idx_via_api(tab_idx);
                 if !self.close_active_tab_via_api_requires_confirmation() {
                     leave_modal(&mut self.state);
                 }
             }
-            (ContextMenuKind::Pane { pane_id, .. }, Some("Rename pane")) => {
+            (ContextMenuKind::Pane { pane_id, .. }, Some(ContextMenuItem::RenamePane)) => {
                 open_rename_pane(&mut self.state, pane_id);
             }
             (
                 ContextMenuKind::Pane {
                     ws_idx, pane_id, ..
                 },
-                Some("Clear pane name"),
+                Some(ContextMenuItem::ClearPaneName),
             ) => {
                 if let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) {
                     self.runtime_pane_rename(
@@ -1207,7 +1208,7 @@ impl App {
                     source_pane_id: Some(source_pane_id),
                     ..
                 },
-                Some("Swap with focused pane"),
+                Some(ContextMenuItem::SwapWithFocusedPane),
             ) => {
                 let source_public_id = self.public_pane_id(ws_idx, source_pane_id);
                 let target_public_id = self.public_pane_id(ws_idx, pane_id);
@@ -1231,7 +1232,7 @@ impl App {
                 ContextMenuKind::Pane {
                     ws_idx, pane_id, ..
                 },
-                Some("Split right"),
+                Some(ContextMenuItem::SplitRight),
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Right);
@@ -1241,7 +1242,7 @@ impl App {
                 ContextMenuKind::Pane {
                     ws_idx, pane_id, ..
                 },
-                Some("Split down"),
+                Some(ContextMenuItem::SplitDown),
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Down);
@@ -1251,7 +1252,7 @@ impl App {
                 ContextMenuKind::Pane {
                     ws_idx, pane_id, ..
                 },
-                Some("Zoom"),
+                Some(ContextMenuItem::Zoom),
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.zoom_focused_pane_via_api();
@@ -1261,7 +1262,7 @@ impl App {
                 ContextMenuKind::Pane {
                     ws_idx, pane_id, ..
                 },
-                Some("Close pane"),
+                Some(ContextMenuItem::ClosePane),
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 if !self.close_focused_pane_via_api_requires_confirmation() {
@@ -1999,7 +2000,7 @@ mod tests {
         let idx = menu
             .items()
             .iter()
-            .position(|item| *item == "Close pane")
+            .position(|item| *item == crate::app::state::ContextMenuItem::ClosePane)
             .expect("close pane item");
         let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
@@ -2030,7 +2031,7 @@ mod tests {
         let idx = menu
             .items()
             .iter()
-            .position(|item| *item == "Close")
+            .position(|item| *item == ContextMenuItem::Close)
             .expect("close tab item");
 
         app.apply_context_menu_action_via_api(menu, idx);
@@ -2064,7 +2065,7 @@ mod tests {
         let close_idx = menu
             .items()
             .iter()
-            .position(|item| *item == "Close pane")
+            .position(|item| *item == crate::app::state::ContextMenuItem::ClosePane)
             .expect("close pane item");
         menu.list.highlighted = close_idx;
         app.state.context_menu = Some(menu);

@@ -1003,16 +1003,22 @@ impl SettingsSection {
         Self::Experiments,
     ];
 
-    pub fn label(self) -> &'static str {
+    /// Localized tab label. Unlike [`Self::label`] (a stable English
+    /// identifier, currently unused for display), this goes through `t!()`
+    /// and is what the settings tab strip actually renders and hit-tests
+    /// against — both must stay in sync, since Cyrillic byte length differs
+    /// from its terminal column width.
+    pub fn translated_label(self) -> String {
+        use rust_i18n::t;
         match self {
-            Self::Theme => "theme",
-            Self::Sound => "sound",
-            Self::Toast => "toasts",
-            Self::PaneLabels => "pane labels",
-            Self::Language => "language",
-            Self::Keybinds => "keybinds",
-            Self::Experiments => "experiments",
-            Self::Integrations => "integrations",
+            Self::Theme => t!("settings.tab.theme").to_string(),
+            Self::Sound => t!("settings.tab.sound").to_string(),
+            Self::Toast => t!("settings.tab.toasts").to_string(),
+            Self::PaneLabels => t!("settings.tab.pane_labels").to_string(),
+            Self::Language => t!("settings.tab.language").to_string(),
+            Self::Keybinds => t!("settings.tab.keybinds").to_string(),
+            Self::Experiments => t!("settings.tab.experiments").to_string(),
+            Self::Integrations => t!("settings.tab.integrations").to_string(),
         }
     }
 }
@@ -1618,6 +1624,57 @@ pub enum ContextMenuKind {
     },
 }
 
+/// A context-menu row's stable identity, used for dispatch. Display text is
+/// derived separately (via [`ContextMenuItem::label`], which goes through
+/// `t!()`) so that translating the menu can never change what an item *does*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextMenuItem {
+    Rename,
+    Close,
+    CloseGroup,
+    NewWorktree,
+    OpenWorktree,
+    DeleteWorktreeCheckout,
+    Collapse,
+    Expand,
+    NewTab,
+    RenamePane,
+    ClearPaneName,
+    SwapWithFocusedPane,
+    SplitRight,
+    SplitDown,
+    Zoom,
+    ClosePane,
+}
+
+impl ContextMenuItem {
+    pub fn label(self) -> String {
+        use rust_i18n::t;
+        match self {
+            Self::Rename => t!("menus.context.rename").to_string(),
+            Self::Close => t!("menus.context.close").to_string(),
+            Self::CloseGroup => t!("menus.context.close_group").to_string(),
+            Self::NewWorktree => t!("menus.context.new_worktree").to_string(),
+            Self::OpenWorktree => t!("menus.context.open_worktree").to_string(),
+            Self::DeleteWorktreeCheckout => {
+                t!("menus.context.delete_worktree_checkout").to_string()
+            }
+            Self::Collapse => t!("menus.context.collapse").to_string(),
+            Self::Expand => t!("menus.context.expand").to_string(),
+            Self::NewTab => t!("menus.context.new_tab").to_string(),
+            Self::RenamePane => t!("menus.context.rename_pane").to_string(),
+            Self::ClearPaneName => t!("menus.context.clear_pane_name").to_string(),
+            Self::SwapWithFocusedPane => {
+                t!("menus.context.swap_with_focused_pane").to_string()
+            }
+            Self::SplitRight => t!("menus.context.split_right").to_string(),
+            Self::SplitDown => t!("menus.context.split_down").to_string(),
+            Self::Zoom => t!("menus.context.zoom").to_string(),
+            Self::ClosePane => t!("menus.context.close_pane").to_string(),
+        }
+    }
+}
+
 /// Right-click context menu state.
 pub struct ContextMenuState {
     pub kind: ContextMenuKind,
@@ -1627,29 +1684,30 @@ pub struct ContextMenuState {
 }
 
 impl ContextMenuState {
-    pub fn items(&self) -> &'static [&'static str] {
+    pub fn items(&self) -> &'static [ContextMenuItem] {
+        use ContextMenuItem as I;
         match self.kind {
-            ContextMenuKind::Workspace { .. } => &["Rename", "Close"],
+            ContextMenuKind::Workspace { .. } => &[I::Rename, I::Close],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => &["Rename", "Close", "New worktree", "Open worktree..."],
+            } => &[I::Rename, I::Close, I::NewWorktree, I::OpenWorktree],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
                 ..
-            } => &["Rename", "Close", "Delete worktree checkout..."],
+            } => &[I::Rename, I::Close, I::DeleteWorktreeCheckout],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
                 collapsed: true,
                 ..
             } => &[
-                "Rename",
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                "Expand",
+                I::Rename,
+                I::CloseGroup,
+                I::NewWorktree,
+                I::OpenWorktree,
+                I::Expand,
             ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
@@ -1657,60 +1715,60 @@ impl ContextMenuState {
                 collapsed: false,
                 ..
             } => &[
-                "Rename",
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                "Collapse",
+                I::Rename,
+                I::CloseGroup,
+                I::NewWorktree,
+                I::OpenWorktree,
+                I::Collapse,
             ],
-            ContextMenuKind::Tab { .. } => &["New tab", "Rename", "Close"],
+            ContextMenuKind::Tab { .. } => &[I::NewTab, I::Rename, I::Close],
             ContextMenuKind::Pane {
                 has_manual_label: true,
                 source_pane_id: Some(_),
                 ..
             } => &[
-                "Rename pane",
-                "Clear pane name",
-                "Swap with focused pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
+                I::RenamePane,
+                I::ClearPaneName,
+                I::SwapWithFocusedPane,
+                I::SplitRight,
+                I::SplitDown,
+                I::Zoom,
+                I::ClosePane,
             ],
             ContextMenuKind::Pane {
                 has_manual_label: false,
                 source_pane_id: Some(_),
                 ..
             } => &[
-                "Rename pane",
-                "Swap with focused pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
+                I::RenamePane,
+                I::SwapWithFocusedPane,
+                I::SplitRight,
+                I::SplitDown,
+                I::Zoom,
+                I::ClosePane,
             ],
             ContextMenuKind::Pane {
                 has_manual_label: true,
                 source_pane_id: None,
                 ..
             } => &[
-                "Rename pane",
-                "Clear pane name",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
+                I::RenamePane,
+                I::ClearPaneName,
+                I::SplitRight,
+                I::SplitDown,
+                I::Zoom,
+                I::ClosePane,
             ],
             ContextMenuKind::Pane {
                 has_manual_label: false,
                 source_pane_id: None,
                 ..
             } => &[
-                "Rename pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
+                I::RenamePane,
+                I::SplitRight,
+                I::SplitDown,
+                I::Zoom,
+                I::ClosePane,
             ],
         }
     }
@@ -2056,9 +2114,18 @@ impl AppState {
         self.update_available.is_some() || self.integration_updates_available()
     }
 
-    pub(crate) fn global_menu_item_has_badge(&self, item: &str) -> bool {
-        (item == "update ready" && self.update_available.is_some())
-            || (item == "settings" && self.integration_updates_available())
+    /// Whether the global-menu row at `idx` should show an attention badge.
+    /// Takes a position, not the (localized) label text, so this stays
+    /// correct regardless of UI language — mirrors the conditional
+    /// construction in [`Self::global_menu_labels`].
+    pub(crate) fn global_menu_item_has_badge(&self, idx: usize) -> bool {
+        let has_update_or_notes_entry =
+            self.update_available.is_some() || self.latest_release_notes_available;
+        match idx {
+            0 => self.integration_updates_available(), // settings
+            3 if has_update_or_notes_entry => self.update_available.is_some(), // update ready / what's new
+            _ => false,
+        }
     }
 
     pub(crate) fn settings_section_has_badge(&self, section: SettingsSection) -> bool {
@@ -2894,7 +2961,11 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "Delete worktree checkout..."]
+            &[
+                ContextMenuItem::Rename,
+                ContextMenuItem::Close,
+                ContextMenuItem::DeleteWorktreeCheckout
+            ]
         );
     }
 
@@ -2914,7 +2985,12 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "New worktree", "Open worktree..."]
+            &[
+                ContextMenuItem::Rename,
+                ContextMenuItem::Close,
+                ContextMenuItem::NewWorktree,
+                ContextMenuItem::OpenWorktree
+            ]
         );
     }
 
@@ -2935,11 +3011,11 @@ mod tests {
         assert_eq!(
             menu.items(),
             &[
-                "Rename",
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                "Collapse"
+                ContextMenuItem::Rename,
+                ContextMenuItem::CloseGroup,
+                ContextMenuItem::NewWorktree,
+                ContextMenuItem::OpenWorktree,
+                ContextMenuItem::Collapse
             ]
         );
     }

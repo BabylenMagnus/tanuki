@@ -196,14 +196,19 @@ impl AppState {
         Rect::new(x, footer.y, width, footer.height)
     }
 
-    pub(crate) fn global_menu_labels(&self) -> Vec<&'static str> {
-        let mut labels = vec!["settings", "keybinds", "reload config"];
+    pub(crate) fn global_menu_labels(&self) -> Vec<String> {
+        use rust_i18n::t;
+        let mut labels = vec![
+            t!("sidebar.global_menu.settings").to_string(),
+            t!("sidebar.global_menu.keybinds").to_string(),
+            t!("sidebar.global_menu.reload_config").to_string(),
+        ];
         if self.update_available.is_some() {
-            labels.push("update ready");
+            labels.push(t!("sidebar.global_menu.update_ready").to_string());
         } else if self.latest_release_notes_available {
-            labels.push("what's new");
+            labels.push(t!("sidebar.global_menu.whats_new").to_string());
         }
-        labels.push("detach");
+        labels.push(t!("sidebar.global_menu.detach").to_string());
         labels
     }
 
@@ -213,8 +218,9 @@ impl AppState {
         let labels = self.global_menu_labels();
         let content_width = labels
             .iter()
-            .map(|label| {
-                let badge_width = if self.global_menu_item_has_badge(label) {
+            .enumerate()
+            .map(|(idx, label)| {
+                let badge_width = if self.global_menu_item_has_badge(idx) {
                     2
                 } else {
                     0

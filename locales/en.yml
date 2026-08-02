@@ -3,493 +3,788 @@ _version: 2
 settings.title:
   en: settings
   ru: настройки
+  ru-pre1918: настройки
 settings.close:
   en: close
   ru: закрыть
+  ru-pre1918: закрыть
 settings.install:
   en: install
   ru: установить
+  ru-pre1918: установить
 settings.apply:
   en: apply
   ru: применить
+  ru-pre1918: применить
 settings.footer.select:
   en: select
   ru: выбрать
+  ru-pre1918: выбрать
 settings.footer.tab:
   en: tab
   ru: tab
+  ru-pre1918: tab
 settings.footer.section:
   en: section
   ru: раздел
+  ru-pre1918: раздѣлъ
 
 settings.sound.title:
   en: sound alerts
   ru: звуковые оповещения
+  ru-pre1918: звуковые оповещенія
 settings.sound.description:
   en: play sounds when agents change state in background
   ru: проигрывать звук при смене статуса агента в фоне
+  ru-pre1918: проигрывать звукъ при смѣнѣ статуса агента въ фоне
 settings.toast.title:
   en: notification popups
   ru: всплывающие уведомления
+  ru-pre1918: всплывающіе уведомленія
 settings.toast.description:
   en: choose where background popup notifications should appear
   ru: выберите, где показывать фоновые уведомления
+  ru-pre1918: выберите, гдѣ показывать фоновые уведомленія
 settings.toast.off:
   en: "off"
   ru: выкл
+  ru-pre1918: выклъ
 settings.toast.inside_tanuki:
   en: inside tanuki
   ru: внутри tanuki
+  ru-pre1918: внутри tanuki
 settings.toast.via_terminal:
   en: via terminal
   ru: через терминал
+  ru-pre1918: черезъ терминалъ
 settings.toast.via_system:
   en: via system
   ru: через систему
+  ru-pre1918: черезъ систему
 settings.pane_labels.title:
   en: agent border labels
   ru: подписи агентов на рамках
+  ru-pre1918: подписи агентовъ на рамкахъ
 settings.pane_labels.description:
   en: show detected agent names in split pane borders
   ru: показывать имена агентов на рамках панелей
+  ru-pre1918: показывать имена агентовъ на рамкахъ панелей
 
 settings.language.title:
   en: language
   ru: язык
+  ru-pre1918: языкъ
 settings.language.description:
   en: choose the UI language
   ru: выберите язык интерфейса
+  ru-pre1918: выберите языкъ интерфейса
 settings.language.auto:
   en: auto
   ru: авто
+  ru-pre1918: авто
 settings.language.english:
   en: english
   ru: english
+  ru-pre1918: english
 settings.language.russian:
   en: russian
   ru: русский
+  ru-pre1918: русскій
+settings.language.russian_pre1918:
+  en: russian (pre-reform)
+  ru: русский (дореформенный)
+  ru-pre1918: русскій (дореформенный)
+
+settings.tab.theme:
+  en: theme
+  ru: тема
+  ru-pre1918: тема
+settings.tab.sound:
+  en: sound
+  ru: звук
+  ru-pre1918: звукъ
+settings.tab.toasts:
+  en: toasts
+  ru: уведомления
+  ru-pre1918: уведомленія
+settings.tab.pane_labels:
+  en: pane labels
+  ru: подписи панелей
+  ru-pre1918: подписи панелей
+settings.tab.language:
+  en: language
+  ru: язык
+  ru-pre1918: языкъ
+settings.tab.keybinds:
+  en: keybinds
+  ru: клавиши
+  ru-pre1918: клавиши
+settings.tab.experiments:
+  en: experiments
+  ru: эксперименты
+  ru-pre1918: эксперименты
+settings.tab.integrations:
+  en: integrations
+  ru: интеграции
+  ru-pre1918: интеграціи
 
 settings.integrations.title:
   en: agent integrations
   ru: интеграции агентов
+  ru-pre1918: интеграціи агентовъ
 settings.integrations.description:
   en: let agents report state directly instead of relying only on process detection
   ru: агенты сообщают статус напрямую, а не только через детекцию процесса
+  ru-pre1918: агенты сообщаютъ статусъ напрямую, а не только черезъ детекцію процесса
 settings.integrations.hint_install:
   en: press install to add available or outdated integrations
   ru: нажмите «установить», чтобы добавить доступные или устаревшие интеграции
+  ru-pre1918: нажмите «установить», чтобы добавить доступные или устаревшіе интеграціи
 settings.integrations.hint_all_installed:
   en: all detected integrations are installed
   ru: все найденные интеграции установлены
+  ru-pre1918: всѣ найденные интеграціи установлены
 settings.integrations.hint_none_found:
   en: no supported agent CLIs found on PATH
   ru: поддерживаемые агенты не найдены в PATH
+  ru-pre1918: поддерживаемые агенты не найдены въ PATH
 settings.integrations.none_available:
   en: no integration targets available
   ru: нет доступных целей для интеграции
+  ru-pre1918: нѣтъ доступныхъ цѣлей для интеграціи
 
 settings.experiments.description:
   en: optional features that are off by default
   ru: опциональные функции, выключенные по умолчанию
+  ru-pre1918: опціональные функціи, выключенные по умолчанію
 
 settings.keybinds.desc_direct:
   en: press a key combo to bind it, or esc to cancel
   ru: нажмите комбинацию клавиш для привязки, esc — отмена
+  ru-pre1918: нажмите комбинацію клавишъ для привязки, esc — отмена
 settings.keybinds.desc_prefix:
   en: press a key combo to bind it after the leader key, or esc to cancel
   ru: нажмите комбинацию после leader-клавиши, esc — отмена
+  ru-pre1918: нажмите комбинацію послѣ leader-клавиши, esc — отмена
 settings.keybinds.desc_search_active:
   en: type to filter, enter/esc to stop editing (filter stays applied)
   ru: печатайте для фильтрации, enter/esc — закончить (фильтр останется)
+  ru-pre1918: печатайте для фильтраціи, enter/esc — закончить (фильтръ останется)
 settings.keybinds.desc_default:
   en: no default binding — pick your own; enter = direct chord, p = prefix+ binding, / = search
   ru: нет привязки по умолчанию — задайте свою; enter — прямая, p — с префиксом, / — поиск
+  ru-pre1918: нѣтъ привязки по умолчанію — задайте свою; enter — прямая, p — съ префиксомъ, / — поискъ
 settings.keybinds.press_to_edit:
   en: press / to edit
   ru: нажмите / для редактирования
+  ru-pre1918: нажмите / для редактированія
 settings.keybinds.press_to_search:
   en: press / to search
   ru: нажмите / для поиска
+  ru-pre1918: нажмите / для поиска
 settings.keybinds.no_matches:
   en: no matching keybinds
   ru: совпадений не найдено
+  ru-pre1918: совпаденій не найдено
 settings.keybinds.unset:
   en: unset
   ru: не задано
+  ru-pre1918: не задано
 settings.keybinds.press_a_key:
   en: "press a key…"
   ru: "нажмите клавишу…"
+  ru-pre1918: "нажмите клавишу…"
 settings.keybinds.workspaces_tabs_readonly:
   en: workspaces / tabs (read-only)
   ru: воркспейсы / вкладки (только чтение)
+  ru-pre1918: воркспейсы / вкладки (только чтеніе)
 settings.keybinds.switch_workspace:
   en: switch workspace 1-9
   ru: воркспейс 1-9
+  ru-pre1918: воркспейсъ 1-9
 settings.keybinds.focus_agent:
   en: focus agent 1-9
   ru: агент 1-9
+  ru-pre1918: агентъ 1-9
 settings.keybinds.switch_tab:
   en: switch tab 1-9
   ru: вкладка 1-9
+  ru-pre1918: вкладка 1-9
 settings.keybinds.custom_readonly:
   en: custom (read-only)
   ru: пользовательские (только чтение)
+  ru-pre1918: пользовательскіе (только чтеніе)
 
 dialogs.save:
   en: save
   ru: сохранить
+  ru-pre1918: сохранить
 dialogs.clear:
   en: clear
   ru: очистить
+  ru-pre1918: очистить
 dialogs.cancel:
   en: cancel
   ru: отмена
+  ru-pre1918: отмена
 dialogs.confirm:
   en: confirm
   ru: подтвердить
+  ru-pre1918: подтвердить
 dialogs.remove:
   en: remove
   ru: удалить
+  ru-pre1918: удалить
 dialogs.delete_anyway:
   en: delete anyway
   ru: удалить всё равно
+  ru-pre1918: удалить всё равно
 dialogs.open:
   en: open
   ru: открыть
+  ru-pre1918: открыть
 dialogs.create_and_open:
   en: create and open
   ru: создать и открыть
+  ru-pre1918: создать и открыть
 dialogs.new_workspace:
   en: new workspace
   ru: новый воркспейс
+  ru-pre1918: новый воркспейсъ
 dialogs.rename_workspace:
   en: rename workspace
   ru: переименовать воркспейс
+  ru-pre1918: переименовать воркспейсъ
 dialogs.new_tab:
   en: new tab
   ru: новая вкладка
+  ru-pre1918: новая вкладка
 dialogs.rename_tab:
   en: rename tab
   ru: переименовать вкладку
+  ru-pre1918: переименовать вкладку
 dialogs.rename_pane:
   en: rename pane
   ru: переименовать панель
+  ru-pre1918: переименовать панель
 dialogs.new_worktree:
   en: new worktree
   ru: новый worktree
+  ru-pre1918: новый worktree
 dialogs.branch:
   en: branch
   ru: ветка
+  ru-pre1918: ветка
 dialogs.checkout:
   en: checkout
   ru: checkout
+  ru-pre1918: checkout
 dialogs.creating:
   en: "creating…"
   ru: "создание…"
+  ru-pre1918: "созданіе…"
 dialogs.removing:
   en: "removing…"
   ru: "удаление…"
+  ru-pre1918: "удаленіе…"
 dialogs.delete_worktree_checkout:
   en: delete worktree checkout?
   ru: удалить checkout worktree?
+  ru-pre1918: удалить checkout worktree?
 dialogs.removes_checkout_folder:
   en: "This removes the checkout folder:"
   ru: "Это удалит папку checkout:"
+  ru-pre1918: "Это удалитъ папку checkout:"
 dialogs.branch_not_deleted:
   en: The branch is not deleted. The Tanuki workspace will close.
   ru: Ветка не удаляется. Воркспейс Tanuki будет закрыт.
+  ru-pre1918: Ветка не удаляется. Воркспейсъ Tanuki будетъ закрытъ.
 dialogs.dirty_files_warning:
   en: Dirty or untracked files will be permanently deleted.
   ru: Изменённые и неотслеживаемые файлы будут удалены безвозвратно.
+  ru-pre1918: Изменённые и неотслеживаемые файлы будутъ удалены безвозвратно.
 dialogs.open_worktree:
   en: open worktree
   ru: открыть worktree
+  ru-pre1918: открыть worktree
 dialogs.filter_worktrees:
   en: filter worktrees
   ru: фильтр worktree
+  ru-pre1918: фильтръ worktree
 dialogs.checkouts_count:
   en: "%{count} checkouts"
   ru: "%{count} checkout'ов"
+  ru-pre1918: "%{count} checkout'овъ"
 dialogs.checkouts_filtered_count:
   en: "%{filtered}/%{count} checkouts"
   ru: "%{filtered}/%{count} checkout'ов"
+  ru-pre1918: "%{filtered}/%{count} checkout'овъ"
 dialogs.no_matching_worktrees:
   en: no matching worktrees
   ru: совпадений не найдено
+  ru-pre1918: совпаденій не найдено
 dialogs.pane_singular:
   en: 1 pane
   ru: 1 панель
+  ru-pre1918: 1 панель
 dialogs.pane_plural:
   en: "%{count} panes"
   ru: "%{count} панелей"
+  ru-pre1918: "%{count} панелей"
 dialogs.workspace_singular:
   en: "1 workspace,"
   ru: "1 воркспейс,"
+  ru-pre1918: "1 воркспейсъ,"
 dialogs.workspace_plural:
   en: "%{count} workspaces,"
   ru: "%{count} воркспейсов,"
+  ru-pre1918: "%{count} воркспейсовъ,"
 dialogs.close_worktree_group:
   en: Close worktree group?
   ru: Закрыть группу worktree?
+  ru-pre1918: Закрыть группу worktree?
 dialogs.close_workspace:
   en: Close workspace?
   ru: Закрыть воркспейс?
+  ru-pre1918: Закрыть воркспейсъ?
+
+menus.context.rename:
+  en: Rename
+  ru: Переименовать
+  ru-pre1918: Переименовать
+menus.context.close:
+  en: Close
+  ru: Закрыть
+  ru-pre1918: Закрыть
+menus.context.close_group:
+  en: Close group
+  ru: Закрыть группу
+  ru-pre1918: Закрыть группу
+menus.context.new_worktree:
+  en: New worktree
+  ru: Новый worktree
+  ru-pre1918: Новый worktree
+menus.context.open_worktree:
+  en: "Open worktree..."
+  ru: "Открыть worktree..."
+  ru-pre1918: "Открыть worktree..."
+menus.context.delete_worktree_checkout:
+  en: "Delete worktree checkout..."
+  ru: "Удалить checkout worktree..."
+  ru-pre1918: "Удалить checkout worktree..."
+menus.context.collapse:
+  en: Collapse
+  ru: Свернуть
+  ru-pre1918: Свернуть
+menus.context.expand:
+  en: Expand
+  ru: Развернуть
+  ru-pre1918: Развернуть
+menus.context.new_tab:
+  en: New tab
+  ru: Новая вкладка
+  ru-pre1918: Новая вкладка
+menus.context.rename_pane:
+  en: Rename pane
+  ru: Переименовать панель
+  ru-pre1918: Переименовать панель
+menus.context.clear_pane_name:
+  en: Clear pane name
+  ru: Очистить имя панели
+  ru-pre1918: Очистить имя панели
+menus.context.swap_with_focused_pane:
+  en: Swap with focused pane
+  ru: Поменять с активной панелью
+  ru-pre1918: Помѣнять съ активной панелью
+menus.context.split_right:
+  en: Split right
+  ru: Разделить вправо
+  ru-pre1918: Раздѣлить вправо
+menus.context.split_down:
+  en: Split down
+  ru: Разделить вниз
+  ru-pre1918: Раздѣлить внизъ
+menus.context.zoom:
+  en: Zoom
+  ru: Увеличить
+  ru-pre1918: Увеличить
+menus.context.close_pane:
+  en: Close pane
+  ru: Закрыть панель
+  ru-pre1918: Закрыть панель
+
+sidebar.global_menu.settings:
+  en: settings
+  ru: настройки
+  ru-pre1918: настройки
+sidebar.global_menu.keybinds:
+  en: keybinds
+  ru: горячие клавиши
+  ru-pre1918: горячіе клавиши
+sidebar.global_menu.reload_config:
+  en: reload config
+  ru: перезагрузить конфиг
+  ru-pre1918: перезагрузить конфигъ
+sidebar.global_menu.whats_new:
+  en: what's new
+  ru: что нового
+  ru-pre1918: что новаго
+sidebar.global_menu.update_ready:
+  en: update ready
+  ru: обновление готово
+  ru-pre1918: обновленіе готово
+sidebar.global_menu.detach:
+  en: detach
+  ru: отключиться
+  ru-pre1918: отключиться
+
+sidebar.sort.grouped:
+  en: grouped
+  ru: сгруппировано
+  ru-pre1918: сгруппировано
+sidebar.sort.priority:
+  en: priority
+  ru: приоритет
+  ru-pre1918: пріоритетъ
 
 mobile.no_workspace:
   en: no workspace
   ru: нет воркспейса
+  ru-pre1918: нѣтъ воркспейса
 mobile.switch:
   en: switch
   ru: сменить
+  ru-pre1918: смѣнить
 mobile.close:
   en: close
   ru: закрыть
+  ru-pre1918: закрыть
 mobile.agents:
   en: agents
   ru: агенты
+  ru-pre1918: агенты
 mobile.filtered:
   en: filtered
   ru: отфильтровано
+  ru-pre1918: отфильтровано
 mobile.no_matching_agents:
   en: no matching agents
   ru: совпадений не найдено
+  ru-pre1918: совпаденій не найдено
 mobile.spaces:
   en: spaces
   ru: воркспейсы
+  ru-pre1918: воркспейсы
 mobile.new_workspace_action:
   en: "+ new workspace"
   ru: "+ новый воркспейс"
+  ru-pre1918: "+ новый воркспейсъ"
 mobile.tabs:
   en: tabs
   ru: вкладки
+  ru-pre1918: вкладки
 mobile.new_tab_action:
   en: "+ new tab"
   ru: "+ новая вкладка"
+  ru-pre1918: "+ новая вкладка"
 mobile.menu:
   en: menu
   ru: меню
+  ru-pre1918: меню
 mobile.no_agents:
   en: no agents
   ru: нет агентов
+  ru-pre1918: нѣтъ агентовъ
 mobile.all_idle:
   en: all idle
   ru: все простаивают
+  ru-pre1918: всѣ простаиваютъ
 mobile.blocked_count:
   en: "%{count} blocked"
   ru: "%{count} заблокировано"
+  ru-pre1918: "%{count} заблокировано"
 mobile.done_count:
   en: "%{count} done"
   ru: "%{count} готово"
+  ru-pre1918: "%{count} готово"
 mobile.working_count:
   en: "%{count} working"
   ru: "%{count} работает"
+  ru-pre1918: "%{count} работаетъ"
 mobile.idle_count:
   en: "%{count} idle"
   ru: "%{count} простаивает"
+  ru-pre1918: "%{count} простаиваетъ"
 mobile.agent_waiting:
   en: "%{agent} waiting"
   ru: "%{agent} ждёт"
+  ru-pre1918: "%{agent} ждётъ"
 mobile.agent_done:
   en: "%{agent} done"
   ru: "%{agent} готово"
+  ru-pre1918: "%{agent} готово"
 mobile.update_ready:
   en: update ready
   ru: обновление готово
+  ru-pre1918: обновленіе готово
 
 sidebar.spaces:
   en: spaces
   ru: воркспейсы
+  ru-pre1918: воркспейсы
 sidebar.new:
   en: new
   ru: новый
+  ru-pre1918: новый
 sidebar.menu:
   en: menu
   ru: меню
+  ru-pre1918: меню
 sidebar.agents:
   en: agents
   ru: агенты
+  ru-pre1918: агенты
 sidebar.no_matching_agents:
   en: no matching agents
   ru: совпадений не найдено
+  ru-pre1918: совпаденій не найдено
 
 release_notes.update_ready:
   en: update ready
   ru: обновление готово
+  ru-pre1918: обновленіе готово
 release_notes.whats_new:
   en: what's new in this release
   ru: что нового в этом релизе
+  ru-pre1918: что нового въ этомъ релизе
 release_notes.close:
   en: close
   ru: закрыть
+  ru-pre1918: закрыть
 release_notes.scroll:
   en: scroll
   ru: прокрутка
+  ru-pre1918: прокрутка
 release_notes.wheel_updown:
   en: "wheel ↑↓"
   ru: "колесо ↑↓"
+  ru-pre1918: "колесо ↑↓"
 release_notes.announcement_preview:
   en: product announcement preview
   ru: превью анонса продукта
+  ru-pre1918: превью анонса продукта
 release_notes.announcement:
   en: product announcement
   ru: анонс продукта
+  ru-pre1918: анонсъ продукта
 
 menus.mode_prefix:
   en: PREFIX
   ru: PREFIX
+  ru-pre1918: PREFIX
 menus.mode_copy:
   en: COPY
   ru: COPY
+  ru-pre1918: COPY
 menus.mode_navigate:
   en: NAVIGATE
   ru: NAVIGATE
+  ru-pre1918: NAVIGATE
 menus.mode_resize:
   en: RESIZE
   ru: RESIZE
+  ru-pre1918: RESIZE
 menus.cancel:
   en: cancel
   ru: отмена
+  ru-pre1918: отмена
 menus.send_prefix:
   en: send prefix
   ru: отправить prefix
+  ru-pre1918: отправить prefix
 menus.workspace_nav:
   en: workspace nav
   ru: навигация по воркспейсам
+  ru-pre1918: навигація по воркспейсамъ
 menus.keybinds:
   en: keybinds
   ru: горячие клавиши
+  ru-pre1918: горячіе клавиши
 menus.enter:
   en: enter
   ru: enter
+  ru-pre1918: enter
 menus.selecting:
   en: selecting
   ru: выделение
+  ru-pre1918: выдѣленіе
 menus.select:
   en: select
   ru: выделить
+  ru-pre1918: выдѣлить
 menus.exit:
   en: exit
   ru: выход
+  ru-pre1918: выходъ
 menus.clear:
   en: clear
   ru: очистить
+  ru-pre1918: очистить
 menus.move:
   en: move
   ru: перемещение
+  ru-pre1918: перемѣщеніе
 menus.search:
   en: search
   ru: поиск
+  ru-pre1918: поискъ
 menus.repeat:
   en: repeat
   ru: повтор
+  ru-pre1918: повторъ
 menus.copy:
   en: copy
   ru: копировать
+  ru-pre1918: копировать
 menus.back:
   en: back
   ru: назад
+  ru-pre1918: назадъ
 menus.ws:
   en: ws
   ru: ws
+  ru-pre1918: ws
 menus.pane:
   en: pane
   ru: панель
+  ru-pre1918: панель
 menus.navigator:
   en: navigator
   ru: навигатор
+  ru-pre1918: навигаторъ
 menus.new_tab:
   en: new tab
   ru: новая вкладка
+  ru-pre1918: новая вкладка
 menus.split:
   en: split
   ru: разделить
+  ru-pre1918: раздѣлить
 menus.close:
   en: close
   ru: закрыть
+  ru-pre1918: закрыть
 menus.zoom:
   en: zoom
   ru: увеличить
+  ru-pre1918: увеличить
 menus.resize:
   en: resize
   ru: изменить размер
+  ru-pre1918: изменить размеръ
 menus.equalize:
   en: equalize
   ru: выровнять
+  ru-pre1918: выровнять
 menus.detach:
   en: detach
   ru: отключиться
+  ru-pre1918: отключиться
 menus.width:
   en: width
   ru: ширина
+  ru-pre1918: ширина
 menus.height:
   en: height
   ru: высота
+  ru-pre1918: высота
 menus.done:
   en: done
   ru: готово
+  ru-pre1918: готово
 
 panes.popup:
   en: popup
   ru: попап
+  ru-pre1918: попапъ
 panes.no_workspaces_yet:
   en: No workspaces yet
   ru: Пока нет воркспейсов
+  ru-pre1918: Пока нѣтъ воркспейсовъ
 panes.workspace_explainer:
   en: A workspace is one project context.
   ru: Воркспейс — это контекст одного проекта.
+  ru-pre1918: Воркспейсъ — это контекстъ одного проекта.
 panes.root_pane_explainer:
   en: Its root pane (top-left) sets the default repo or folder name.
   ru: Корневая панель (сверху слева) задаёт имя репозитория или папки по умолчанию.
+  ru-pre1918: Корневая панель (сверху слева) задаётъ имя репозиторія или папки по умолчанію.
 panes.press:
   en: Press
   ru: Нажмите
+  ru-pre1918: Нажмите
 panes.to_create_one:
   en: to create one
   ru: чтобы создать
+  ru-pre1918: чтобы создать
 
 navigator.blocked:
   en: blocked
   ru: заблокирован
+  ru-pre1918: заблокированъ
 navigator.working:
   en: working
   ru: работает
+  ru-pre1918: работаетъ
 navigator.idle:
   en: idle
   ru: простаивает
+  ru-pre1918: простаиваетъ
 navigator.done:
   en: done
   ru: готово
+  ru-pre1918: готово
 navigator.search_panes:
   en: search panes
   ru: поиск панелей
+  ru-pre1918: поискъ панелей
 navigator.panes_count:
   en: "%{count} panes"
   ru: "%{count} панелей"
+  ru-pre1918: "%{count} панелей"
 navigator.tab_label:
   en: "tab: %{name}"
   ru: "вкладка: %{name}"
+  ru-pre1918: "вкладка: %{name}"
 navigator.pane_number:
   en: "pane %{number}"
   ru: "панель %{number}"
+  ru-pre1918: "панель %{number}"
 navigator.shell:
   en: shell
   ru: shell
+  ru-pre1918: shell
 navigator.switch:
   en: switch
   ru: переключить
+  ru-pre1918: переключить
 navigator.states:
   en: states
   ru: статусы
+  ru-pre1918: статусы
 navigator.close:
   en: close
   ru: закрыть
+  ru-pre1918: закрыть
 
 onboarding.continue:
   en: continue
   ru: продолжить
+  ru-pre1918: продолжить
 onboarding.subtitle:
   en: terminal workspace manager for coding agents
   ru: менеджер терминальных воркспейсов для AI-агентов
+  ru-pre1918: менеджеръ терминальныхъ воркспейсовъ для AI-агентовъ
 onboarding.mouse_first_explainer:
   en: |-
     this is a mouse-first terminal.
@@ -499,34 +794,48 @@ onboarding.mouse_first_explainer:
     это mouse-first терминал.
       кликайте по сайдбару для смены воркспейсов, тащите
       рамки панелей для resize, ПКМ — контекстное меню.
+  ru-pre1918: |-
+    это mouse-first терминалъ.
+      кликайте по сайдбару для смѣны воркспейсовъ, тащите
+      рамки панелей для resize, ПКМ — контекстное меню.
 onboarding.enters_prefix_mode:
   en: enters prefix mode
   ru: включает prefix-режим
+  ru-pre1918: включаетъ prefix-режимъ
 onboarding.shows_keybinds_settings:
   en: shows keybinds and settings
   ru: показывает горячие клавиши и настройки
+  ru-pre1918: показываетъ горячіе клавиши и настройки
 onboarding.next_hint:
   en: "next: install optional agent integrations for more reliable state"
   ru: "далее: установите опциональные интеграции агентов для надёжного статуса"
+  ru-pre1918: "далѣе: установите опціональные интеграціи агентовъ для надёжного статуса"
 
 toasts.agent_detection_rules_updated:
   en: Agent detection rules updated
   ru: Правила детекции агентов обновлены
+  ru-pre1918: Правила детекціи агентовъ обновлены
 toasts.version_available:
   en: "v%{version} available"
   ru: "доступна v%{version}"
+  ru-pre1918: "доступна v%{version}"
 toasts.custom_command_failed:
   en: custom command failed
   ru: ошибка выполнения команды
+  ru-pre1918: ошибка выполненія команды
 toasts.edit_scrollback_failed:
   en: edit scrollback failed
   ru: не удалось открыть буфер в редакторе
+  ru-pre1918: не удалось открыть буферъ въ редакторе
 toasts.opened_scrollback:
   en: opened scrollback
   ru: буфер открыт
+  ru-pre1918: буферъ открытъ
 toasts.reloaded_config:
   en: reloaded config
   ru: конфиг перезагружен
+  ru-pre1918: конфигъ перезагруженъ
 toasts.failed_to_open_worktree:
   en: "failed to open worktree: %{err}"
   ru: "не удалось открыть worktree: %{err}"
+  ru-pre1918: "не удалось открыть worktree: %{err}"

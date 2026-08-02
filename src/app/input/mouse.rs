@@ -1190,7 +1190,7 @@ impl AppState {
         let max_item_w = menu
             .items()
             .iter()
-            .map(|item| item.len() as u16)
+            .map(|item| item.label().chars().count() as u16)
             .max()
             .unwrap_or(0);
         let menu_w = (max_item_w + 4).max(14).min(screen.width.max(1));
@@ -2324,7 +2324,7 @@ mod tests {
         let swap_idx = menu
             .items()
             .iter()
-            .position(|item| *item == "Swap with focused pane")
+            .position(|item| *item == crate::app::state::ContextMenuItem::SwapWithFocusedPane)
             .expect("swap item");
         menu.list.highlighted = swap_idx;
 
@@ -2402,7 +2402,9 @@ mod tests {
                 ..
             } if pane_id == target && source_pane_id == source
         ));
-        assert!(menu.items().contains(&"Swap with focused pane"));
+        assert!(menu
+            .items()
+            .contains(&crate::app::state::ContextMenuItem::SwapWithFocusedPane));
     }
 
     #[tokio::test]
@@ -3464,7 +3466,7 @@ mod tests {
         let close_idx = menu_state
             .items()
             .iter()
-            .position(|item| *item == "Close pane")
+            .position(|item| *item == crate::app::state::ContextMenuItem::ClosePane)
             .expect("close pane menu item");
         let menu = app
             .state
@@ -3517,7 +3519,7 @@ mod tests {
         let close_idx = menu_state
             .items()
             .iter()
-            .position(|item| *item == "Close pane")
+            .position(|item| *item == crate::app::state::ContextMenuItem::ClosePane)
             .expect("close pane menu item");
         let menu = app
             .state

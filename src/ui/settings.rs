@@ -75,10 +75,10 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                     "● ",
                     Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(section.label()),
+                Span::raw(section.translated_label()),
             ])
         } else {
-            Line::from(section.label())
+            Line::from(section.translated_label())
         }
     });
     let tabs = Tabs::new(tab_labels)
@@ -156,19 +156,24 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
             );
         }
         SettingsSection::Language => {
-            let auto = t!("settings.language.auto").to_string();
-            let english = t!("settings.language.english").to_string();
-            let russian = t!("settings.language.russian").to_string();
+            let auto_label = t!("settings.language.auto").to_string();
+            let locale_labels: Vec<(String, &'static str)> = crate::app::SUPPORTED_LOCALES
+                .iter()
+                .map(|(code, label_key)| (t!(*label_key).to_string(), *code))
+                .collect();
+            let options: Vec<(&str, &str)> = std::iter::once((auto_label.as_str(), "auto"))
+                .chain(
+                    locale_labels
+                        .iter()
+                        .map(|(label, code)| (label.as_str(), *code)),
+                )
+                .collect();
             render_modal_choice_list(
                 frame,
                 content_area,
                 &t!("settings.language.title"),
                 &t!("settings.language.description"),
-                &[
-                    (auto.as_str(), "auto"),
-                    (english.as_str(), "en"),
-                    (russian.as_str(), "ru"),
-                ],
+                &options,
                 app.language.as_str(),
                 app.settings.list.selected,
                 p,
