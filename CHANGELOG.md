@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.58] - 2026-08-02
+
 ### Added
 - Add FORK.md to document fork provenance and upstream sync strategy
 
