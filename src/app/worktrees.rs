@@ -1,6 +1,12 @@
 use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// `cargo check` misreports this as unused (rust-i18n macro-hygiene quirk with
+// its internal `_rust_i18n_t!` re-export chain) even though `cargo test`/
+// `cargo build` fail to resolve `t!` at line ~429 without it.
+#[allow(unused_imports)]
+use rust_i18n::t;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
@@ -425,7 +431,7 @@ impl App {
                     selected: 0,
                     query: String::new(),
                     search_focused: false,
-                    error: Some(format!("failed to open worktree: {err}")),
+                    error: Some(t!("toasts.failed_to_open_worktree", err = err).to_string()),
                 });
                 self.state.mode = Mode::OpenExistingWorktree;
             }

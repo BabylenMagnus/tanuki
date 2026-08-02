@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use rust_i18n::t;
+
 use super::{
     scrollbar::{render_scrollbar, should_show_scrollbar},
     status::{agent_icon, state_label_color},
@@ -67,7 +69,7 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             crate::detect::AgentState::Blocked,
             true,
             app.spinner_tick,
-            "blocked",
+            t!("navigator.blocked").to_string(),
             app,
         ),
         Some(NavigatorStateFilter::Working) => push_state_chip(
@@ -75,7 +77,7 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             crate::detect::AgentState::Working,
             true,
             app.spinner_tick,
-            "working",
+            t!("navigator.working").to_string(),
             app,
         ),
         Some(NavigatorStateFilter::Idle) => push_state_chip(
@@ -83,7 +85,7 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             crate::detect::AgentState::Idle,
             true,
             app.spinner_tick,
-            "idle",
+            t!("navigator.idle").to_string(),
             app,
         ),
         Some(NavigatorStateFilter::Done) => push_state_chip(
@@ -91,20 +93,24 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             crate::detect::AgentState::Idle,
             false,
             app.spinner_tick,
-            "done",
+            t!("navigator.done").to_string(),
             app,
         ),
         None if query.is_empty() => spans.push(Span::styled(
-            "search panes",
+            t!("navigator.search_panes").to_string(),
             Style::default().fg(p.overlay0),
         )),
         None => spans.push(Span::styled(query.to_string(), Style::default().fg(p.text))),
     }
     spans.push(Span::styled(
-        format!(
-            "{count:>width$} panes",
-            width = area.width.saturating_sub(16) as usize
-        ),
+        t!(
+            "navigator.panes_count",
+            count = format!(
+                "{count:>width$}",
+                width = area.width.saturating_sub(16) as usize
+            )
+        )
+        .to_string(),
         Style::default().fg(p.overlay0),
     ));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -115,7 +121,7 @@ fn push_state_chip(
     state: crate::detect::AgentState,
     seen: bool,
     tick: u32,
-    label: &'static str,
+    label: String,
     app: &AppState,
 ) {
     let (icon, icon_style) = agent_icon(state, seen, tick, &app.palette);
@@ -402,7 +408,10 @@ fn workspace_detail(
     };
     let label = ws.display_name_from(&app.terminals, terminal_runtimes);
     let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
-    let mut parts = vec![label, format!("{pane_count} panes")];
+    let mut parts = vec![
+        label,
+        t!("navigator.panes_count", count = pane_count).to_string(),
+    ];
     if !rowless_workspace_activity(app, terminal_runtimes, ws_idx).is_empty() {
         parts.push(rowless_workspace_activity(app, terminal_runtimes, ws_idx));
     }
@@ -423,12 +432,14 @@ fn tab_detail(
     };
     let mut parts = vec![
         ws.display_name_from(&app.terminals, terminal_runtimes),
-        format!(
-            "tab: {}",
-            ws.tab_display_name(tab_idx)
+        t!(
+            "navigator.tab_label",
+            name = ws
+                .tab_display_name(tab_idx)
                 .unwrap_or_else(|| (tab_idx + 1).to_string())
-        ),
-        format!("{} panes", tab.panes.len()),
+        )
+        .to_string(),
+        t!("navigator.panes_count", count = tab.panes.len()).to_string(),
     ];
     let rows = app.navigator_rows_from(terminal_runtimes);
     if let Some(meta) = rows
@@ -457,14 +468,18 @@ fn pane_detail(
     };
     let mut parts = vec![ws.display_name_from(&app.terminals, terminal_runtimes)];
     if ws.tabs.len() > 1 {
-        parts.push(format!(
-            "tab: {}",
-            ws.tab_display_name(tab_idx)
-                .unwrap_or_else(|| (tab_idx + 1).to_string())
-        ));
+        parts.push(
+            t!(
+                "navigator.tab_label",
+                name = ws
+                    .tab_display_name(tab_idx)
+                    .unwrap_or_else(|| (tab_idx + 1).to_string())
+            )
+            .to_string(),
+        );
     }
     if let Some(pane_number) = ws.public_pane_number(pane_id) {
-        parts.push(format!("pane {pane_number}"));
+        parts.push(t!("navigator.pane_number", number = pane_number).to_string());
     }
     if let Some(terminal_id) = tab.terminal_id(pane_id) {
         if let Some(terminal) = app.terminals.get(terminal_id) {
@@ -496,7 +511,7 @@ fn pane_detail(
                     .unwrap_or_else(|| display_state(state, seen).to_string());
                 parts.push(status);
             } else {
-                parts.push("shell".to_string());
+                parts.push(t!("navigator.shell").to_string());
             }
         }
     }
@@ -550,26 +565,26 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
     let line = if app.navigator.search_focused {
         Line::from(vec![
             Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(format!(" {}  ", t!("navigator.switch")), dim),
             Span::styled("↑↓", key),
-            Span::styled(" move  ", dim),
+            Span::styled(format!(" {}  ", t!("menus.move")), dim),
             Span::styled("ctrl+u", key),
-            Span::styled(" clear  ", dim),
+            Span::styled(format!(" {}  ", t!("menus.clear")), dim),
             Span::styled("esc", key),
-            Span::styled(" back", dim),
+            Span::styled(format!(" {}", t!("menus.back")), dim),
         ])
     } else {
         Line::from(vec![
             Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(format!(" {}  ", t!("navigator.switch")), dim),
             Span::styled("/", key),
-            Span::styled(" search  ", dim),
+            Span::styled(format!(" {}  ", t!("menus.search")), dim),
             Span::styled("b/w/i/d/a", key),
-            Span::styled(" states  ", dim),
+            Span::styled(format!(" {}  ", t!("navigator.states")), dim),
             Span::styled("j/k/↑↓", key),
-            Span::styled(" move  ", dim),
+            Span::styled(format!(" {}  ", t!("menus.move")), dim),
             Span::styled("esc", key),
-            Span::styled(" close", dim),
+            Span::styled(format!(" {}", t!("navigator.close")), dim),
         ])
     };
     frame.render_widget(Paragraph::new(line), area);

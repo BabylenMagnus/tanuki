@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use rust_i18n::t;
+
 use super::sidebar::{
     agent_panel_entries, agent_panel_entries_from, grouped_child_display_label,
     next_entry_is_indented_workspace, workspace_list_entries_expanded, AgentPanelEntry,
@@ -289,7 +291,7 @@ pub(crate) fn render_mobile_panel(
 
     let areas = mobile_switcher_areas(app);
     frame.render_widget(
-        Paragraph::new(" switch").style(
+        Paragraph::new(format!(" {}", t!("mobile.switch"))).style(
             Style::default()
                 .fg(p.text)
                 .bg(p.panel_bg)
@@ -321,7 +323,10 @@ fn render_header_status(
     }
     let p = &app.palette;
     let Some(ws) = app.active.and_then(|idx| app.workspaces.get(idx)) else {
-        frame.render_widget(Paragraph::new(" no workspace"), area);
+        frame.render_widget(
+            Paragraph::new(format!(" {}", t!("mobile.no_workspace"))),
+            area,
+        );
         return;
     };
 
@@ -398,7 +403,7 @@ fn render_switch_button(app: &AppState, frame: &mut Frame, area: Rect) {
     }
     let label_y = if area.height > 1 { area.y + 1 } else { area.y };
     frame.render_widget(
-        Paragraph::new("switch")
+        Paragraph::new(t!("mobile.switch").to_string())
             .style(
                 Style::default()
                     .fg(p.text)
@@ -431,7 +436,7 @@ fn render_close_button(app: &AppState, frame: &mut Frame, area: Rect) {
             .set_style(Style::default().fg(p.surface_dim).bg(p.surface0));
     }
     frame.render_widget(
-        Paragraph::new("close")
+        Paragraph::new(t!("mobile.close").to_string())
             .style(
                 Style::default()
                     .fg(p.overlay1)
@@ -507,8 +512,16 @@ fn render_mobile_switcher_content(
         let title = app
             .agent_view_override
             .as_ref()
-            .map(|view| format!("agents · {}", view.label.as_deref().unwrap_or("filtered")))
-            .unwrap_or_else(|| "agents".to_string());
+            .map(|view| {
+                format!(
+                    "{} · {}",
+                    t!("mobile.agents"),
+                    view.label
+                        .clone()
+                        .unwrap_or_else(|| t!("mobile.filtered").to_string())
+                )
+            })
+            .unwrap_or_else(|| t!("mobile.agents").to_string());
         render_section_title_at(
             frame,
             viewport,
@@ -528,7 +541,7 @@ fn render_mobile_switcher_content(
                 app.mobile_switcher_scroll,
                 ratatui::style::Color::Reset,
                 Line::from(Span::styled(
-                    "  no matching agents",
+                    format!("  {}", t!("mobile.no_matching_agents")),
                     Style::default().fg(p.overlay0).add_modifier(Modifier::DIM),
                 )),
             );
@@ -577,7 +590,7 @@ fn render_mobile_switcher_content(
         content,
         doc_y,
         app.mobile_switcher_scroll,
-        "spaces",
+        &t!("mobile.spaces"),
         p,
     );
     doc_y += 1;
@@ -587,7 +600,7 @@ fn render_mobile_switcher_content(
         content,
         doc_y,
         app.mobile_switcher_scroll,
-        "+ new workspace",
+        &t!("mobile.new_workspace_action"),
         p,
     );
     doc_y += 1;
@@ -670,7 +683,7 @@ fn render_mobile_switcher_content(
             content,
             doc_y,
             app.mobile_switcher_scroll,
-            "tabs",
+            &t!("mobile.tabs"),
             p,
         );
         doc_y += 1;
@@ -680,7 +693,7 @@ fn render_mobile_switcher_content(
             content,
             doc_y,
             app.mobile_switcher_scroll,
-            "+ new tab",
+            &t!("mobile.new_tab_action"),
             p,
         );
         doc_y += 1;
@@ -724,7 +737,7 @@ fn render_mobile_switcher_content(
         content,
         doc_y,
         app.mobile_switcher_scroll,
-        "menu",
+        &t!("mobile.menu"),
         p,
     );
     doc_y += 1;
@@ -1019,26 +1032,35 @@ enum SummaryTone {
 /// (blocked → done → working → idle). Pure so it can be unit-tested.
 fn agent_summary_segments(counts: GlobalAgentCounts) -> Vec<(String, SummaryTone)> {
     if counts.total() == 0 {
-        return vec![("no agents".to_string(), SummaryTone::Muted)];
+        return vec![(t!("mobile.no_agents").to_string(), SummaryTone::Muted)];
     }
     if !counts.any_pending() {
-        return vec![("all idle".to_string(), SummaryTone::Muted)];
+        return vec![(t!("mobile.all_idle").to_string(), SummaryTone::Muted)];
     }
     let mut segments = Vec::new();
     if counts.blocked > 0 {
         segments.push((
-            format!("◉ {} blocked", counts.blocked),
+            format!("◉ {}", t!("mobile.blocked_count", count = counts.blocked)),
             SummaryTone::Blocked,
         ));
     }
     if counts.done > 0 {
-        segments.push((format!("● {} done", counts.done), SummaryTone::Done));
+        segments.push((
+            format!("● {}", t!("mobile.done_count", count = counts.done)),
+            SummaryTone::Done,
+        ));
     }
     if counts.working > 0 {
-        segments.push((format!("{} working", counts.working), SummaryTone::Working));
+        segments.push((
+            t!("mobile.working_count", count = counts.working).to_string(),
+            SummaryTone::Working,
+        ));
     }
     if counts.idle > 0 {
-        segments.push((format!("{} idle", counts.idle), SummaryTone::Idle));
+        segments.push((
+            t!("mobile.idle_count", count = counts.idle).to_string(),
+            SummaryTone::Idle,
+        ));
     }
     segments
 }
@@ -1115,14 +1137,14 @@ fn mobile_toast_title(toast: &ToastNotification) -> String {
         ToastKind::NeedsAttention => toast
             .title
             .strip_suffix(" needs attention")
-            .map(|agent| format!("{agent} waiting"))
+            .map(|agent| t!("mobile.agent_waiting", agent = agent).to_string())
             .unwrap_or_else(|| toast.title.clone()),
         ToastKind::Finished => toast
             .title
             .strip_suffix(" finished")
-            .map(|agent| format!("{agent} done"))
+            .map(|agent| t!("mobile.agent_done", agent = agent).to_string())
             .unwrap_or_else(|| toast.title.clone()),
-        ToastKind::UpdateInstalled => "update ready".to_string(),
+        ToastKind::UpdateInstalled => t!("mobile.update_ready").to_string(),
     }
 }
 

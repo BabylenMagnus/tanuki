@@ -3,6 +3,8 @@
 
 use std::time::Instant;
 
+use rust_i18n::t;
+
 use tracing::{info, warn};
 
 use crate::detect::{Agent, AgentState};
@@ -2653,7 +2655,7 @@ impl AppState {
                 ) {
                     self.toast = Some(ToastNotification {
                         kind: ToastKind::UpdateInstalled,
-                        title: format!("v{version} available"),
+                        title: t!("toasts.version_available", version = version).to_string(),
                         context: crate::update::update_install_instruction(&install_command),
                         position: None,
                         target: None,
@@ -2683,7 +2685,7 @@ impl AppState {
                         .join(", ");
                     self.toast = Some(ToastNotification {
                         kind: ToastKind::UpdateInstalled,
-                        title: "Agent detection rules updated".to_string(),
+                        title: t!("toasts.agent_detection_rules_updated").to_string(),
                         context: agent_list,
                         position: None,
                         target: None,

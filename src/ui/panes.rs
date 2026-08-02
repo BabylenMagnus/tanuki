@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use rust_i18n::t;
+
 use super::scrollbar::{render_pane_scrollbar, should_show_scrollbar};
 #[cfg(test)]
 use super::text::display_width;
@@ -413,11 +415,12 @@ pub(super) fn render_popup_pane(
     let Some(rt) = terminal_runtimes.get(&popup.terminal_id) else {
         return;
     };
+    let popup_title = t!("panes.popup").to_string();
     let title = app
         .terminals
         .get(&popup.terminal_id)
         .and_then(|terminal| terminal.manual_label.as_deref())
-        .unwrap_or("popup");
+        .unwrap_or(&popup_title);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.palette.accent))
@@ -920,29 +923,29 @@ pub(super) fn render_empty(app: &AppState, frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(""),
         Line::from(Span::styled(
-            "  No workspaces yet",
+            format!("  {}", t!("panes.no_workspaces_yet")),
             Style::default().fg(p.overlay0),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  A workspace is one project context.",
+            format!("  {}", t!("panes.workspace_explainer")),
             Style::default().fg(p.overlay1),
         )),
         Line::from(Span::styled(
-            "  Its root pane (top-left) sets the default repo or folder name.",
+            format!("  {}", t!("panes.root_pane_explainer")),
             Style::default().fg(p.overlay1),
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Press ", Style::default().fg(p.overlay0)),
+            Span::styled(format!("  {} ", t!("panes.press")), Style::default().fg(p.overlay0)),
             Span::styled(
                 app.keybinds
                     .new_workspace
                     .label()
-                    .unwrap_or_else(|| "unset".to_string()),
+                    .unwrap_or_else(|| t!("settings.keybinds.unset").to_string()),
                 Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" to create one", Style::default().fg(p.overlay0)),
+            Span::styled(format!(" {}", t!("panes.to_create_one")), Style::default().fg(p.overlay0)),
         ]),
     ];
     frame.render_widget(

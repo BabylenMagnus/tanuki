@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use rust_i18n::t;
+
 use super::widgets::{
     action_button_row_rects, centered_popup_rect, modal_stack_areas, panel_contrast_fg,
     render_action_button, render_modal_choice_list, render_panel_shell, ActionButtonSpec,
@@ -60,7 +62,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
-            " settings",
+            format!(" {}", t!("settings.title")),
             Style::default().fg(p.text).add_modifier(Modifier::BOLD),
         )])),
         header_rows[0],
@@ -114,23 +116,27 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 frame,
                 content_area,
                 p,
-                "sound alerts",
-                "play sounds when agents change state in background",
+                &t!("settings.sound.title"),
+                &t!("settings.sound.description"),
                 app.sound_enabled(),
                 app.settings.list.selected,
             );
         }
         SettingsSection::Toast => {
+            let off = t!("settings.toast.off").to_string();
+            let inside_tanuki = t!("settings.toast.inside_tanuki").to_string();
+            let via_terminal = t!("settings.toast.via_terminal").to_string();
+            let via_system = t!("settings.toast.via_system").to_string();
             render_modal_choice_list(
                 frame,
                 content_area,
-                "notification popups",
-                "choose where background popup notifications should appear",
+                &t!("settings.toast.title"),
+                &t!("settings.toast.description"),
                 &[
-                    ("off", ToastDelivery::Off),
-                    ("inside tanuki", ToastDelivery::Tanuki),
-                    ("via terminal", ToastDelivery::Terminal),
-                    ("via system", ToastDelivery::System),
+                    (off.as_str(), ToastDelivery::Off),
+                    (inside_tanuki.as_str(), ToastDelivery::Tanuki),
+                    (via_terminal.as_str(), ToastDelivery::Terminal),
+                    (via_system.as_str(), ToastDelivery::System),
                 ],
                 app.toast_delivery(),
                 app.settings.list.selected,
@@ -143,10 +149,30 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 frame,
                 content_area,
                 p,
-                "agent border labels",
-                "show detected agent names in split pane borders",
+                &t!("settings.pane_labels.title"),
+                &t!("settings.pane_labels.description"),
                 app.agent_border_labels_enabled(),
                 app.settings.list.selected,
+            );
+        }
+        SettingsSection::Language => {
+            let auto = t!("settings.language.auto").to_string();
+            let english = t!("settings.language.english").to_string();
+            let russian = t!("settings.language.russian").to_string();
+            render_modal_choice_list(
+                frame,
+                content_area,
+                &t!("settings.language.title"),
+                &t!("settings.language.description"),
+                &[
+                    (auto.as_str(), "auto"),
+                    (english.as_str(), "en"),
+                    (russian.as_str(), "ru"),
+                ],
+                app.language.as_str(),
+                app.settings.list.selected,
+                p,
+                2,
             );
         }
         SettingsSection::Keybinds => {
@@ -172,7 +198,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 frame,
                 apply_rect,
                 Some("↵"),
-                primary_label,
+                &primary_label,
                 Style::default()
                     .fg(panel_contrast_fg(p))
                     .bg(p.accent)
@@ -183,7 +209,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
             frame,
             close_rect,
             Some("esc"),
-            "close",
+            &t!("settings.close"),
             Style::default()
                 .fg(p.text)
                 .bg(p.surface0)
@@ -193,9 +219,9 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ↑↓", Style::default().fg(p.overlay0)),
-                Span::styled(" select  ", Style::default().fg(p.overlay1)),
-                Span::styled("tab", Style::default().fg(p.overlay0)),
-                Span::styled(" section", Style::default().fg(p.overlay1)),
+                Span::styled(format!(" {}  ", t!("settings.footer.select")), Style::default().fg(p.overlay1)),
+                Span::styled(t!("settings.footer.tab").to_string(), Style::default().fg(p.overlay0)),
+                Span::styled(format!(" {}", t!("settings.footer.section")), Style::default().fg(p.overlay1)),
             ])),
             footer_rows[0],
         );
@@ -204,10 +230,10 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
 
 pub(crate) fn settings_primary_button_label(
     section: crate::app::state::SettingsSection,
-) -> &'static str {
+) -> String {
     match section {
-        crate::app::state::SettingsSection::Integrations => "install",
-        _ => "apply",
+        crate::app::state::SettingsSection::Integrations => t!("settings.install").to_string(),
+        _ => t!("settings.apply").to_string(),
     }
 }
 
@@ -226,12 +252,13 @@ pub(crate) fn settings_button_rects(
     section: crate::app::state::SettingsSection,
     show_primary: bool,
 ) -> (Option<Rect>, Rect) {
+    let close_label = t!("settings.close").to_string();
     if !show_primary {
         let rects = action_button_row_rects(
             inner,
             &[ActionButtonSpec {
                 hint: Some("esc"),
-                label: "close",
+                label: &close_label,
             }],
             2,
             inner.height.saturating_sub(1),
@@ -239,16 +266,17 @@ pub(crate) fn settings_button_rects(
         return (None, rects[0]);
     }
 
+    let primary_label = settings_primary_button_label(section);
     let rects = action_button_row_rects(
         inner,
         &[
             ActionButtonSpec {
                 hint: Some("↵"),
-                label: settings_primary_button_label(section),
+                label: &primary_label,
             },
             ActionButtonSpec {
                 hint: Some("esc"),
-                label: "close",
+                label: &close_label,
             },
         ],
         2,
@@ -276,14 +304,14 @@ fn integrations_footer_paragraph(app: &AppState) -> Paragraph<'static> {
             .iter()
             .any(crate::integration::IntegrationRecommendation::needs_install)
         {
-            " press install to add available or outdated integrations"
+            t!("settings.integrations.hint_install")
         } else if found_any {
-            " all detected integrations are installed"
+            t!("settings.integrations.hint_all_installed")
         } else {
-            " no supported agent CLIs found on PATH"
+            t!("settings.integrations.hint_none_found")
         };
         footer_lines.push(Line::from(Span::styled(
-            hint.to_string(),
+            format!(" {hint}"),
             Style::default().fg(p.overlay1),
         )));
     }
@@ -311,16 +339,14 @@ fn render_settings_integrations(app: &AppState, frame: &mut Frame, area: Rect) {
     .areas::<6>(area);
 
     frame.render_widget(
-        Paragraph::new("agent integrations")
+        Paragraph::new(t!("settings.integrations.title").to_string())
             .style(Style::default().fg(p.text).add_modifier(Modifier::BOLD)),
         rows[0],
     );
     frame.render_widget(
-        Paragraph::new(
-            "let agents report state directly instead of relying only on process detection",
-        )
-        .style(Style::default().fg(p.overlay1))
-        .wrap(ratatui::widgets::Wrap { trim: false }),
+        Paragraph::new(t!("settings.integrations.description").to_string())
+            .style(Style::default().fg(p.overlay1))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
         rows[1],
     );
 
@@ -354,7 +380,7 @@ fn render_settings_integrations(app: &AppState, frame: &mut Frame, area: Rect) {
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
-            " no integration targets available",
+            format!(" {}", t!("settings.integrations.none_available")),
             Style::default().fg(p.overlay1),
         )));
     }
@@ -428,7 +454,7 @@ fn render_settings_experiments(app: &AppState, frame: &mut Frame, area: Rect) {
     super::widgets::render_modal_description(
         frame,
         desc_area,
-        "optional features that are off by default",
+        &t!("settings.experiments.description"),
         Style::default().fg(p.overlay1),
     );
 
@@ -462,21 +488,15 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
     .areas::<3>(area);
 
     let description = match app.settings.keybind_capture {
-        Some(KeybindCaptureKind::Direct) => "press a key combo to bind it, or esc to cancel",
-        Some(KeybindCaptureKind::Prefix) => {
-            "press a key combo to bind it after the leader key, or esc to cancel"
-        }
-        None if app.settings.keybind_search_active => {
-            "type to filter, enter/esc to stop editing (filter stays applied)"
-        }
-        None => {
-            "no default binding — pick your own; enter = direct chord, p = prefix+ binding, / = search"
-        }
+        Some(KeybindCaptureKind::Direct) => t!("settings.keybinds.desc_direct"),
+        Some(KeybindCaptureKind::Prefix) => t!("settings.keybinds.desc_prefix"),
+        None if app.settings.keybind_search_active => t!("settings.keybinds.desc_search_active"),
+        None => t!("settings.keybinds.desc_default"),
     };
     super::widgets::render_modal_description(
         frame,
         desc_area,
-        description,
+        &description,
         Style::default().fg(p.overlay1),
     );
 
@@ -499,11 +519,14 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
                 app.settings.keybind_search.clone(),
                 Style::default().fg(p.text),
             ),
-            Span::styled(" (press / to edit)", Style::default().fg(p.overlay1)),
+            Span::styled(
+                format!(" ({})", t!("settings.keybinds.press_to_edit")),
+                Style::default().fg(p.overlay1),
+            ),
         ])
     } else {
         Line::from(Span::styled(
-            " press / to search",
+            format!(" {}", t!("settings.keybinds.press_to_search")),
             Style::default().fg(p.overlay1),
         ))
     };
@@ -513,7 +536,8 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
 
     if filtered.is_empty() && app.keybinds.custom_commands.is_empty() {
         frame.render_widget(
-            Paragraph::new(" no matching keybinds").style(Style::default().fg(p.overlay1)),
+            Paragraph::new(format!(" {}", t!("settings.keybinds.no_matches")))
+                .style(Style::default().fg(p.overlay1)),
             list_area,
         );
         return;
@@ -538,9 +562,9 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
         }
         let binding_label = setting
             .current_binding(&app.keybinds)
-            .unwrap_or_else(|| "unset".to_string());
+            .unwrap_or_else(|| t!("settings.keybinds.unset").to_string());
         let value = if app.settings.list.selected == idx && app.settings.keybind_capture.is_some() {
-            "press a key…".to_string()
+            t!("settings.keybinds.press_a_key").to_string()
         } else {
             binding_label
         };
@@ -558,25 +582,34 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
     // was unified into this tab. Only shown with no active search filter.
     if app.settings.keybind_search.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
-            " workspaces / tabs (read-only)",
+            format!(" {}", t!("settings.keybinds.workspaces_tabs_readonly")),
             header_style,
         ))));
         items.push(ListItem::new(Line::from(vec![
-            Span::raw(format!("   {:<22}", "switch workspace 1-9")),
+            Span::raw(format!(
+                "   {:<22}",
+                t!("settings.keybinds.switch_workspace").to_string()
+            )),
             Span::styled(
                 indexed_keybind_label(&app.keybinds.switch_workspace),
                 Style::default().fg(p.overlay1),
             ),
         ])));
         items.push(ListItem::new(Line::from(vec![
-            Span::raw(format!("   {:<22}", "focus agent 1-9")),
+            Span::raw(format!(
+                "   {:<22}",
+                t!("settings.keybinds.focus_agent").to_string()
+            )),
             Span::styled(
                 indexed_keybind_label(&app.keybinds.focus_agent),
                 Style::default().fg(p.overlay1),
             ),
         ])));
         items.push(ListItem::new(Line::from(vec![
-            Span::raw(format!("   {:<22}", "switch tab 1-9")),
+            Span::raw(format!(
+                "   {:<22}",
+                t!("settings.keybinds.switch_tab").to_string()
+            )),
             Span::styled(
                 indexed_keybind_label(&app.keybinds.switch_tab),
                 Style::default().fg(p.overlay1),
@@ -585,7 +618,7 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
 
         if !app.keybinds.custom_commands.is_empty() {
             items.push(ListItem::new(Line::from(Span::styled(
-                " custom (read-only)",
+                format!(" {}", t!("settings.keybinds.custom_readonly")),
                 header_style,
             ))));
             for command in &app.keybinds.custom_commands {
@@ -624,7 +657,7 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
 /// binding's label when the run isn't a clean `1..9` sequence.
 fn indexed_keybind_label(bindings: &[crate::config::IndexedKeybind]) -> String {
     if bindings.is_empty() {
-        return "unset".to_string();
+        return t!("settings.keybinds.unset").to_string();
     }
 
     let mut parts = Vec::new();

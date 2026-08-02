@@ -1,0 +1,532 @@
+_version: 2
+
+settings.title:
+  en: settings
+  ru: настройки
+settings.close:
+  en: close
+  ru: закрыть
+settings.install:
+  en: install
+  ru: установить
+settings.apply:
+  en: apply
+  ru: применить
+settings.footer.select:
+  en: select
+  ru: выбрать
+settings.footer.tab:
+  en: tab
+  ru: tab
+settings.footer.section:
+  en: section
+  ru: раздел
+
+settings.sound.title:
+  en: sound alerts
+  ru: звуковые оповещения
+settings.sound.description:
+  en: play sounds when agents change state in background
+  ru: проигрывать звук при смене статуса агента в фоне
+settings.toast.title:
+  en: notification popups
+  ru: всплывающие уведомления
+settings.toast.description:
+  en: choose where background popup notifications should appear
+  ru: выберите, где показывать фоновые уведомления
+settings.toast.off:
+  en: "off"
+  ru: выкл
+settings.toast.inside_tanuki:
+  en: inside tanuki
+  ru: внутри tanuki
+settings.toast.via_terminal:
+  en: via terminal
+  ru: через терминал
+settings.toast.via_system:
+  en: via system
+  ru: через систему
+settings.pane_labels.title:
+  en: agent border labels
+  ru: подписи агентов на рамках
+settings.pane_labels.description:
+  en: show detected agent names in split pane borders
+  ru: показывать имена агентов на рамках панелей
+
+settings.language.title:
+  en: language
+  ru: язык
+settings.language.description:
+  en: choose the UI language
+  ru: выберите язык интерфейса
+settings.language.auto:
+  en: auto
+  ru: авто
+settings.language.english:
+  en: english
+  ru: english
+settings.language.russian:
+  en: russian
+  ru: русский
+
+settings.integrations.title:
+  en: agent integrations
+  ru: интеграции агентов
+settings.integrations.description:
+  en: let agents report state directly instead of relying only on process detection
+  ru: агенты сообщают статус напрямую, а не только через детекцию процесса
+settings.integrations.hint_install:
+  en: press install to add available or outdated integrations
+  ru: нажмите «установить», чтобы добавить доступные или устаревшие интеграции
+settings.integrations.hint_all_installed:
+  en: all detected integrations are installed
+  ru: все найденные интеграции установлены
+settings.integrations.hint_none_found:
+  en: no supported agent CLIs found on PATH
+  ru: поддерживаемые агенты не найдены в PATH
+settings.integrations.none_available:
+  en: no integration targets available
+  ru: нет доступных целей для интеграции
+
+settings.experiments.description:
+  en: optional features that are off by default
+  ru: опциональные функции, выключенные по умолчанию
+
+settings.keybinds.desc_direct:
+  en: press a key combo to bind it, or esc to cancel
+  ru: нажмите комбинацию клавиш для привязки, esc — отмена
+settings.keybinds.desc_prefix:
+  en: press a key combo to bind it after the leader key, or esc to cancel
+  ru: нажмите комбинацию после leader-клавиши, esc — отмена
+settings.keybinds.desc_search_active:
+  en: type to filter, enter/esc to stop editing (filter stays applied)
+  ru: печатайте для фильтрации, enter/esc — закончить (фильтр останется)
+settings.keybinds.desc_default:
+  en: no default binding — pick your own; enter = direct chord, p = prefix+ binding, / = search
+  ru: нет привязки по умолчанию — задайте свою; enter — прямая, p — с префиксом, / — поиск
+settings.keybinds.press_to_edit:
+  en: press / to edit
+  ru: нажмите / для редактирования
+settings.keybinds.press_to_search:
+  en: press / to search
+  ru: нажмите / для поиска
+settings.keybinds.no_matches:
+  en: no matching keybinds
+  ru: совпадений не найдено
+settings.keybinds.unset:
+  en: unset
+  ru: не задано
+settings.keybinds.press_a_key:
+  en: "press a key…"
+  ru: "нажмите клавишу…"
+settings.keybinds.workspaces_tabs_readonly:
+  en: workspaces / tabs (read-only)
+  ru: воркспейсы / вкладки (только чтение)
+settings.keybinds.switch_workspace:
+  en: switch workspace 1-9
+  ru: воркспейс 1-9
+settings.keybinds.focus_agent:
+  en: focus agent 1-9
+  ru: агент 1-9
+settings.keybinds.switch_tab:
+  en: switch tab 1-9
+  ru: вкладка 1-9
+settings.keybinds.custom_readonly:
+  en: custom (read-only)
+  ru: пользовательские (только чтение)
+
+dialogs.save:
+  en: save
+  ru: сохранить
+dialogs.clear:
+  en: clear
+  ru: очистить
+dialogs.cancel:
+  en: cancel
+  ru: отмена
+dialogs.confirm:
+  en: confirm
+  ru: подтвердить
+dialogs.remove:
+  en: remove
+  ru: удалить
+dialogs.delete_anyway:
+  en: delete anyway
+  ru: удалить всё равно
+dialogs.open:
+  en: open
+  ru: открыть
+dialogs.create_and_open:
+  en: create and open
+  ru: создать и открыть
+dialogs.new_workspace:
+  en: new workspace
+  ru: новый воркспейс
+dialogs.rename_workspace:
+  en: rename workspace
+  ru: переименовать воркспейс
+dialogs.new_tab:
+  en: new tab
+  ru: новая вкладка
+dialogs.rename_tab:
+  en: rename tab
+  ru: переименовать вкладку
+dialogs.rename_pane:
+  en: rename pane
+  ru: переименовать панель
+dialogs.new_worktree:
+  en: new worktree
+  ru: новый worktree
+dialogs.branch:
+  en: branch
+  ru: ветка
+dialogs.checkout:
+  en: checkout
+  ru: checkout
+dialogs.creating:
+  en: "creating…"
+  ru: "создание…"
+dialogs.removing:
+  en: "removing…"
+  ru: "удаление…"
+dialogs.delete_worktree_checkout:
+  en: delete worktree checkout?
+  ru: удалить checkout worktree?
+dialogs.removes_checkout_folder:
+  en: "This removes the checkout folder:"
+  ru: "Это удалит папку checkout:"
+dialogs.branch_not_deleted:
+  en: The branch is not deleted. The Tanuki workspace will close.
+  ru: Ветка не удаляется. Воркспейс Tanuki будет закрыт.
+dialogs.dirty_files_warning:
+  en: Dirty or untracked files will be permanently deleted.
+  ru: Изменённые и неотслеживаемые файлы будут удалены безвозвратно.
+dialogs.open_worktree:
+  en: open worktree
+  ru: открыть worktree
+dialogs.filter_worktrees:
+  en: filter worktrees
+  ru: фильтр worktree
+dialogs.checkouts_count:
+  en: "%{count} checkouts"
+  ru: "%{count} checkout'ов"
+dialogs.checkouts_filtered_count:
+  en: "%{filtered}/%{count} checkouts"
+  ru: "%{filtered}/%{count} checkout'ов"
+dialogs.no_matching_worktrees:
+  en: no matching worktrees
+  ru: совпадений не найдено
+dialogs.pane_singular:
+  en: 1 pane
+  ru: 1 панель
+dialogs.pane_plural:
+  en: "%{count} panes"
+  ru: "%{count} панелей"
+dialogs.workspace_singular:
+  en: "1 workspace,"
+  ru: "1 воркспейс,"
+dialogs.workspace_plural:
+  en: "%{count} workspaces,"
+  ru: "%{count} воркспейсов,"
+dialogs.close_worktree_group:
+  en: Close worktree group?
+  ru: Закрыть группу worktree?
+dialogs.close_workspace:
+  en: Close workspace?
+  ru: Закрыть воркспейс?
+
+mobile.no_workspace:
+  en: no workspace
+  ru: нет воркспейса
+mobile.switch:
+  en: switch
+  ru: сменить
+mobile.close:
+  en: close
+  ru: закрыть
+mobile.agents:
+  en: agents
+  ru: агенты
+mobile.filtered:
+  en: filtered
+  ru: отфильтровано
+mobile.no_matching_agents:
+  en: no matching agents
+  ru: совпадений не найдено
+mobile.spaces:
+  en: spaces
+  ru: воркспейсы
+mobile.new_workspace_action:
+  en: "+ new workspace"
+  ru: "+ новый воркспейс"
+mobile.tabs:
+  en: tabs
+  ru: вкладки
+mobile.new_tab_action:
+  en: "+ new tab"
+  ru: "+ новая вкладка"
+mobile.menu:
+  en: menu
+  ru: меню
+mobile.no_agents:
+  en: no agents
+  ru: нет агентов
+mobile.all_idle:
+  en: all idle
+  ru: все простаивают
+mobile.blocked_count:
+  en: "%{count} blocked"
+  ru: "%{count} заблокировано"
+mobile.done_count:
+  en: "%{count} done"
+  ru: "%{count} готово"
+mobile.working_count:
+  en: "%{count} working"
+  ru: "%{count} работает"
+mobile.idle_count:
+  en: "%{count} idle"
+  ru: "%{count} простаивает"
+mobile.agent_waiting:
+  en: "%{agent} waiting"
+  ru: "%{agent} ждёт"
+mobile.agent_done:
+  en: "%{agent} done"
+  ru: "%{agent} готово"
+mobile.update_ready:
+  en: update ready
+  ru: обновление готово
+
+sidebar.spaces:
+  en: spaces
+  ru: воркспейсы
+sidebar.new:
+  en: new
+  ru: новый
+sidebar.menu:
+  en: menu
+  ru: меню
+sidebar.agents:
+  en: agents
+  ru: агенты
+sidebar.no_matching_agents:
+  en: no matching agents
+  ru: совпадений не найдено
+
+release_notes.update_ready:
+  en: update ready
+  ru: обновление готово
+release_notes.whats_new:
+  en: what's new in this release
+  ru: что нового в этом релизе
+release_notes.close:
+  en: close
+  ru: закрыть
+release_notes.scroll:
+  en: scroll
+  ru: прокрутка
+release_notes.wheel_updown:
+  en: "wheel ↑↓"
+  ru: "колесо ↑↓"
+release_notes.announcement_preview:
+  en: product announcement preview
+  ru: превью анонса продукта
+release_notes.announcement:
+  en: product announcement
+  ru: анонс продукта
+
+menus.mode_prefix:
+  en: PREFIX
+  ru: PREFIX
+menus.mode_copy:
+  en: COPY
+  ru: COPY
+menus.mode_navigate:
+  en: NAVIGATE
+  ru: NAVIGATE
+menus.mode_resize:
+  en: RESIZE
+  ru: RESIZE
+menus.cancel:
+  en: cancel
+  ru: отмена
+menus.send_prefix:
+  en: send prefix
+  ru: отправить prefix
+menus.workspace_nav:
+  en: workspace nav
+  ru: навигация по воркспейсам
+menus.keybinds:
+  en: keybinds
+  ru: горячие клавиши
+menus.enter:
+  en: enter
+  ru: enter
+menus.selecting:
+  en: selecting
+  ru: выделение
+menus.select:
+  en: select
+  ru: выделить
+menus.exit:
+  en: exit
+  ru: выход
+menus.clear:
+  en: clear
+  ru: очистить
+menus.move:
+  en: move
+  ru: перемещение
+menus.search:
+  en: search
+  ru: поиск
+menus.repeat:
+  en: repeat
+  ru: повтор
+menus.copy:
+  en: copy
+  ru: копировать
+menus.back:
+  en: back
+  ru: назад
+menus.ws:
+  en: ws
+  ru: ws
+menus.pane:
+  en: pane
+  ru: панель
+menus.navigator:
+  en: navigator
+  ru: навигатор
+menus.new_tab:
+  en: new tab
+  ru: новая вкладка
+menus.split:
+  en: split
+  ru: разделить
+menus.close:
+  en: close
+  ru: закрыть
+menus.zoom:
+  en: zoom
+  ru: увеличить
+menus.resize:
+  en: resize
+  ru: изменить размер
+menus.equalize:
+  en: equalize
+  ru: выровнять
+menus.detach:
+  en: detach
+  ru: отключиться
+menus.width:
+  en: width
+  ru: ширина
+menus.height:
+  en: height
+  ru: высота
+menus.done:
+  en: done
+  ru: готово
+
+panes.popup:
+  en: popup
+  ru: попап
+panes.no_workspaces_yet:
+  en: No workspaces yet
+  ru: Пока нет воркспейсов
+panes.workspace_explainer:
+  en: A workspace is one project context.
+  ru: Воркспейс — это контекст одного проекта.
+panes.root_pane_explainer:
+  en: Its root pane (top-left) sets the default repo or folder name.
+  ru: Корневая панель (сверху слева) задаёт имя репозитория или папки по умолчанию.
+panes.press:
+  en: Press
+  ru: Нажмите
+panes.to_create_one:
+  en: to create one
+  ru: чтобы создать
+
+navigator.blocked:
+  en: blocked
+  ru: заблокирован
+navigator.working:
+  en: working
+  ru: работает
+navigator.idle:
+  en: idle
+  ru: простаивает
+navigator.done:
+  en: done
+  ru: готово
+navigator.search_panes:
+  en: search panes
+  ru: поиск панелей
+navigator.panes_count:
+  en: "%{count} panes"
+  ru: "%{count} панелей"
+navigator.tab_label:
+  en: "tab: %{name}"
+  ru: "вкладка: %{name}"
+navigator.pane_number:
+  en: "pane %{number}"
+  ru: "панель %{number}"
+navigator.shell:
+  en: shell
+  ru: shell
+navigator.switch:
+  en: switch
+  ru: переключить
+navigator.states:
+  en: states
+  ru: статусы
+navigator.close:
+  en: close
+  ru: закрыть
+
+onboarding.continue:
+  en: continue
+  ru: продолжить
+onboarding.subtitle:
+  en: terminal workspace manager for coding agents
+  ru: менеджер терминальных воркспейсов для AI-агентов
+onboarding.mouse_first_explainer:
+  en: |-
+    this is a mouse-first terminal.
+      click the sidebar to switch workspaces, drag pane
+      borders to resize, right-click for context menus.
+  ru: |-
+    это mouse-first терминал.
+      кликайте по сайдбару для смены воркспейсов, тащите
+      рамки панелей для resize, ПКМ — контекстное меню.
+onboarding.enters_prefix_mode:
+  en: enters prefix mode
+  ru: включает prefix-режим
+onboarding.shows_keybinds_settings:
+  en: shows keybinds and settings
+  ru: показывает горячие клавиши и настройки
+onboarding.next_hint:
+  en: "next: install optional agent integrations for more reliable state"
+  ru: "далее: установите опциональные интеграции агентов для надёжного статуса"
+
+toasts.agent_detection_rules_updated:
+  en: Agent detection rules updated
+  ru: Правила детекции агентов обновлены
+toasts.version_available:
+  en: "v%{version} available"
+  ru: "доступна v%{version}"
+toasts.custom_command_failed:
+  en: custom command failed
+  ru: ошибка выполнения команды
+toasts.edit_scrollback_failed:
+  en: edit scrollback failed
+  ru: не удалось открыть буфер в редакторе
+toasts.opened_scrollback:
+  en: opened scrollback
+  ru: буфер открыт
+toasts.reloaded_config:
+  en: reloaded config
+  ru: конфиг перезагружен
+toasts.failed_to_open_worktree:
+  en: "failed to open worktree: %{err}"
+  ru: "не удалось открыть worktree: %{err}"

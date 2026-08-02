@@ -306,6 +306,7 @@ impl App {
                         SettingsAction::SaveAgentBorderLabels(enabled) => {
                             self.save_agent_border_labels(enabled)
                         }
+                        SettingsAction::SaveLanguage(language) => self.save_language(&language),
                         SettingsAction::SavePaneHistory(enabled) => {
                             self.save_pane_history_persistence(enabled)
                         }

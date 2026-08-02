@@ -17,6 +17,7 @@ pub(super) enum SettingsAction {
     SaveSound(bool),
     SaveToastDelivery(ToastDelivery),
     SaveAgentBorderLabels(bool),
+    SaveLanguage(String),
     SavePaneHistory(bool),
     SaveSwitchAsciiInputSourceInPrefix(bool),
     SaveKeybind(KeybindSetting, String),
@@ -48,6 +49,7 @@ impl App {
                 SettingsAction::SaveAgentBorderLabels(enabled) => {
                     self.save_agent_border_labels(enabled)
                 }
+                SettingsAction::SaveLanguage(language) => self.save_language(&language),
                 SettingsAction::SavePaneHistory(enabled) => {
                     self.save_pane_history_persistence(enabled)
                 }
@@ -98,6 +100,23 @@ fn toast_delivery_for_index(idx: usize) -> ToastDelivery {
         2 => ToastDelivery::Terminal,
         _ => ToastDelivery::System,
     }
+}
+
+fn language_index(language: &str) -> usize {
+    match language {
+        "en" => 1,
+        "ru" => 2,
+        _ => 0,
+    }
+}
+
+fn language_for_index(idx: usize) -> String {
+    match idx {
+        1 => "en",
+        2 => "ru",
+        _ => "auto",
+    }
+    .to_string()
 }
 
 fn preview_selected_theme(state: &mut AppState) {
@@ -244,6 +263,30 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 state.settings.list.selected = toast_delivery_index(state.toast_delivery());
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                state.settings.section = SettingsSection::Language;
+                state.settings.list.selected = language_index(&state.language);
+            }
+            _ => {
+                if let Some(super::modal::ModalAction::Close) =
+                    super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS)
+                {
+                    cancel_settings(state);
+                }
+            }
+        },
+        SettingsSection::Language => match key.code {
+            KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
+            KeyCode::Down | KeyCode::Char('j') => state.settings.list.move_next(3),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                return Some(SettingsAction::SaveLanguage(language_for_index(
+                    state.settings.list.selected,
+                )));
+            }
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                state.settings.section = SettingsSection::PaneLabels;
+                state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+            }
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                 state.settings.section = SettingsSection::Keybinds;
                 state.settings.list.selected = 0;
                 state.settings.keybind_search.clear();
@@ -317,9 +360,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                         Some(crate::app::state::KeybindCaptureKind::Prefix);
                 }
                 KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                    state.settings.section = SettingsSection::PaneLabels;
-                    state.settings.list.selected =
-                        usize::from(!state.agent_border_labels_enabled());
+                    state.settings.section = SettingsSection::Language;
+                    state.settings.list.selected = language_index(&state.language);
                     state.settings.keybind_search.clear();
                 }
                 KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
@@ -399,6 +441,7 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
         SettingsSection::Sound => usize::from(!state.sound_enabled()),
         SettingsSection::Toast => toast_delivery_index(state.toast_delivery()),
         SettingsSection::PaneLabels => usize::from(!state.agent_border_labels_enabled()),
+        SettingsSection::Language => language_index(&state.language),
         SettingsSection::Keybinds => 0,
         SettingsSection::Experiments => 0,
         SettingsSection::Integrations => 0,
@@ -498,6 +541,14 @@ impl AppState {
                     None
                 }
             }
+            SettingsSection::Language => {
+                let list_y = area.y + 3;
+                if row >= list_y && row < list_y + 6 {
+                    Some(((row - list_y) / 2) as usize)
+                } else {
+                    None
+                }
+            }
             SettingsSection::Keybinds => {
                 let list_y = area.y + 3;
                 let max_visible = area.height.saturating_sub(3) as usize;
@@ -536,6 +587,7 @@ impl AppState {
                         SettingsSection::PaneLabels => {
                             usize::from(!self.agent_border_labels_enabled())
                         }
+                        SettingsSection::Language => language_index(&self.language),
                         SettingsSection::Keybinds => 0,
                         SettingsSection::Experiments => 0,
                         SettingsSection::Integrations => 0,
@@ -565,6 +617,9 @@ impl AppState {
                         SettingsSection::PaneLabels => {
                             let enabled = idx == 0;
                             Some(SettingsAction::SaveAgentBorderLabels(enabled))
+                        }
+                        SettingsSection::Language => {
+                            Some(SettingsAction::SaveLanguage(language_for_index(idx)))
                         }
                         SettingsSection::Keybinds => None,
                         SettingsSection::Experiments => experiment_toggle_action(self, idx),
@@ -702,6 +757,12 @@ mod tests {
             &mut state,
             KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
         );
+        assert_eq!(state.settings.section, SettingsSection::Language);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
+        );
         assert_eq!(state.settings.section, SettingsSection::Keybinds);
 
         update_settings_state(
@@ -739,6 +800,12 @@ mod tests {
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
         );
         assert_eq!(state.settings.section, SettingsSection::Keybinds);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
+        );
+        assert_eq!(state.settings.section, SettingsSection::Language);
 
         update_settings_state(
             &mut state,

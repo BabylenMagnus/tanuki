@@ -25,6 +25,28 @@ mod theme_sync;
 mod worktrees;
 
 use std::collections::{HashMap, HashSet};
+use rust_i18n::t;
+
+/// Resolve a configured language preference ("auto", "en", "ru") to a concrete
+/// locale code. "auto" checks `LANG`/`LC_ALL`/`LANGUAGE` for a `ru` prefix
+/// (Unix/WSL convention); on native Windows those are typically unset, so
+/// "auto" falls back to English there — a known limitation, not a bug.
+pub(crate) fn resolve_locale(language: &str) -> String {
+    match language {
+        "ru" => "ru".to_string(),
+        "en" => "en".to_string(),
+        _ => {
+            for var in ["LC_ALL", "LANG", "LANGUAGE"] {
+                if let Ok(val) = std::env::var(var) {
+                    if val.to_lowercase().starts_with("ru") {
+                        return "ru".to_string();
+                    }
+                }
+            }
+            "en".to_string()
+        }
+    }
+}
 use std::future::pending;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -390,6 +412,7 @@ impl App {
         event_hub: crate::api::EventHub,
     ) -> Self {
         let (prefix_code, prefix_mods) = config.prefix_key();
+        rust_i18n::set_locale(&resolve_locale(&config.ui.language));
         crate::kitty_graphics::set_enabled(config.experimental.kitty_graphics);
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
@@ -672,6 +695,7 @@ impl App {
             sound: config.ui.sound.clone(),
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
+            language: config.ui.language.clone(),
             keybinds: config.keybinds(),
             spinner_tick: 0,
             palette: theme_palette,
@@ -1472,6 +1496,10 @@ impl App {
                 }
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
+                if self.state.language != config.ui.language {
+                    self.state.language = config.ui.language.clone();
+                    rust_i18n::set_locale(&resolve_locale(&self.state.language));
+                }
             }
         }
 
@@ -1564,7 +1592,7 @@ impl App {
             if notify_success {
                 self.state.toast = Some(crate::app::state::ToastNotification {
                     kind: crate::app::state::ToastKind::UpdateInstalled,
-                    title: "reloaded config".to_string(),
+                    title: t!("toasts.reloaded_config").to_string(),
                     context: "using config.toml".to_string(),
                     position: None,
                     target: None,
@@ -1576,7 +1604,7 @@ impl App {
             if notify_success {
                 self.state.toast = Some(crate::app::state::ToastNotification {
                     kind: crate::app::state::ToastKind::UpdateInstalled,
-                    title: "reloaded config".to_string(),
+                    title: t!("toasts.reloaded_config").to_string(),
                     context: "with warnings".to_string(),
                     position: None,
                     target: None,

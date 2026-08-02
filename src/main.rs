@@ -54,6 +54,8 @@ fn set_host_color_scheme_reports(enabled: bool) -> io::Result<()> {
     io::stdout().flush()
 }
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 mod agent_resume;
 mod api;
 mod app;

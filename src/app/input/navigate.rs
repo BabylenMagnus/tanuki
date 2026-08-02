@@ -7,6 +7,7 @@ use std::{
 
 use bytes::Bytes;
 use crossterm::event::KeyCode;
+use rust_i18n::t;
 #[cfg(test)]
 use crossterm::event::KeyEvent;
 use ratatui::layout::Direction;
@@ -790,7 +791,7 @@ impl App {
             Err(err) => {
                 self.state.toast = Some(crate::app::state::ToastNotification {
                     kind: crate::app::state::ToastKind::NeedsAttention,
-                    title: "custom command failed".to_string(),
+                    title: t!("toasts.custom_command_failed").to_string(),
                     context: err.to_string(),
                     position: None,
                     target: None,
@@ -886,7 +887,7 @@ impl App {
             Err(err) => {
                 self.state.toast = Some(crate::app::state::ToastNotification {
                     kind: crate::app::state::ToastKind::NeedsAttention,
-                    title: "edit scrollback failed".to_string(),
+                    title: t!("toasts.edit_scrollback_failed").to_string(),
                     context: err.to_string(),
                     position: None,
                     target: None,
@@ -942,7 +943,7 @@ impl App {
         if let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) {
             self.state.toast = Some(crate::app::state::ToastNotification {
                 kind: crate::app::state::ToastKind::Finished,
-                title: "opened scrollback".to_string(),
+                title: t!("toasts.opened_scrollback").to_string(),
                 context: format!("focused pane {public_pane_id}"),
                 position: None,
                 target: None,

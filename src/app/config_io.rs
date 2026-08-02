@@ -100,6 +100,19 @@ impl App {
         }
     }
 
+    pub(super) fn save_language(&mut self, language: &str) {
+        if self.update_config_file("language setting", |content| {
+            crate::config::upsert_section_value(
+                content,
+                "ui",
+                "language",
+                &format!("\"{language}\""),
+            )
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
     pub(super) fn save_agent_border_labels(&mut self, enabled: bool) {
         if self.update_config_file("agent border labels", |content| {
             crate::config::upsert_section_bool(
