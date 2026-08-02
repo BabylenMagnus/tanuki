@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.53] - 2026-08-02
+
 ### Added
 - Add equalize splits action and update version to 0.1.49
 - Implement semantic frame writing and patch handling in client
