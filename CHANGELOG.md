@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Update dependencies and add localization support for English
+
 ## [0.1.58] - 2026-08-02
 
 ### Added
