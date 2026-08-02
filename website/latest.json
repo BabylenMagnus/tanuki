@@ -1,14 +1,24 @@
 {
-  "version": "0.1.47",
-  "protocol": 17,
-  "notes": "### Fixed\n- Stop forcing full-screen client clears on every keystroke: terminal input no longer requests full re-render (PTY retained path handles content), and same-size full rebuilds set is_full=false so the client diffs instead of CSI 2J\n- Do not reset the semantic last-frame baseline on every input event (was forcing non-skippable full paints)",
+  "version": "0.1.53",
+  "protocol": 18,
+  "notes": "### Added\n- Add equalize splits action and update version to 0.1.49\n- Implement semantic frame writing and patch handling in client\n\n### Changed\n- Bump version to 0.1.52 and update changelog\n- Populate Unreleased changelog from commits\n- Update version to 0.1.51 and add changelog entry\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.50 and update changelog\n- Populate Unreleased changelog from commits\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.48 and update changelog\n- Populate Unreleased changelog from commits",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.47/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.53": {
+      "notes": "### Added\n- Add equalize splits action and update version to 0.1.49\n- Implement semantic frame writing and patch handling in client\n\n### Changed\n- Bump version to 0.1.52 and update changelog\n- Populate Unreleased changelog from commits\n- Update version to 0.1.51 and add changelog entry\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.50 and update changelog\n- Populate Unreleased changelog from commits\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.48 and update changelog\n- Populate Unreleased changelog from commits",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.53/tanuki-macos-aarch64"
+      }
+    },
     "0.1.47": {
       "notes": "### Fixed\n- Stop forcing full-screen client clears on every keystroke: terminal input no longer requests full re-render (PTY retained path handles content), and same-size full rebuilds set is_full=false so the client diffs instead of CSI 2J\n- Do not reset the semantic last-frame baseline on every input event (was forcing non-skippable full paints)",
       "protocol": 17,
