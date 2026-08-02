@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Add FORK.md to document fork provenance and upstream sync strategy
+
+### Changed
+- Bump version to 0.1.54 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.54] - 2026-08-02
 
 ### Added
