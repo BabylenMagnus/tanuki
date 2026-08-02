@@ -506,6 +506,12 @@
           "description": "Close the focused pane."
         },
         {
+          "key": "keys.equalize_splits",
+          "type": "keybinding",
+          "default": "\"prefix+=\"",
+          "description": "Resize all splits in the current layout back to equal proportions."
+        },
+        {
           "key": "keys.zoom",
           "type": "keybinding",
           "default": "\"prefix+z\"",
