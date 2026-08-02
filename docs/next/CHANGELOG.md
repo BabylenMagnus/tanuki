@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+- Add equalize splits action and update version to 0.1.49
+- Implement semantic frame writing and patch handling in client
+
+### Changed
+- Bump version to 0.1.52 and update changelog
+- Populate Unreleased changelog from commits
+- Update version to 0.1.51 and add changelog entry
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.50 and update changelog
+- Populate Unreleased changelog from commits
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.48 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.52] - 2026-08-02
 
 ### Added
