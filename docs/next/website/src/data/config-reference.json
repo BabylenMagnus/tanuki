@@ -600,6 +600,17 @@
           "description": "Capture mouse input for Herdr's mouse UI."
         },
         {
+          "key": "ui.language",
+          "type": "enum",
+          "default": "auto",
+          "description": "UI language for Tanuki's own chrome (sidebar, menus, settings, toasts). \"auto\" detects from the OS locale (LANG/LC_ALL/LANGUAGE on Unix); falls back to English if detection fails or the locale isn't supported.",
+          "values": [
+            "auto",
+            "en",
+            "ru"
+          ]
+        },
+        {
           "key": "ui.copy_on_select",
           "type": "boolean",
           "default": "true",
