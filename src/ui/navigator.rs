@@ -475,7 +475,7 @@ fn pane_detail(
             let display_agent = terminal.effective_display_agent();
             if let Some(agent) = display_agent
                 .as_deref()
-                .or_else(|| terminal.agent_name.as_deref())
+                .or(terminal.agent_name.as_deref())
                 .or_else(|| {
                     terminal
                         .effective_agent_label()
