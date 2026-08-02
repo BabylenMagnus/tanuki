@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+- Add FORK.md to document fork provenance and upstream sync strategy
+
+### Fixed
+- Use or() instead of or_else() for clippy unnecessary_lazy_evaluations
+
+### Changed
+- Bump version to 0.1.56 and update changelog
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.55 and update changelog
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.54 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.56] - 2026-08-02
 
 ### Added
