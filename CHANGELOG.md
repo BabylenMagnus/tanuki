@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- Update dependencies and add localization support for English
+
+### Changed
+- Bump version to 0.1.60 and update changelog with new features
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.59 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.60] - 2026-08-02
 
 ### Added
