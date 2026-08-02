@@ -1,14 +1,24 @@
 {
-  "version": "0.1.58",
+  "version": "0.1.61",
   "protocol": 18,
-  "notes": "### Added\n- Add FORK.md to document fork provenance and upstream sync strategy\n\n### Fixed\n- Use or() instead of or_else() for clippy unnecessary_lazy_evaluations\n\n### Changed\n- Bump version to 0.1.57 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.56 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.55 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.54 and update changelog\n- Populate Unreleased changelog from commits",
+  "notes": "### Added\n- Update dependencies and add localization support for English\n\n### Changed\n- Bump version to 0.1.60 and update changelog with new features\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.59 and update changelog\n- Populate Unreleased changelog from commits",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.58/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.58/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.58/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.58/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.61": {
+      "notes": "### Added\n- Update dependencies and add localization support for English\n\n### Changed\n- Bump version to 0.1.60 and update changelog with new features\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.59 and update changelog\n- Populate Unreleased changelog from commits",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-macos-aarch64"
+      }
+    },
     "0.1.58": {
       "notes": "### Added\n- Add FORK.md to document fork provenance and upstream sync strategy\n\n### Fixed\n- Use or() instead of or_else() for clippy unnecessary_lazy_evaluations\n\n### Changed\n- Bump version to 0.1.57 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.56 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.55 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.54 and update changelog\n- Populate Unreleased changelog from commits",
       "protocol": 18,
