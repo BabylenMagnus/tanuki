@@ -1,14 +1,24 @@
 {
-  "version": "0.1.61",
+  "version": "0.1.62",
   "protocol": 18,
-  "notes": "### Added\n- Update dependencies and add localization support for English\n\n### Changed\n- Bump version to 0.1.60 and update changelog with new features\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.59 and update changelog\n- Populate Unreleased changelog from commits",
+  "notes": "### Added\n- Add pre-reform Russian language support in config",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.61/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.62": {
+      "notes": "### Added\n- Add pre-reform Russian language support in config",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.62/tanuki-macos-aarch64"
+      }
+    },
     "0.1.61": {
       "notes": "### Added\n- Update dependencies and add localization support for English\n\n### Changed\n- Bump version to 0.1.60 and update changelog with new features\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.59 and update changelog\n- Populate Unreleased changelog from commits",
       "protocol": 18,
