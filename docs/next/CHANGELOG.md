@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add pre-reform Russian language support in config
+
 ## [0.1.61] - 2026-08-02
 
 ### Added
