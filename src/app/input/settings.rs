@@ -20,6 +20,7 @@ pub(super) enum SettingsAction {
     SaveLanguage(String),
     SavePaneHistory(bool),
     SaveSwitchAsciiInputSourceInPrefix(bool),
+    SaveCloudHost(bool),
     SaveKeybind(KeybindSetting, String),
     InstallRecommendedIntegrations,
 }
@@ -35,6 +36,9 @@ fn experiment_toggle_action(state: &AppState, idx: usize) -> Option<SettingsActi
                 !ExperimentSetting::SwitchAsciiInputSourceInPrefix.enabled(state),
             ))
         }
+        ExperimentSetting::CloudHost => Some(SettingsAction::SaveCloudHost(
+            !ExperimentSetting::CloudHost.enabled(state),
+        )),
     }
 }
 
@@ -56,6 +60,7 @@ impl App {
                 SettingsAction::SaveSwitchAsciiInputSourceInPrefix(enabled) => {
                     self.save_switch_ascii_input_source_in_prefix(enabled)
                 }
+                SettingsAction::SaveCloudHost(enabled) => self.save_cloud_host(enabled),
                 SettingsAction::SaveKeybind(setting, binding) => {
                     self.save_keybind(setting.field_name(), &binding)
                 }

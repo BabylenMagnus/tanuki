@@ -696,6 +696,7 @@ impl App {
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             pane_history_persistence: config.experimental.pane_history,
+            cloud_host: config.remote.cloud_host,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
             cjk_ime_agents: parse_cjk_ime_agents(&config.experimental.cjk_ime_agents),
@@ -1544,6 +1545,7 @@ impl App {
             if !self.persist_pane_history {
                 crate::persist::clear_history();
             }
+            self.state.cloud_host = config.remote.cloud_host;
         }
 
         if !invalid_section("advanced") {

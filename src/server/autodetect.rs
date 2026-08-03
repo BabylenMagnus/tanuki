@@ -271,6 +271,9 @@ fn build_server_daemon_command(exe: PathBuf) -> Command {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    if crate::config::Config::load().config.remote.cloud_host {
+        command.arg("--cloud-host");
+    }
     crate::platform::detach_server_daemon_command(&mut command);
 
     match std::env::current_dir() {

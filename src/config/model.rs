@@ -874,12 +874,18 @@ pub struct RemoteConfig {
     /// Add keepalive fallbacks and private connection reuse for `tanuki --remote`.
     /// Set false to run plain ssh unchanged. Default: true.
     pub manage_ssh_config: bool,
+    /// Register the server as a Tanuki Cloud host on every normal `tanuki`
+    /// launch (equivalent to always passing `tanuki server --cloud-host`),
+    /// so other paired devices can attach with `tanuki --cloud <device-token-id>`
+    /// without any manual server command. Default: false.
+    pub cloud_host: bool,
 }
 
 impl Default for RemoteConfig {
     fn default() -> Self {
         Self {
             manage_ssh_config: true,
+            cloud_host: false,
         }
     }
 }

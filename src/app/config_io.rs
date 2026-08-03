@@ -134,6 +134,19 @@ impl App {
         }
     }
 
+    /// Persists whether the server should register as a Tanuki Cloud host
+    /// (`tanuki server --cloud-host`) on every normal `tanuki` launch. Takes
+    /// effect the next time the server daemon is (re)spawned — see
+    /// `server::autodetect::build_server_daemon_command`; it does not
+    /// reconfigure the currently-running server in place.
+    pub(super) fn save_cloud_host(&mut self, enabled: bool) {
+        if self.update_config_file("cloud host", |content| {
+            crate::config::upsert_section_bool(content, "remote", "cloud_host", enabled)
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
     pub(super) fn save_switch_ascii_input_source_in_prefix(&mut self, enabled: bool) {
         if self.update_config_file("prefix ascii input source", |content| {
             crate::config::upsert_section_bool(
