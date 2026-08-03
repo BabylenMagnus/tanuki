@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Improve language handling and sidebar layout calculations
+
 ## [0.1.63] - 2026-08-03
 
 ### Added
