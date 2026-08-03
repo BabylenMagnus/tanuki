@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add support for respawning server daemon after updates
+
 ## [0.1.62] - 2026-08-02
 
 ### Added
