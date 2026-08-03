@@ -1537,7 +1537,13 @@ impl TerminalState {
         self.stale_full_lifecycle_hook_sessions.clear();
         self.state = AgentState::Unknown;
         self.last_agent_state_change_seq = None;
-        self.launch_argv = None;
+        // launch_argv intentionally survives this reset: it carries the
+        // user's custom launch flags (e.g. `--dangerously-skip-permissions`)
+        // across exactly the respawn this function handles. Clearing it here
+        // used to permanently drop those flags the moment the Windows
+        // PowerShell exit-respawn quirk (see `should_respawn_shell_after_agent_exit`)
+        // or a failed native-resume fell back to a plain shell, since the
+        // next session save would then persist whatever bare command replaced it.
         self.respawn_shell_on_exit = false;
         self.recent_agent_process_exit_at = None;
         self.pending_agent_resume_plan = None;
