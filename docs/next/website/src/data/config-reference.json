@@ -1064,6 +1064,12 @@
           "type": "boolean",
           "default": "true",
           "description": "Add keepalive fallbacks and private connection reuse for `herdr --remote`. Set false to run plain ssh unchanged."
+        },
+        {
+          "key": "remote.cloud_host",
+          "type": "boolean",
+          "default": "false",
+          "description": "Register the server as a Tanuki Cloud host (equivalent to always passing `herdr server --cloud-host`) on every normal launch, so other paired devices can attach with `herdr --cloud <device-token-id>` without a manual server command."
         }
       ]
     },
