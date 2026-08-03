@@ -20,15 +20,26 @@ use crate::{
     config::ToastDelivery,
 };
 
-pub(crate) const SETTINGS_POPUP_WIDTH: u16 = 104;
+// Minimum needed to fit the longest tab strip (ru-pre1918, all tabs + update badge)
+// without truncation.
+pub(crate) const SETTINGS_POPUP_MIN_WIDTH: u16 = 104;
+pub(crate) const SETTINGS_POPUP_MAX_WIDTH: u16 = 140;
+pub(crate) const SETTINGS_POPUP_WIDTH_PERCENT: u16 = 65;
 pub(crate) const SETTINGS_POPUP_BASE_HEIGHT: u16 = 22;
 
-pub(crate) fn settings_popup_height(app: &AppState) -> u16 {
+pub(crate) fn settings_popup_width(screen_width: u16) -> u16 {
+    let by_percent = (screen_width as u32 * SETTINGS_POPUP_WIDTH_PERCENT as u32 / 100) as u16;
+    by_percent
+        .max(SETTINGS_POPUP_MIN_WIDTH)
+        .min(SETTINGS_POPUP_MAX_WIDTH)
+}
+
+pub(crate) fn settings_popup_height(app: &AppState, popup_width: u16) -> u16 {
     if app.settings.section != crate::app::state::SettingsSection::Integrations {
         return SETTINGS_POPUP_BASE_HEIGHT;
     }
     let list_rows = app.integration_recommendations.len().max(1) as u16;
-    let footer_rows = integrations_footer_height(app, SETTINGS_POPUP_WIDTH - 2);
+    let footer_rows = integrations_footer_height(app, popup_width - 2);
     // borders 2 + header 3 + stack gaps 2 + modal footer 2
     // + section title 1 + description 2 + spacers 2
     (14 + list_rows + footer_rows).max(SETTINGS_POPUP_BASE_HEIGHT)
@@ -38,7 +49,8 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
     use crate::app::state::SettingsSection;
 
     let p = &app.palette;
-    let Some(popup) = centered_popup_rect(area, SETTINGS_POPUP_WIDTH, settings_popup_height(app))
+    let popup_width = settings_popup_width(area.width);
+    let Some(popup) = centered_popup_rect(area, popup_width, settings_popup_height(app, popup_width))
     else {
         return;
     };

@@ -440,8 +440,8 @@ sidebar.global_menu.detach:
 
 sidebar.sort.grouped:
   en: grouped
-  ru: сгруппировано
-  ru-pre1918: сгруппировано
+  ru: группы
+  ru-pre1918: группы
 sidebar.sort.priority:
   en: priority
   ru: приоритет
