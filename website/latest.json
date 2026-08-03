@@ -1,14 +1,24 @@
 {
-  "version": "0.1.67",
+  "version": "0.1.68",
   "protocol": 18,
-  "notes": "### Fixed\n- Update Russian translations and improve settings popup dimensions\n- Preserve launch_argv during terminal state reset\n\n### Changed\n- Bump version to 0.1.66 and update changelog\n- Populate Unreleased changelog from commits",
+  "notes": "### Added\n- Update global menu action to 'update & restart' and implement logic",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.68": {
+      "notes": "### Added\n- Update global menu action to 'update & restart' and implement logic",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.68/tanuki-macos-aarch64"
+      }
+    },
     "0.1.67": {
       "notes": "### Fixed\n- Update Russian translations and improve settings popup dimensions\n- Preserve launch_argv during terminal state reset\n\n### Changed\n- Bump version to 0.1.66 and update changelog\n- Populate Unreleased changelog from commits",
       "protocol": 18,
