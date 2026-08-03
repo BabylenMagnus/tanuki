@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+- Update Russian translations and improve settings popup dimensions
+- Preserve launch_argv during terminal state reset
+
+### Changed
+- Bump version to 0.1.66 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.66] - 2026-08-03
 
 ### Fixed
