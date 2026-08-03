@@ -1331,17 +1331,18 @@ fn render_agent_detail(
         Rect::new(area.x, area.y, area.width, 1),
     );
 
+    let control_label: String = active_agent_view_label(app)
+        .map(str::to_string)
+        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));
+    let toggle_rect = agent_panel_header_label_rect(area, &control_label);
+    let agents_label_width = area.width.saturating_sub(toggle_rect.width);
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
             format!(" {}", t!("sidebar.agents")),
             Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
         )])),
-        Rect::new(area.x, area.y + 1, area.width, 1),
+        Rect::new(area.x, area.y + 1, agents_label_width, 1),
     );
-    let control_label: String = active_agent_view_label(app)
-        .map(str::to_string)
-        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));
-    let toggle_rect = agent_panel_header_label_rect(area, &control_label);
     if toggle_rect != Rect::default() {
         let color = if app.agent_view_override.is_some() {
             p.accent

@@ -795,14 +795,37 @@ fn merge_persisted_launch_flags(
     let Some(saved) = saved_launch_argv else {
         return base_argv;
     };
-    let extra_flags: Vec<String> = saved
-        .iter()
-        .skip(1)
-        .filter(|flag| !base_argv.contains(flag))
-        .cloned()
-        .collect();
+
+    // Walk saved[1..] as (flag, value) pairs rather than independent tokens.
+    // A saved flag that's already represented in `base_argv` (e.g. `--resume`,
+    // whose value is rebuilt fresh from the current session ref) is dropped
+    // together with its value -- otherwise a stale value token (an old
+    // session id captured from a live process's argv, see
+    // `live_agent_launch_argv`) survives as a stray trailing positional,
+    // which agent CLIs like Claude Code interpret as an initial prompt.
+    let mut extra: Vec<String> = Vec::new();
+    let mut index = 1;
+    while index < saved.len() {
+        let token = &saved[index];
+        let takes_value = token.starts_with('-')
+            && !token.contains('=')
+            && saved.get(index + 1).is_some_and(|next| !next.starts_with('-'));
+
+        if base_argv.contains(token) {
+            index += if takes_value { 2 } else { 1 };
+            continue;
+        }
+
+        extra.push(token.clone());
+        if takes_value {
+            index += 1;
+            extra.push(saved[index].clone());
+        }
+        index += 1;
+    }
+
     let mut argv = base_argv;
-    argv.extend(extra_flags);
+    argv.extend(extra);
     argv
 }
 
@@ -1269,6 +1292,44 @@ mod tests {
     fn merge_persisted_launch_flags_is_noop_without_saved_argv() {
         let base = vec!["claude".into(), "--resume".into(), "claude-session".into()];
         assert_eq!(merge_persisted_launch_flags(base.clone(), None), base);
+    }
+
+    #[test]
+    fn merge_persisted_launch_flags_drops_stale_resume_value_as_trailing_positional() {
+        // Regression: `saved` here mimics `live_agent_launch_argv` reading
+        // back a claude process's own argv after it was previously resumed
+        // with an older session id. That stale id must not survive as a
+        // trailing positional -- Claude Code's CLI treats a positional after
+        // `--resume <id>` as an initial prompt, so a leftover id would be
+        // sent to the agent as a message on every restart.
+        let base = vec![
+            "claude".into(),
+            "--resume".into(),
+            "new-session".into(),
+        ];
+        let saved = vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "stale-session".to_string(),
+        ];
+        assert_eq!(
+            merge_persisted_launch_flags(base, Some(&saved)),
+            vec!["claude", "--resume", "new-session"]
+        );
+    }
+
+    #[test]
+    fn merge_persisted_launch_flags_preserves_unrelated_flag_value_pairs() {
+        let base = vec!["claude".into(), "--resume".into(), "claude-session".into()];
+        let saved = vec![
+            "claude".to_string(),
+            "--model".to_string(),
+            "sonnet".to_string(),
+        ];
+        assert_eq!(
+            merge_persisted_launch_flags(base, Some(&saved)),
+            vec!["claude", "--resume", "claude-session", "--model", "sonnet"]
+        );
     }
 
     #[tokio::test]

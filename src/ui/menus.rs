@@ -208,13 +208,14 @@ pub(super) fn render_navigate_overlay(app: &AppState, frame: &mut Frame, area: R
     render_bottom_bar(frame, overlay_area, line, app.palette.panel_bg);
 
     if app.update_available.is_some() {
+        let status_text = format!(" {}", t!("release_notes.update_ready"));
         let status = Line::from(vec![Span::styled(
-            format!(" {}", t!("release_notes.update_ready")),
+            status_text.clone(),
             Style::default()
                 .fg(app.palette.accent)
                 .add_modifier(Modifier::BOLD),
         )]);
-        let width = 13u16.min(overlay_area.width);
+        let width = (status_text.chars().count() as u16).min(overlay_area.width);
         let status_area = Rect::new(
             overlay_area.x + overlay_area.width.saturating_sub(width),
             overlay_area.y,

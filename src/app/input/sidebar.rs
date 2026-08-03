@@ -176,7 +176,8 @@ impl AppState {
 
     pub(crate) fn sidebar_new_button_rect(&self) -> Rect {
         let footer = self.sidebar_footer_rect();
-        let width = 5u16.min(footer.width.max(1));
+        let label_width = rust_i18n::t!("sidebar.new").chars().count() as u16;
+        let width = (label_width + 2).min(footer.width.max(1));
         Rect::new(footer.x, footer.y, width, footer.height)
     }
 
@@ -186,12 +187,13 @@ impl AppState {
         }
 
         let footer = self.sidebar_footer_rect();
-        let width = if self.global_menu_attention_badge_visible() {
-            8
+        let label_width = rust_i18n::t!("sidebar.menu").chars().count() as u16;
+        let badge_width = if self.global_menu_attention_badge_visible() {
+            2
         } else {
-            6
-        }
-        .min(footer.width.max(1));
+            0
+        };
+        let width = (label_width + badge_width + 2).min(footer.width.max(1));
         let x = footer.x + footer.width.saturating_sub(width);
         Rect::new(x, footer.y, width, footer.height)
     }

@@ -103,20 +103,21 @@ fn toast_delivery_for_index(idx: usize) -> ToastDelivery {
 }
 
 fn language_index(language: &str) -> usize {
-    match language {
-        "en" => 1,
-        "ru" => 2,
-        _ => 0,
-    }
+    crate::app::SUPPORTED_LOCALES
+        .iter()
+        .position(|(code, _)| *code == language)
+        .map(|pos| pos + 1)
+        .unwrap_or(0)
 }
 
 fn language_for_index(idx: usize) -> String {
-    match idx {
-        1 => "en",
-        2 => "ru",
-        _ => "auto",
+    if idx == 0 {
+        return "auto".to_string();
     }
-    .to_string()
+    crate::app::SUPPORTED_LOCALES
+        .get(idx - 1)
+        .map(|(code, _)| code.to_string())
+        .unwrap_or_else(|| "auto".to_string())
 }
 
 fn preview_selected_theme(state: &mut AppState) {
@@ -276,7 +277,9 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
         },
         SettingsSection::Language => match key.code {
             KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
-            KeyCode::Down | KeyCode::Char('j') => state.settings.list.move_next(3),
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.settings.list.move_next(crate::app::SUPPORTED_LOCALES.len() + 1)
+            }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 return Some(SettingsAction::SaveLanguage(language_for_index(
                     state.settings.list.selected,
@@ -543,7 +546,8 @@ impl AppState {
             }
             SettingsSection::Language => {
                 let list_y = area.y + 3;
-                if row >= list_y && row < list_y + 6 {
+                let list_rows = (crate::app::SUPPORTED_LOCALES.len() as u16 + 1) * 2;
+                if row >= list_y && row < list_y + list_rows {
                     Some(((row - list_y) / 2) as usize)
                 } else {
                     None
