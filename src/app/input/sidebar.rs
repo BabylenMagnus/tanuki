@@ -605,7 +605,7 @@ mod tests {
                 "settings",
                 "keybinds",
                 "reload config",
-                "update ready",
+                "update & restart",
                 "detach"
             ]
         );

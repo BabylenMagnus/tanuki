@@ -77,6 +77,7 @@ pub(super) fn modal_action_from_buttons<A: Copy>(
 pub(crate) enum GlobalMenuAction {
     Detach,
     WhatsNew,
+    UpdateAndRestart,
     Keybinds,
     ReloadConfig,
     Settings,
@@ -88,7 +89,9 @@ pub(super) fn global_menu_actions(state: &AppState) -> Vec<GlobalMenuAction> {
         GlobalMenuAction::Keybinds,
         GlobalMenuAction::ReloadConfig,
     ];
-    if state.update_available.is_some() || state.latest_release_notes_available {
+    if state.update_available.is_some() {
+        actions.push(GlobalMenuAction::UpdateAndRestart);
+    } else if state.latest_release_notes_available {
         actions.push(GlobalMenuAction::WhatsNew);
     }
     actions.push(GlobalMenuAction::Detach);
@@ -129,6 +132,11 @@ pub(super) fn apply_global_menu_action(state: &mut AppState, action: GlobalMenuA
             request_detach(state);
         }
         GlobalMenuAction::WhatsNew => open_update_release_notes(state),
+        GlobalMenuAction::UpdateAndRestart => {
+            crate::update::spawn_update_and_relaunch();
+            leave_modal(state);
+            request_detach(state);
+        }
         GlobalMenuAction::Keybinds => {
             super::settings::open_settings_at(state, crate::app::state::SettingsSection::Keybinds)
         }

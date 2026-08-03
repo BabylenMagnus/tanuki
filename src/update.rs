@@ -129,6 +129,40 @@ fn windows_stop_and_restart_running_sessions(release: &ReleaseInfo) {
     }
 }
 
+/// Spawns a background "update, then relaunch" chain for the in-app "update &
+/// restart" menu action, and lets the caller detach the current client on top
+/// of it. The current console is about to close as part of that detach, so
+/// the chain runs in a fresh console window on Windows rather than a fully
+/// detached/hidden process — the user needs to see update progress and land
+/// in the relaunched session. Session targeting (env vars like
+/// `TANUKI_SESSION`) is inherited from the current process automatically.
+pub(crate) fn spawn_update_and_relaunch() {
+    let Ok(exe) = env::current_exe() else {
+        return;
+    };
+    let exe = exe.to_string_lossy().into_owned();
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        let script = format!("\"{exe}\" update & \"{exe}\"");
+        let _ = Command::new("cmd")
+            .args(["/C", &script])
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let script = format!("\"{exe}\" update && \"{exe}\"");
+        let mut command = Command::new("sh");
+        command.args(["-c", &script]);
+        crate::platform::detach_server_daemon_command(&mut command);
+        let _ = command.spawn();
+    }
+}
+
 fn fake_release_notes_body(version: &str) -> String {
     let notes_version = env::var(FAKE_UPDATE_NOTES_VERSION_ENV)
         .ok()

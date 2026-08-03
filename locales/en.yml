@@ -430,9 +430,9 @@ sidebar.global_menu.whats_new:
   ru: что нового
   ru-pre1918: что новаго
 sidebar.global_menu.update_ready:
-  en: update ready
-  ru: обновление готово
-  ru-pre1918: обновленіе готово
+  en: update & restart
+  ru: обновить и перезагрузить
+  ru-pre1918: обновить и перезагрузить
 sidebar.global_menu.detach:
   en: detach
   ru: отключиться
