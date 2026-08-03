@@ -1,14 +1,24 @@
 {
-  "version": "0.1.65",
+  "version": "0.1.67",
   "protocol": 18,
-  "notes": "### Fixed\n- Increase popup width from 76 to 104 pixels",
+  "notes": "### Fixed\n- Update Russian translations and improve settings popup dimensions\n- Preserve launch_argv during terminal state reset\n\n### Changed\n- Bump version to 0.1.66 and update changelog\n- Populate Unreleased changelog from commits",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.65/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.65/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.65/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.65/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.67": {
+      "notes": "### Fixed\n- Update Russian translations and improve settings popup dimensions\n- Preserve launch_argv during terminal state reset\n\n### Changed\n- Bump version to 0.1.66 and update changelog\n- Populate Unreleased changelog from commits",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.67/tanuki-macos-aarch64"
+      }
+    },
     "0.1.65": {
       "notes": "### Fixed\n- Increase popup width from 76 to 104 pixels",
       "protocol": 18,
