@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.69] - 2026-08-04
+
 ### Added
 - Add support for cloud host registration on server launch
 
