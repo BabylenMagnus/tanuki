@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Update global menu action to 'update & restart' and implement logic
+
 ## [0.1.67] - 2026-08-03
 
 ### Fixed
