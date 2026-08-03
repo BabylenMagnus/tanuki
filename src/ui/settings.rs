@@ -20,7 +20,7 @@ use crate::{
     config::ToastDelivery,
 };
 
-pub(crate) const SETTINGS_POPUP_WIDTH: u16 = 76;
+pub(crate) const SETTINGS_POPUP_WIDTH: u16 = 104;
 pub(crate) const SETTINGS_POPUP_BASE_HEIGHT: u16 = 22;
 
 pub(crate) fn settings_popup_height(app: &AppState) -> u16 {
