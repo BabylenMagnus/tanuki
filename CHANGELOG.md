@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.65] - 2026-08-03
+
 ### Fixed
 - Increase popup width from 76 to 104 pixels
 
