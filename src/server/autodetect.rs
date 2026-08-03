@@ -208,6 +208,61 @@ pub fn spawn_server_daemon() -> io::Result<u32> {
     Ok(pid)
 }
 
+/// Spawns the tanuki server as a background daemon process targeting a
+/// specific session, rather than deriving the target purely from this
+/// process's own ambient environment (as [`spawn_server_daemon`] does).
+///
+/// Used by `tanuki update` to respawn the exact session/socket it just
+/// stopped: the `tanuki update` invocation's own environment may not match
+/// the target session being restarted (e.g. it enumerated multiple named
+/// sessions), so the session/socket must be passed explicitly instead of
+/// relying on inherited env vars.
+///
+/// `session_name` selects a named session (mirrors `TANUKI_SESSION`).
+/// `socket_path_override` selects a raw socket path override (mirrors
+/// `TANUKI_SOCKET_PATH`) and is only consulted when `session_name` is
+/// `None`. When both are `None`, the default session is targeted.
+pub fn spawn_server_daemon_for_target(
+    session_name: Option<&str>,
+    socket_path_override: Option<&Path>,
+) -> io::Result<u32> {
+    let exe = std::env::current_exe().map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("failed to determine tanuki executable path: {err}"),
+        )
+    })?;
+
+    info!(exe = %exe.display(), session = ?session_name, "spawning server daemon for target");
+
+    let mut command = build_server_daemon_command(exe);
+    match (session_name, socket_path_override) {
+        (Some(name), _) => {
+            command.env(crate::session::SESSION_ENV_VAR, name);
+            command.env_remove(crate::api::SOCKET_PATH_ENV_VAR);
+            command.env_remove("TANUKI_CLIENT_SOCKET_PATH");
+        }
+        (None, Some(path)) => {
+            command.env_remove(crate::session::SESSION_ENV_VAR);
+            command.env(crate::api::SOCKET_PATH_ENV_VAR, path);
+        }
+        (None, None) => {
+            command.env_remove(crate::session::SESSION_ENV_VAR);
+            command.env_remove(crate::api::SOCKET_PATH_ENV_VAR);
+            command.env_remove("TANUKI_CLIENT_SOCKET_PATH");
+        }
+    }
+
+    let child = command.spawn().map_err(|err: io::Error| {
+        io::Error::new(err.kind(), format!("failed to spawn tanuki server: {err}"))
+    })?;
+
+    let pid = child.id();
+    info!(pid, "server daemon spawned");
+
+    Ok(pid)
+}
+
 fn build_server_daemon_command(exe: PathBuf) -> Command {
     let mut command = Command::new(&exe);
     command

@@ -15,8 +15,9 @@ use std::io;
 use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 #[cfg(not(windows))]
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[cfg(not(windows))]
 use interprocess::local_socket::traits::Stream as _;
@@ -45,6 +46,89 @@ const SERVER_HANDOFF_REQUEST_TIMEOUT: Duration = Duration::from_secs(240);
 const SERVER_HANDOFF_CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(not(windows))]
 const SERVER_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// How long to wait for a respawned server daemon to become ready after an
+/// update stops the old one. Shared by the Unix plain-stop path and the
+/// Windows update flow.
+const SERVER_RESPAWN_READY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Spawns a fresh server daemon for `session_name` (mirrors `TANUKI_SESSION`;
+/// `None` targets the default session) and waits for it to become ready at
+/// `socket_path`. Used after stopping a running server as part of `tanuki
+/// update`, so the user doesn't have to manually relaunch Tanuki — an
+/// already-attached client reconnects on its own via the existing
+/// `server::autodetect::auto_detect_launch` restart-race retry.
+fn respawn_server_daemon_after_update(
+    session_name: Option<&str>,
+    socket_path: &Path,
+) -> Result<(), String> {
+    crate::server::autodetect::spawn_server_daemon_for_target(session_name, None)
+        .map_err(|err| format!("failed to restart server: {err}"))?;
+    crate::server::autodetect::wait_for_server_socket(socket_path, SERVER_RESPAWN_READY_TIMEOUT)
+        .map_err(|err| format!("server did not become ready after restart: {err}"))
+}
+
+/// Stops and automatically restarts every currently-running tanuki session
+/// after a Windows update. Windows has no live-handoff capability (ConPTY
+/// pseudoconsoles cannot be transferred between processes), so this is a
+/// plain stop-then-respawn: any already-attached client reconnects on its
+/// own via the existing `server::autodetect::auto_detect_launch` restart-race
+/// retry, the same mechanism a manual `tanuki server stop` + relaunch already
+/// goes through. Best-effort: failures are reported per-session with manual
+/// fallback guidance rather than aborting the update (the binary is already
+/// installed at this point).
+#[cfg(windows)]
+fn windows_stop_and_restart_running_sessions(release: &ReleaseInfo) {
+    let sessions = match crate::session::list_sessions() {
+        Ok(sessions) => sessions,
+        Err(err) => {
+            eprintln!("could not check for running tanuki sessions: {err}");
+            return;
+        }
+    };
+
+    let running: Vec<_> = sessions.into_iter().filter(|session| session.running).collect();
+    if running.is_empty() {
+        return;
+    }
+
+    eprintln!("restarting running tanuki sessions to use {}...", release.label());
+    for session in running {
+        let name = if session.default {
+            None
+        } else {
+            Some(session.name.as_str())
+        };
+        let attach_command = if session.default {
+            "tanuki".to_string()
+        } else {
+            format!("tanuki session attach {}", session.name)
+        };
+        let stop_command = crate::session::stop_command_for(name);
+
+        eprintln!("  stopping session {}...", session.name);
+        if let Err(err) = crate::session::stop_session(name) {
+            eprintln!(
+                "  failed to stop session {}: {err}\n  run `{stop_command}`, then `{attach_command}` manually.",
+                session.name
+            );
+            continue;
+        }
+
+        let client_socket_path = crate::session::client_socket_path_for(name);
+        match respawn_server_daemon_after_update(name, &client_socket_path) {
+            Ok(()) => eprintln!(
+                "  session {} restarted on {}; run `{attach_command}` if it doesn't reconnect on its own.",
+                session.name,
+                release.label()
+            ),
+            Err(err) => eprintln!(
+                "  stopped session {}, but could not restart it automatically: {err}\n  run `{attach_command}` when ready.",
+                session.name
+            ),
+        }
+    }
+}
+
 fn fake_release_notes_body(version: &str) -> String {
     let notes_version = env::var(FAKE_UPDATE_NOTES_VERSION_ENV)
         .ok()
@@ -788,6 +872,7 @@ enum RunningServerUpdateAction {
 enum RunningServerUpdateOutcome {
     RestartDeferred,
     Stopped,
+    Restarted,
     LiveHandoffComplete,
     FailedHandoffOldServerKept,
     FailedHandoffOldServerStopped,
@@ -1327,6 +1412,15 @@ fn recover_failed_live_handoff_for_update(
         FailedHandoffServerState::OldServerRunning(status) => {
             if prompt_to_stop_old_server_after_failed_handoff(plan, release, &status)? {
                 stop_running_server_for_update(plan)?;
+                if let Err(err) =
+                    respawn_server_daemon_after_update(plan.target.name.as_deref(), plan.socket_path())
+                {
+                    eprintln!(
+                        "stopped {} {}, but could not restart it automatically: {err}",
+                        plan.target_noun(),
+                        plan.label()
+                    );
+                }
                 Ok(RunningServerUpdateOutcome::FailedHandoffOldServerStopped)
             } else {
                 Ok(RunningServerUpdateOutcome::FailedHandoffOldServerKept)
@@ -1605,7 +1699,20 @@ fn apply_running_session_update_decisions(
             RunningServerUpdateAction::None => RunningServerUpdateOutcome::RestartDeferred,
             RunningServerUpdateAction::StopOldServer => {
                 stop_running_server_for_update(&decision.plan)?;
-                RunningServerUpdateOutcome::Stopped
+                match respawn_server_daemon_after_update(
+                    decision.plan.target.name.as_deref(),
+                    decision.plan.socket_path(),
+                ) {
+                    Ok(()) => RunningServerUpdateOutcome::Restarted,
+                    Err(err) => {
+                        eprintln!(
+                            "stopped {} {}, but could not restart it automatically: {err}",
+                            decision.plan.target_noun(),
+                            decision.plan.label()
+                        );
+                        RunningServerUpdateOutcome::Stopped
+                    }
+                }
             }
             RunningServerUpdateAction::LiveHandoff => {
                 match live_handoff_running_server_for_update(&decision.plan, release, updated_exe) {
@@ -1673,6 +1780,22 @@ fn print_running_session_update_outcomes(
                         outcome.stop_command,
                         release.label()
                     ),
+                }
+            }
+            RunningServerUpdateOutcome::Restarted => {
+                if let Some(command) = &outcome.attach_command {
+                    eprintln!(
+                        "{} {} restarted on {}; run `{command}` if it doesn't reconnect on its own.",
+                        outcome.target_noun,
+                        outcome.session_label,
+                        release.label()
+                    );
+                } else {
+                    eprintln!(
+                        "server {} restarted on {}; it should reconnect on its own.",
+                        outcome.session_label,
+                        release.label()
+                    );
                 }
             }
             RunningServerUpdateOutcome::Stopped
@@ -2023,11 +2146,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         let _ = fs::remove_file(&downloaded_path);
         eprintln!("installed {}", release.label());
         print_outdated_integration_notice_with_updated_binary(&updated_exe);
-        eprintln!(
-            "{} is on disk now, but any Tanuki session you already have open is still running the old server.\n{}",
-            release.label(),
-            crate::session::active_restart_after_update_guidance()
-        );
+        windows_stop_and_restart_running_sessions(&release);
     }
 
     #[cfg(not(windows))]
