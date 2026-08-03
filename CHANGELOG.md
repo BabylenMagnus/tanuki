@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.66] - 2026-08-03
+
 ### Fixed
 - Update Russian translations and improve settings popup dimensions
 - Preserve launch_argv during terminal state reset

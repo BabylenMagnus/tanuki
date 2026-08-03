@@ -29,9 +29,7 @@ pub(crate) const SETTINGS_POPUP_BASE_HEIGHT: u16 = 22;
 
 pub(crate) fn settings_popup_width(screen_width: u16) -> u16 {
     let by_percent = (screen_width as u32 * SETTINGS_POPUP_WIDTH_PERCENT as u32 / 100) as u16;
-    by_percent
-        .max(SETTINGS_POPUP_MIN_WIDTH)
-        .min(SETTINGS_POPUP_MAX_WIDTH)
+    by_percent.clamp(SETTINGS_POPUP_MIN_WIDTH, SETTINGS_POPUP_MAX_WIDTH)
 }
 
 pub(crate) fn settings_popup_height(app: &AppState, popup_width: u16) -> u16 {
