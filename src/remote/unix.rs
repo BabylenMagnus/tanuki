@@ -170,7 +170,45 @@ fn validate_remote_target(target: &str) -> Result<&str, String> {
     Ok(target)
 }
 
+/// `--remote` shells out to a real `ssh` binary throughout this module
+/// (`Command::new("ssh")`, e.g. `SshStdioBridge::start`). On Unix that's
+/// reliably present; on Windows it depends on the optional OpenSSH Client
+/// capability, which is not installed by default on every image. Rather
+/// than let the first `Command::new("ssh").spawn()` fail deep inside
+/// `RemoteSsh`/`SshStdioBridge` with a bare "program not found" OS error,
+/// check up front and fail with an actionable message. No `which` crate in
+/// `Cargo.toml` (checked before adding this) -- a manual `PATH` scan is a
+/// few lines and doesn't warrant a new dependency.
+fn ensure_ssh_available() -> io::Result<()> {
+    let exe_name = if cfg!(windows) { "ssh.exe" } else { "ssh" };
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return Err(io::Error::other(ssh_missing_message()));
+    };
+    let found = std::env::split_paths(&path_var).any(|dir| dir.join(exe_name).is_file());
+    if found {
+        Ok(())
+    } else {
+        Err(io::Error::other(ssh_missing_message()))
+    }
+}
+
+fn ssh_missing_message() -> String {
+    if cfg!(windows) {
+        "ssh was not found on PATH. Install the OpenSSH Client optional feature, then retry:\n  \
+         Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0\n\
+         (run that in an elevated PowerShell, then open a new terminal)"
+            .to_string()
+    } else {
+        "ssh was not found on PATH. Install an OpenSSH client package for your distribution \
+         (e.g. `apt install openssh-client`, `dnf install openssh-clients`, \
+         `pacman -S openssh`), then retry."
+            .to_string()
+    }
+}
+
 pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
+    ensure_ssh_available()?;
+
     let session_name = crate::session::active_name()
         .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_string());
     let local_socket = local_forward_socket_path(&remote.target, &session_name);

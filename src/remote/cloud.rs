@@ -69,7 +69,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use rust_socketio::{ClientBuilder, Payload, RawClient, TransportType};
@@ -125,6 +125,78 @@ const HOST_HELLO_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// event.
 const VIEWER_RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
 const VIEWER_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
+
+/// Grace window a detached viewer's host-side session (its [`ReplayBuffer`]
+/// and pending [`CloudDuplex`]) is kept alive after `term:peer_detached`,
+/// before being permanently discarded. Mirrors the backend's own
+/// `_HOST_TTL_SECONDS` grace period for the reverse direction (the host's
+/// connection dropping, not the viewer's) -- one 30s mental model for
+/// "any transient disconnect gets a chance to recover" instead of two
+/// different timeouts to reason about.
+const VIEWER_SESSION_GRACE_PERIOD: Duration = Duration::from_secs(30);
+
+/// Fixed-size, per-viewer ring buffer of host output bytes with a
+/// monotonic sequence counter (a byte-position counter, not a per-message
+/// id), so a viewer that reconnects within [`VIEWER_SESSION_GRACE_PERIOD`]
+/// can replay exactly what it missed instead of losing it silently. Oldest
+/// bytes are evicted first once full -- deliberately bounded (unlike
+/// Eternal Terminal's unbounded deque) so a viewer that never reconnects
+/// cannot leak host memory indefinitely.
+const REPLAY_BUFFER_CAPACITY: usize = 4 * 1024 * 1024;
+
+enum ReplayError {
+    /// `from_seq` is older than anything still retained in the buffer --
+    /// the caller must fall back to a fresh `term:attach` (accepting the
+    /// gap) rather than retry `term:reattach` in a loop.
+    TooFarBehind,
+}
+
+struct ReplayBuffer {
+    data: std::collections::VecDeque<u8>,
+    /// Sequence number of the oldest byte still in `data`. A replay
+    /// requested from before this point cannot be served.
+    start_seq: u64,
+    /// Sequence number that will be assigned to the next pushed byte.
+    next_seq: u64,
+}
+
+impl ReplayBuffer {
+    fn new() -> Self {
+        Self {
+            data: std::collections::VecDeque::with_capacity(REPLAY_BUFFER_CAPACITY),
+            start_seq: 0,
+            next_seq: 0,
+        }
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        self.data.extend(bytes.iter().copied());
+        self.next_seq += bytes.len() as u64;
+        while self.data.len() > REPLAY_BUFFER_CAPACITY {
+            self.data.pop_front();
+            self.start_seq += 1;
+        }
+    }
+
+    /// Returns everything from `from_seq` (inclusive) to `next_seq`
+    /// (exclusive), plus the resulting `next_seq` the caller should resume
+    /// live-streaming from. `from_seq == next_seq` (viewer was fully
+    /// caught up) returns an empty replay, not an error.
+    fn replay_from(&self, from_seq: u64) -> Result<(Vec<u8>, u64), ReplayError> {
+        if from_seq < self.start_seq {
+            return Err(ReplayError::TooFarBehind);
+        }
+        if from_seq > self.next_seq {
+            // Viewer claims to have seen bytes we never sent -- treat the
+            // same as "too far behind" rather than trust an inflated
+            // client-reported position.
+            return Err(ReplayError::TooFarBehind);
+        }
+        let skip = (from_seq - self.start_seq) as usize;
+        let bytes: Vec<u8> = self.data.iter().copied().skip(skip).collect();
+        Ok((bytes, self.next_seq))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Legion device identity (`~/.legion/config.json`)
@@ -269,6 +341,77 @@ fn detach_write_fn(write_fn: Arc<WriteFn>) -> Arc<WriteFn> {
     })
 }
 
+/// How long a batched write waits for more bytes to arrive before flushing
+/// what it has -- see [`spawn_batched_emit_thread`]. 10ms is imperceptible
+/// to a human typing but long enough to coalesce a fast burst of keystrokes
+/// (or the several `write()` calls a single pasted line can produce) into
+/// one `term:input` emit instead of one per call.
+const INPUT_BATCH_WINDOW: Duration = Duration::from_millis(10);
+/// Caps how large one coalesced batch can grow before it's flushed early,
+/// so a large paste doesn't accumulate for an unbounded number of window
+/// refills before anything is sent.
+const INPUT_BATCH_MAX_BYTES: usize = 4096;
+
+/// Wraps `emit_fn` so that [`CloudDuplex::write`] calls no longer block on
+/// (or synchronously fail from) the network `.emit(...)` call directly --
+/// instead each `write()` just hands its bytes to an unbounded channel and
+/// returns immediately, and a dedicated background thread coalesces
+/// whatever arrives within [`INPUT_BATCH_WINDOW`] (or until
+/// [`INPUT_BATCH_MAX_BYTES`] is reached) into a single emit. This targets
+/// specifically the viewer -> host `term:input` direction: a raw-mode
+/// terminal typically hands `write()` one keystroke at a time, so without
+/// this every character was previously its own Socket.IO round trip.
+///
+/// Byte order is preserved (`buf.extend`, single consumer thread, no
+/// reordering) -- `term:frame`/`term:reattach` on the read side are
+/// untouched by this, this only wraps the outbound write path.
+///
+/// Errors from `emit_fn` are logged and dropped rather than surfaced back
+/// to the `write()` caller: unlike [`detach_write_fn`], this can no longer
+/// return a synchronous `Err` per call. This is safe here specifically
+/// because `viewer_reconnect_loop` never gives up and settles into a
+/// permanent failure state -- it retries with backoff forever until either
+/// a reconnect succeeds or `term:detached` sets `detached` and closes the
+/// duplex (which surfaces as EOF on the *read* side, the actual mechanism
+/// `ClientError::ConnectionLost` already relies on upstream in
+/// `client/mod.rs`). A transient `write()` failure during a reconnect
+/// window was never itself the real "connection is dead" signal.
+fn spawn_batched_emit_thread(emit_fn: Arc<WriteFn>) -> Arc<WriteFn> {
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+
+    std::thread::spawn(move || {
+        while let Ok(first_chunk) = rx.recv() {
+            let mut batch = first_chunk;
+            let deadline = Instant::now() + INPUT_BATCH_WINDOW;
+
+            while batch.len() < INPUT_BATCH_MAX_BYTES {
+                let now = Instant::now();
+                if now >= deadline {
+                    break;
+                }
+                match rx.recv_timeout(deadline - now) {
+                    Ok(next_chunk) => batch.extend(next_chunk),
+                    Err(_) => break, // window elapsed, or sender side dropped
+                }
+            }
+
+            if let Err(err) = emit_fn(&batch) {
+                warn!(err = %err, "cloud viewer: batched term:input emit failed");
+            }
+        }
+    });
+
+    Arc::new(move |data: &[u8]| -> io::Result<()> {
+        // The channel only disconnects once the background thread above has
+        // exited, which only happens if `tx` itself was dropped -- can't
+        // happen while this closure (which owns a clone-free `tx`) is still
+        // alive, so `send` failing here isn't a real-world case; treat it
+        // the same as a dropped duplex rather than panicking.
+        tx.send(data.to_vec())
+            .map_err(|_| io::Error::other("cloud relay: batched emit worker terminated"))
+    })
+}
+
 struct CloudDuplexState {
     buffer: std::collections::VecDeque<u8>,
     closed: bool,
@@ -293,6 +436,15 @@ struct CloudDuplexInner {
     /// exactly the failure mode this exists to turn into a clear
     /// `TimedOut` instead.
     read_timeout: Mutex<Option<Duration>>,
+    /// Host-side output replay buffer, `Some` only for a host's per-viewer
+    /// `CloudDuplex` (`None` for the viewer's own duplex, which has nothing
+    /// to replay to anyone). Lives here -- not inside the Socket.IO-relay
+    /// `write_fn` closure -- because [`CloudDuplex::set_write_fn`] swaps
+    /// that closure out entirely once a P2P data channel opens
+    /// (`webrtc_p2p::on_channel_ready`); pushing from [`Write::write`]
+    /// instead means both transports are captured through the one call
+    /// site they both funnel through.
+    replay: Option<Mutex<ReplayBuffer>>,
 }
 
 /// A duplex byte stream backed by a Socket.IO relay connection instead of a
@@ -316,6 +468,16 @@ pub(crate) struct CloudDuplex {
 
 impl CloudDuplex {
     fn new(write_fn: Arc<WriteFn>) -> Self {
+        Self::new_inner(write_fn, None)
+    }
+
+    /// Same as [`CloudDuplex::new`], but with a fresh [`ReplayBuffer`]
+    /// attached -- used only for a host's per-viewer duplex.
+    fn new_with_replay(write_fn: Arc<WriteFn>) -> Self {
+        Self::new_inner(write_fn, Some(Mutex::new(ReplayBuffer::new())))
+    }
+
+    fn new_inner(write_fn: Arc<WriteFn>, replay: Option<Mutex<ReplayBuffer>>) -> Self {
         Self {
             inner: Arc::new(CloudDuplexInner {
                 state: Mutex::new(CloudDuplexState {
@@ -325,8 +487,20 @@ impl CloudDuplex {
                 ready: Condvar::new(),
                 write_fn: Mutex::new(write_fn),
                 read_timeout: Mutex::new(None),
+                replay,
             }),
         }
+    }
+
+    /// Replays buffered output from `from_seq` (see [`ReplayBuffer::replay_from`]).
+    /// Returns `None` if this duplex has no replay buffer at all (viewer side).
+    fn replay_from(&self, from_seq: u64) -> Option<Result<(Vec<u8>, u64), ReplayError>> {
+        self.inner.replay.as_ref().map(|replay| {
+            replay
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .replay_from(from_seq)
+        })
     }
 
     /// Sets (or clears, with `None`) the sticky read timeout applied to
@@ -449,6 +623,12 @@ impl Read for CloudDuplex {
 
 impl Write for CloudDuplex {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(replay) = &self.inner.replay {
+            replay
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(buf);
+        }
         let write_fn = Arc::clone(
             &self
                 .inner
@@ -479,6 +659,18 @@ pub(crate) struct CloudHostTransport {
     #[allow(dead_code)]
     client: rust_socketio::client::Client,
     viewers: Arc<Mutex<HashMap<String, CloudDuplex>>>,
+    /// Same duplexes as `viewers`, indexed by the viewer-generated, sid-independent
+    /// `viewer_session_id` instead of the current Socket.IO sid. Needed for
+    /// reattach (Задача 10/2): a reconnecting viewer always gets a brand new sid
+    /// from the server, so sid alone cannot identify "this is the same logical
+    /// session as before." Entries here outlive a `term:peer_detached` for
+    /// `VIEWER_SESSION_GRACE_PERIOD` (see `term:peer_detached` handler below),
+    /// whereas `viewers` entries are removed only after that same grace window.
+    /// Not read through this field directly -- kept alive here only so the
+    /// `Arc` (cloned into the connection's closures) doesn't drop early,
+    /// same reasoning as the `client` field above.
+    #[allow(dead_code)]
+    sessions: Arc<Mutex<HashMap<String, CloudDuplex>>>,
 }
 
 impl CloudHostTransport {
@@ -496,6 +688,49 @@ impl CloudHostTransport {
         server_event_tx: mpsc::Sender<ServerEvent>,
         should_quit: Arc<std::sync::atomic::AtomicBool>,
     ) -> io::Result<Self> {
+        // Shared for the lifetime of this host, across every reconnect
+        // attempt (Задача 2) -- created once here, not inside
+        // `connect_attempt`, so a host-side reconnect never loses attached
+        // viewers' sessions/replay buffers, unlike a brand new `Self::spawn`
+        // would. Mirrors the viewer side's `connect_viewer` hoisting its own
+        // per-call state (`viewer_session_id`/`last_ack_seq`/etc.) once,
+        // outside `connect_viewer_attempt`.
+        let viewers: Arc<Mutex<HashMap<String, CloudDuplex>>> = Arc::new(Mutex::new(HashMap::new()));
+        let sessions: Arc<Mutex<HashMap<String, CloudDuplex>>> = Arc::new(Mutex::new(HashMap::new()));
+        let sid_to_session: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+        let detach_epoch: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
+        let negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let host_client_cell: Arc<Mutex<Option<RawClient>>> = Arc::new(Mutex::new(None));
+        // Guards against spawning overlapping `host_reconnect_loop`s if
+        // "close" fires more than once for the same underlying disconnect
+        // -- same pattern as the viewer side's `reconnecting`.
+        let host_reconnecting = Arc::new(AtomicBool::new(false));
+        let client_id_allocator: Arc<dyn Fn() -> u64 + Send + Sync> = Arc::new(client_id_allocator);
+
+        // Runs for the process lifetime, independent of any single
+        // connection attempt -- re-sends `term:host_hello` against whatever
+        // connection `host_client_cell` currently points to (updated by
+        // every `connect_attempt`'s "open" handler, initial or reconnect),
+        // so it survives host-side reconnects without needing to be
+        // respawned. Refreshes the TTL'd `term:host_sid:{token}`
+        // registration on the backend (`_HOST_TTL_SECONDS`).
+        {
+            let heartbeat_host_client_cell = Arc::clone(&host_client_cell);
+            std::thread::spawn(move || loop {
+                std::thread::sleep(HOST_HEARTBEAT_INTERVAL);
+                let guard = heartbeat_host_client_cell
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let Some(client) = guard.as_ref() else {
+                    continue;
+                };
+                if let Err(err) = client.emit("term:host_hello", json!({})) {
+                    warn!(err = %err, "cloud host: failed to send term:host_hello heartbeat");
+                }
+            });
+        }
+
         // `new_with_cloud_host` (the only caller) runs inside `run_server`'s
         // `rt.block_on(async { ... })`, i.e. already inside a live tokio
         // runtime. `rust_socketio`'s synchronous `ClientBuilder::connect()`
@@ -509,59 +744,101 @@ impl CloudHostTransport {
         // has no ambient tokio context, so `rust_socketio`'s internal
         // `block_on` is free to build its own.
         let (result_tx, result_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = result_tx.send(Self::connect(
-                client_id_allocator,
-                server_event_tx,
-                should_quit,
-            ));
-        });
-        result_rx.recv().map_err(|_| {
+        {
+            let client_id_allocator = Arc::clone(&client_id_allocator);
+            let server_event_tx = server_event_tx.clone();
+            let should_quit = Arc::clone(&should_quit);
+            let viewers = Arc::clone(&viewers);
+            let sessions = Arc::clone(&sessions);
+            let sid_to_session = Arc::clone(&sid_to_session);
+            let detach_epoch = Arc::clone(&detach_epoch);
+            let negotiations = Arc::clone(&negotiations);
+            let host_client_cell = Arc::clone(&host_client_cell);
+            let host_reconnecting = Arc::clone(&host_reconnecting);
+            std::thread::spawn(move || {
+                let _ = result_tx.send(Self::connect_attempt(
+                    client_id_allocator,
+                    server_event_tx,
+                    should_quit,
+                    viewers,
+                    sessions,
+                    sid_to_session,
+                    detach_epoch,
+                    negotiations,
+                    host_client_cell,
+                    host_reconnecting,
+                ));
+            });
+        }
+        let client = result_rx.recv().map_err(|_| {
             io::Error::other("cloud host: connect thread terminated without a result")
-        })?
+        })??;
+
+        Ok(Self {
+            client,
+            viewers,
+            sessions,
+        })
     }
 
-    fn connect(
-        client_id_allocator: impl Fn() -> u64 + Send + Sync + 'static,
+    /// One connection attempt -- used both for the initial connect (from
+    /// [`spawn`]) and for every subsequent reconnect (from
+    /// [`host_reconnect_loop`], driven off the `"close"` handler installed
+    /// below). All the `Arc`-shared maps are passed in rather than created
+    /// here, so viewers/replay buffers/negotiations survive a host-side
+    /// reconnect intact -- only the underlying Socket.IO `Client` is new.
+    #[allow(clippy::too_many_arguments)]
+    fn connect_attempt(
+        client_id_allocator: Arc<dyn Fn() -> u64 + Send + Sync>,
         server_event_tx: mpsc::Sender<ServerEvent>,
         should_quit: Arc<std::sync::atomic::AtomicBool>,
-    ) -> io::Result<Self> {
+        viewers: Arc<Mutex<HashMap<String, CloudDuplex>>>,
+        sessions: Arc<Mutex<HashMap<String, CloudDuplex>>>,
+        sid_to_session: Arc<Mutex<HashMap<String, String>>>,
+        detach_epoch: Arc<Mutex<HashMap<String, u64>>>,
+        negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>>,
+        host_client_cell: Arc<Mutex<Option<RawClient>>>,
+        host_reconnecting: Arc<AtomicBool>,
+    ) -> io::Result<rust_socketio::client::Client> {
         let config = load_legion_config()?;
         let auth = auth_payload(&config, "term-host");
 
-        let viewers: Arc<Mutex<HashMap<String, CloudDuplex>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let client_id_allocator = Arc::new(client_id_allocator);
-
-        // One in-progress-or-active P2P negotiation per attached viewer
-        // (Task 5). Entries are inserted in `term:peer_attached` and
-        // removed in `term:peer_detached` -- negotiation itself runs on
-        // its own thread (`webrtc_p2p::spawn_negotiation`), this map only
-        // exists so the `term:webrtc_offer`/`term:webrtc_ice` handlers
-        // below know which viewer's negotiation a given signaling message
-        // belongs to.
-        let negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-
         let attach_viewers = Arc::clone(&viewers);
+        let attach_sessions = Arc::clone(&sessions);
+        let attach_sid_to_session = Arc::clone(&sid_to_session);
         let attach_client_id_allocator = Arc::clone(&client_id_allocator);
         let attach_server_event_tx = server_event_tx.clone();
         let attach_should_quit = Arc::clone(&should_quit);
         let attach_negotiations = Arc::clone(&negotiations);
 
         let detach_viewers = Arc::clone(&viewers);
+        let detach_sessions = Arc::clone(&sessions);
+        let detach_sid_to_session = Arc::clone(&sid_to_session);
+        let detach_epoch = Arc::clone(&detach_epoch);
         let detach_negotiations = Arc::clone(&negotiations);
         let input_viewers = Arc::clone(&viewers);
         let offer_negotiations = Arc::clone(&negotiations);
         let ice_negotiations = Arc::clone(&negotiations);
+        let reattach_sessions = Arc::clone(&sessions);
+        let reattach_viewers = Arc::clone(&viewers);
+        let reattach_sid_to_session = Arc::clone(&sid_to_session);
 
-        // Populated from the "open" callback and reused by the heartbeat
-        // thread and the host_hello:error retry to re-emit term:host_hello
-        // without needing a fresh RawClient handle each time.
-        let host_client_cell: Arc<Mutex<Option<RawClient>>> = Arc::new(Mutex::new(None));
+        // `host_client_cell` is now a parameter (shared across reconnects,
+        // populated by the heartbeat loop spawned once in `spawn`) --
+        // just clone it for the callbacks below that need their own handle.
         let open_host_client_cell = Arc::clone(&host_client_cell);
         let retry_host_client_cell = Arc::clone(&host_client_cell);
-        let heartbeat_host_client_cell = Arc::clone(&host_client_cell);
+
+        let close_client_id_allocator = Arc::clone(&client_id_allocator);
+        let close_server_event_tx = server_event_tx.clone();
+        let close_should_quit = Arc::clone(&should_quit);
+        let close_viewers = Arc::clone(&viewers);
+        let close_sessions = Arc::clone(&sessions);
+        let close_sid_to_session = Arc::clone(&sid_to_session);
+        let close_detach_epoch = Arc::clone(&detach_epoch);
+        let close_negotiations = Arc::clone(&negotiations);
+        let close_host_client_cell = Arc::clone(&host_client_cell);
+        let close_host_reconnecting = Arc::clone(&host_reconnecting);
 
         let client = ClientBuilder::new(config.server_url.clone())
             .transport_type(TransportType::Websocket)
@@ -603,6 +880,17 @@ impl CloudHostTransport {
                     warn!("cloud host: term:peer_attached missing viewer_sid");
                     return;
                 };
+                // Opaque, viewer-generated id (see `sessions` field doc):
+                // `rust_socketio` 0.6.0 exposes no way for a client to learn
+                // its own sid, and sid changes on every reconnect anyway, so
+                // this is the only stable handle a viewer can present again
+                // on `term:reattach`. Older viewers that predate Задача 10
+                // won't send one -- fall back to the sid itself so such a
+                // viewer still gets a (non-reattachable, but otherwise
+                // correct) session; it simply can never be found by a
+                // `term:reattach` lookup, which is the pre-existing behavior.
+                let viewer_session_id = extract_str_field(&payload, "viewer_session_id")
+                    .unwrap_or_else(|| viewer_sid.clone());
 
                 // Cloned before `socket` is moved into `write_fn` below --
                 // reused by the P2P negotiation block further down, which
@@ -621,12 +909,20 @@ impl CloudHostTransport {
                         )
                         .map_err(|err| io::Error::other(err.to_string()))
                 });
-                let duplex = CloudDuplex::new(detach_write_fn(write_fn));
+                let duplex = CloudDuplex::new_with_replay(detach_write_fn(write_fn));
 
                 attach_viewers
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .insert(viewer_sid.clone(), duplex.clone());
+                attach_sessions
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(viewer_session_id.clone(), duplex.clone());
+                attach_sid_to_session
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(viewer_sid.clone(), viewer_session_id);
 
                 // Best-effort P2P upgrade (Task 5): the host is the
                 // answerer, since the viewer is the side that initiated
@@ -729,20 +1025,168 @@ impl CloudHostTransport {
                 let Some(viewer_sid) = extract_str_field(&payload, "viewer_sid") else {
                     return;
                 };
-                if let Some(duplex) = detach_viewers
+                // Stop routing to this (now-dead) sid immediately -- but do
+                // NOT close the duplex or drop it from `sessions` yet. The
+                // local client_transport thread reading/writing through it
+                // just blocks (same as a slow/idle viewer) until either a
+                // `term:reattach` reclaims it or the grace window below
+                // expires; closing it here would EOF that thread and tear
+                // down whatever local session state this viewer's synthesized
+                // client connection represents -- exactly the data-loss
+                // Задача 10 exists to prevent.
+                detach_viewers
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .remove(&viewer_sid)
-                {
-                    duplex.close();
-                }
+                    .remove(&viewer_sid);
                 // Dropping the sender lets `webrtc_p2p::spawn_negotiation`'s
                 // forwarding thread observe closure and exit if negotiation
-                // for this viewer was still in flight.
+                // for this viewer was still in flight. A reattach does not
+                // resume P2P -- it permanently falls back to the Socket.IO
+                // relay for the remainder of that logical session (no
+                // renegotiation attempted), which is an accepted, documented
+                // degradation for now.
                 detach_negotiations
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .remove(&viewer_sid);
+
+                let Some(viewer_session_id) = detach_sid_to_session
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&viewer_sid)
+                else {
+                    return;
+                };
+
+                let epoch = {
+                    let mut guard = detach_epoch
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let epoch = guard.entry(viewer_session_id.clone()).or_insert(0);
+                    *epoch += 1;
+                    *epoch
+                };
+
+                let sessions = Arc::clone(&detach_sessions);
+                let detach_epoch = Arc::clone(&detach_epoch);
+                std::thread::spawn(move || {
+                    std::thread::sleep(VIEWER_SESSION_GRACE_PERIOD);
+                    let still_pending = {
+                        let guard = detach_epoch
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        guard.get(&viewer_session_id) == Some(&epoch)
+                    };
+                    if !still_pending {
+                        // Reattached (or detached again) since this timer
+                        // was scheduled -- someone else now owns this
+                        // session's lifecycle, leave it alone.
+                        return;
+                    }
+                    if let Some(duplex) = sessions
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .remove(&viewer_session_id)
+                    {
+                        duplex.close();
+                    }
+                });
+            })
+            .on("term:peer_reattached", move |payload, socket: RawClient| {
+                let Some(value) = payload_as_value(&payload) else {
+                    return;
+                };
+                let Some(new_viewer_sid) = value.get("viewer_sid").and_then(|v| v.as_str())
+                else {
+                    return;
+                };
+                let Some(viewer_session_id) =
+                    value.get("viewer_session_id").and_then(|v| v.as_str())
+                else {
+                    return;
+                };
+                let Some(last_seq) = value.get("last_seq").and_then(|v| v.as_u64()) else {
+                    return;
+                };
+
+                let duplex = reattach_sessions
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .get(viewer_session_id)
+                    .cloned();
+
+                let Some(duplex) = duplex else {
+                    let _ = socket.emit(
+                        "term:reattach_error",
+                        json!({"viewer_sid": new_viewer_sid, "reason": "unknown_viewer"}),
+                    );
+                    return;
+                };
+
+                match duplex.replay_from(last_seq) {
+                    None => {
+                        // Should be unreachable -- every entry in `sessions`
+                        // was created via `new_with_replay` -- but fail
+                        // closed rather than panic if it ever happens.
+                        let _ = socket.emit(
+                            "term:reattach_error",
+                            json!({"viewer_sid": new_viewer_sid, "reason": "unknown_viewer"}),
+                        );
+                    }
+                    Some(Err(ReplayError::TooFarBehind)) => {
+                        let _ = socket.emit(
+                            "term:reattach_error",
+                            json!({"viewer_sid": new_viewer_sid, "reason": "too_far_behind"}),
+                        );
+                    }
+                    Some(Ok((replay_bytes, resume_seq))) => {
+                        // Rebuild the write path against the NEW sid --
+                        // the old `write_fn` closure still addresses the
+                        // now-dead sid from the original attach and would
+                        // silently deliver nowhere. Reuses `set_write_fn`,
+                        // the same mechanism the P2P upgrade path uses.
+                        let new_sid = new_viewer_sid.to_owned();
+                        let write_socket = socket.clone();
+                        let write_fn: Arc<WriteFn> = Arc::new(move |data: &[u8]| -> io::Result<()> {
+                            write_socket
+                                .emit(
+                                    "term:frame",
+                                    json!({
+                                        "viewer_sid": new_sid,
+                                        "bytes": encode_bytes_field(data),
+                                    }),
+                                )
+                                .map_err(|err| io::Error::other(err.to_string()))
+                        });
+                        duplex.set_write_fn(detach_write_fn(write_fn));
+
+                        reattach_viewers
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .insert(new_viewer_sid.to_owned(), duplex);
+                        reattach_sid_to_session
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .insert(new_viewer_sid.to_owned(), viewer_session_id.to_owned());
+
+                        let _ = socket.emit(
+                            "term:reattach_ack",
+                            json!({
+                                "viewer_sid": new_viewer_sid,
+                                "replay_bytes": encode_bytes_field(&replay_bytes),
+                                "resume_seq": resume_seq,
+                            }),
+                        );
+
+                        debug!(
+                            viewer_session_id = %viewer_session_id,
+                            new_viewer_sid = %new_viewer_sid,
+                            resume_seq,
+                            replay_len = replay_bytes.len(),
+                            "cloud host: viewer reattached, replaying buffered output"
+                        );
+                    }
+                }
             })
             .on("term:webrtc_offer", move |payload, _socket| {
                 let Some(value) = payload_as_value(&payload) else {
@@ -798,6 +1242,40 @@ impl CloudHostTransport {
             .on("error", |payload, _socket| {
                 warn!(payload = ?payload, "cloud host: socket.io error");
             })
+            .on("close", move |payload, _socket| {
+                if close_host_reconnecting.swap(true, Ordering::SeqCst) {
+                    // A reconnect loop from a previous "close" is already running.
+                    return;
+                }
+                warn!(
+                    payload = ?payload,
+                    "cloud host: connection closed unexpectedly, reconnecting"
+                );
+                let client_id_allocator = Arc::clone(&close_client_id_allocator);
+                let server_event_tx = close_server_event_tx.clone();
+                let should_quit = Arc::clone(&close_should_quit);
+                let viewers = Arc::clone(&close_viewers);
+                let sessions = Arc::clone(&close_sessions);
+                let sid_to_session = Arc::clone(&close_sid_to_session);
+                let detach_epoch = Arc::clone(&close_detach_epoch);
+                let negotiations = Arc::clone(&close_negotiations);
+                let host_client_cell = Arc::clone(&close_host_client_cell);
+                let host_reconnecting = Arc::clone(&close_host_reconnecting);
+                std::thread::spawn(move || {
+                    host_reconnect_loop(
+                        client_id_allocator,
+                        server_event_tx,
+                        should_quit,
+                        viewers,
+                        sessions,
+                        sid_to_session,
+                        detach_epoch,
+                        negotiations,
+                        host_client_cell,
+                        host_reconnecting,
+                    );
+                });
+            })
             .connect()
             .map_err(|err| {
                 io::Error::new(
@@ -806,25 +1284,7 @@ impl CloudHostTransport {
                 )
             })?;
 
-        // Periodically re-send term:host_hello so the backend's TTL'd
-        // registration (`term:host_sid:{token}`, see term_relay.py) never
-        // expires while this host is genuinely still alive. Runs for the
-        // lifetime of the process, same lifecycle as the client/viewer
-        // connections themselves.
-        std::thread::spawn(move || loop {
-            std::thread::sleep(HOST_HEARTBEAT_INTERVAL);
-            let guard = heartbeat_host_client_cell
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let Some(client) = guard.as_ref() else {
-                continue;
-            };
-            if let Err(err) = client.emit("term:host_hello", json!({})) {
-                warn!(err = %err, "cloud host: failed to send term:host_hello heartbeat");
-            }
-        });
-
-        Ok(Self { client, viewers })
+        Ok(client)
     }
 
     /// Number of viewers currently attached to this host session.
@@ -837,11 +1297,81 @@ impl CloudHostTransport {
     }
 }
 
+/// Runs after an unexpected host-side `"close"` (the host's own socket to
+/// the backend dropped -- not a graceful shutdown, which goes through
+/// `term:host_bye` and doesn't touch this transport at all). Retries
+/// [`CloudHostTransport::connect_attempt`] with exponential backoff,
+/// reusing the same `viewers`/`sessions`/etc. `Arc`s so attached viewers'
+/// replay buffers survive the drop -- mirrors [`viewer_reconnect_loop`].
+#[allow(clippy::too_many_arguments)]
+fn host_reconnect_loop(
+    client_id_allocator: Arc<dyn Fn() -> u64 + Send + Sync>,
+    server_event_tx: mpsc::Sender<ServerEvent>,
+    should_quit: Arc<AtomicBool>,
+    viewers: Arc<Mutex<HashMap<String, CloudDuplex>>>,
+    sessions: Arc<Mutex<HashMap<String, CloudDuplex>>>,
+    sid_to_session: Arc<Mutex<HashMap<String, String>>>,
+    detach_epoch: Arc<Mutex<HashMap<String, u64>>>,
+    negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>>,
+    host_client_cell: Arc<Mutex<Option<RawClient>>>,
+    host_reconnecting: Arc<AtomicBool>,
+) {
+    let mut delay = VIEWER_RECONNECT_INITIAL_DELAY;
+    loop {
+        std::thread::sleep(delay);
+
+        let attempt = CloudHostTransport::connect_attempt(
+            Arc::clone(&client_id_allocator),
+            server_event_tx.clone(),
+            Arc::clone(&should_quit),
+            Arc::clone(&viewers),
+            Arc::clone(&sessions),
+            Arc::clone(&sid_to_session),
+            Arc::clone(&detach_epoch),
+            Arc::clone(&negotiations),
+            Arc::clone(&host_client_cell),
+            Arc::clone(&host_reconnecting),
+        );
+
+        match attempt {
+            Ok(client) => {
+                drop(client);
+                warn!("cloud host: reconnected after unexpected close");
+                host_reconnecting.store(false, Ordering::SeqCst);
+                return;
+            }
+            Err(err) => {
+                warn!(
+                    err = %err,
+                    delay = ?delay,
+                    "cloud host: reconnect attempt failed, retrying"
+                );
+                delay = (delay * 2).min(VIEWER_RECONNECT_MAX_DELAY);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Viewer side: connect_viewer
 // ---------------------------------------------------------------------------
 
 type AttachResult = Result<(), String>;
+
+/// Opaque per-connect_viewer-call correlation id, not a security token --
+/// only needs to be practically unique among concurrent viewer sessions
+/// from this device, which PID + nanosecond timestamp + a process-local
+/// counter already guarantees without pulling in a `uuid`/`rand`
+/// dependency for this alone.
+fn generate_viewer_session_id() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{:x}-{:x}-{:x}", std::process::id(), nanos, counter)
+}
 
 /// Connects to the Tanuki backend as a tanuki cloud viewer attaching to
 /// `target_token_id` (another of the caller's own paired devices), and
@@ -853,6 +1383,22 @@ type AttachResult = Result<(), String>;
 pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
     let config = load_legion_config()?;
     let target_token_id = target_token_id.to_owned();
+
+    // Opaque, stable for the lifetime of this `connect_viewer` call (i.e.
+    // across every reconnect attempt below) -- see the matching doc on
+    // `CloudHostTransport::sessions` for why this exists instead of relying
+    // on the Socket.IO sid (which `rust_socketio` never exposes to the
+    // client anyway, and which changes on every reconnect regardless).
+    let viewer_session_id = generate_viewer_session_id();
+    // Running byte-position counter, advanced by every `term:frame` this
+    // connection receives. Used as `last_seq` on a `term:reattach` after a
+    // reconnect, so the host can replay only what was actually missed.
+    let last_ack_seq = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // False until the first successful `term:attach:ack`/`term:reattach_ack`
+    // -- controls whether the *next* "open" (including the very first one)
+    // emits `term:attach` (nothing to resume yet) or `term:reattach`
+    // (resume from `last_ack_seq`).
+    let has_attached_before = Arc::new(AtomicBool::new(false));
 
     // The Socket.IO client handle needed to emit `term:input` at write-time
     // (from arbitrary caller threads, outside any event callback) is only
@@ -877,7 +1423,11 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
             .emit("term:input", json!(encode_bytes_field(data)))
             .map_err(|err| io::Error::other(err.to_string()))
     });
-    let duplex = CloudDuplex::new(detach_write_fn(write_fn));
+    // Batched, not detach_write_fn: this is specifically the viewer's own
+    // outbound term:input path (see spawn_batched_emit_thread's doc comment
+    // for why coalescing keystrokes here doesn't need the per-call blocking
+    // round trip detach_write_fn gives the host's term:frame writes).
+    let duplex = CloudDuplex::new(spawn_batched_emit_thread(write_fn));
 
     let attach_state: Arc<(Mutex<Option<AttachResult>>, Condvar)> =
         Arc::new((Mutex::new(None), Condvar::new()));
@@ -885,6 +1435,16 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
     // session) so the `"close"` handler that follows it knows not to
     // reconnect -- closing was intentional, not a dropped connection.
     let detached = Arc::new(AtomicBool::new(false));
+    // Set while `term:suspended` is the most recent host-state event (the
+    // HOST's own connection to the relay dropped, not this viewer's --
+    // Задача 2 grace period). Distinct from `detached`: the duplex stays
+    // open and reads keep blocking exactly as if the host were just slow,
+    // never surfacing an EOF to the local terminal. Cleared the moment a
+    // `term:frame` arrives again, since that's proof the host is back.
+    // Not read by the reconnect path itself -- reattach-on-reconnect
+    // already happens unconditionally once `has_attached_before` is set
+    // (Задача 10) -- this flag exists for observability/future UI use.
+    let suspended = Arc::new(AtomicBool::new(false));
     // Guards against spawning overlapping reconnect loops if `"close"`
     // fires more than once for the same underlying disconnect.
     let reconnecting = Arc::new(AtomicBool::new(false));
@@ -904,8 +1464,12 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
         duplex.clone(),
         Arc::clone(&attach_state),
         Arc::clone(&detached),
+        Arc::clone(&suspended),
         Arc::clone(&reconnecting),
         Arc::clone(&p2p_signal_cell),
+        viewer_session_id.clone(),
+        Arc::clone(&last_ack_seq),
+        Arc::clone(&has_attached_before),
     )?;
 
     // The connection is kept alive by the crate's own background poll
@@ -924,6 +1488,79 @@ pub(crate) fn connect_viewer(target_token_id: &str) -> io::Result<Transport> {
 /// so that both the very first connection attempt in [`connect_viewer`] and
 /// every subsequent reconnect attempt in [`viewer_reconnect_loop`] behave
 /// identically from the caller's (and the local terminal's) point of view.
+/// Best-effort P2P upgrade (Task 5), shared between the plain-attach and
+/// reattach success paths -- the viewer is always the offerer, since it's
+/// always the side that just (re)initiated the attach. Failure/timeout
+/// leaves the Socket.IO relay path (already live via the ack that preceded
+/// this call) as the permanent transport for this attach -- no retry.
+fn spawn_viewer_p2p_negotiation(
+    socket: RawClient,
+    duplex: CloudDuplex,
+    p2p_signal_cell: Arc<Mutex<Option<std::sync::mpsc::Sender<RemoteSignal>>>>,
+) {
+    let emit_offer: Arc<dyn Fn(&str) + Send + Sync> = {
+        let socket = socket.clone();
+        Arc::new(move |sdp: &str| {
+            if let Err(err) = socket.emit("term:webrtc_offer", json!({"sdp": sdp})) {
+                warn!(err = %err, "cloud viewer: failed to send term:webrtc_offer");
+            }
+        })
+    };
+    let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
+        let socket = socket.clone();
+        Arc::new(move |candidate: &str| {
+            if let Err(err) = socket.emit("term:webrtc_ice", json!({"candidate": candidate})) {
+                warn!(err = %err, "cloud viewer: failed to send term:webrtc_ice");
+            }
+        })
+    };
+    let emit_answer_unused: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_sdp: &str| {
+        debug_assert!(false, "cloud viewer is always the P2P offerer, never emits an answer");
+    });
+    let on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync> = {
+        let duplex = duplex.clone();
+        Arc::new(move |write_fn| {
+            duplex.set_write_fn(write_fn);
+            debug!("cloud viewer: P2P data channel established, switched off relay");
+        })
+    };
+    let on_data: webrtc_p2p::DataCallback = {
+        let duplex = duplex.clone();
+        Arc::new(move |data: &[u8]| duplex.push_p2p(data))
+    };
+    // Task 7 telemetry -- no `viewer_sid` field needed, the server already
+    // knows this connection's own sid from the emitting socket itself.
+    let on_outcome: Arc<dyn Fn(webrtc_p2p::NegotiationOutcome) + Send + Sync> = {
+        let socket = socket.clone();
+        Arc::new(move |outcome: webrtc_p2p::NegotiationOutcome| {
+            if let Err(err) = socket.emit(
+                "term:webrtc_stats",
+                json!({
+                    "established": outcome.established,
+                    "candidate_type": outcome.best_local_candidate_type.unwrap_or("unknown"),
+                }),
+            ) {
+                warn!(err = %err, "cloud viewer: failed to send term:webrtc_stats");
+            }
+        })
+    };
+
+    let remote_tx = webrtc_p2p::spawn_negotiation(
+        true,
+        cloud_ice_servers(),
+        emit_offer,
+        emit_answer_unused,
+        emit_ice,
+        on_channel_ready,
+        on_data,
+        on_outcome,
+        P2P_NEGOTIATION_TIMEOUT,
+    );
+    *p2p_signal_cell
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(remote_tx);
+}
+
 fn connect_viewer_attempt(
     config: &LegionConfig,
     target_token_id: String,
@@ -931,20 +1568,41 @@ fn connect_viewer_attempt(
     duplex: CloudDuplex,
     attach_state: Arc<(Mutex<Option<AttachResult>>, Condvar)>,
     detached: Arc<AtomicBool>,
+    suspended: Arc<AtomicBool>,
     reconnecting: Arc<AtomicBool>,
     p2p_signal_cell: Arc<Mutex<Option<std::sync::mpsc::Sender<RemoteSignal>>>>,
+    viewer_session_id: String,
+    last_ack_seq: Arc<std::sync::atomic::AtomicU64>,
+    has_attached_before: Arc<AtomicBool>,
 ) -> io::Result<rust_socketio::client::Client> {
     let auth = auth_payload(config, "term-viewer");
 
     let open_client_cell = Arc::clone(&client_cell);
     let open_attach_state = Arc::clone(&attach_state);
+    let open_viewer_session_id = viewer_session_id.clone();
+    let open_last_ack_seq = Arc::clone(&last_ack_seq);
+    let open_has_attached_before = Arc::clone(&has_attached_before);
     let ack_attach_state = Arc::clone(&attach_state);
     let ack_duplex = duplex.clone();
     let ack_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
+    let ack_has_attached_before = Arc::clone(&has_attached_before);
+    let ack_last_ack_seq = Arc::clone(&last_ack_seq);
     let error_attach_state = Arc::clone(&attach_state);
+    let reattach_ack_attach_state = Arc::clone(&attach_state);
+    let reattach_ack_duplex = duplex.clone();
+    let reattach_ack_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
+    let reattach_ack_has_attached_before = Arc::clone(&has_attached_before);
+    let reattach_ack_last_ack_seq = Arc::clone(&last_ack_seq);
+    let reattach_error_target_token_id = target_token_id.clone();
+    let reattach_error_viewer_session_id = viewer_session_id.clone();
+    let reattach_error_attach_state = Arc::clone(&attach_state);
     let frame_duplex = duplex.clone();
+    let frame_last_ack_seq = Arc::clone(&last_ack_seq);
+    let frame_suspended = Arc::clone(&suspended);
+    let suspended_flag = Arc::clone(&suspended);
     let detach_duplex = duplex.clone();
     let detach_detached = Arc::clone(&detached);
+    let detach_suspended = Arc::clone(&suspended);
     let open_target_token_id = target_token_id.clone();
     let ice_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
     let answer_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
@@ -957,6 +1615,10 @@ fn connect_viewer_attempt(
     let close_detached = Arc::clone(&detached);
     let close_reconnecting = Arc::clone(&reconnecting);
     let close_p2p_signal_cell = Arc::clone(&p2p_signal_cell);
+    let close_viewer_session_id = viewer_session_id.clone();
+    let close_last_ack_seq = Arc::clone(&last_ack_seq);
+    let close_has_attached_before = Arc::clone(&has_attached_before);
+    let close_suspended = Arc::clone(&suspended);
 
     let client = ClientBuilder::new(config.server_url.clone())
         .transport_type(TransportType::Websocket)
@@ -965,90 +1627,88 @@ fn connect_viewer_attempt(
             *open_client_cell
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(socket.clone());
-            if let Err(err) = socket.emit(
-                "term:attach",
-                json!({ "target_token_id": open_target_token_id }),
-            ) {
+            let emit_result = if open_has_attached_before.load(Ordering::SeqCst) {
+                socket.emit(
+                    "term:reattach",
+                    json!({
+                        "target_token_id": open_target_token_id,
+                        "viewer_session_id": open_viewer_session_id,
+                        "last_seq": open_last_ack_seq.load(Ordering::SeqCst),
+                    }),
+                )
+            } else {
+                socket.emit(
+                    "term:attach",
+                    json!({
+                        "target_token_id": open_target_token_id,
+                        "viewer_session_id": open_viewer_session_id,
+                    }),
+                )
+            };
+            if let Err(err) = emit_result {
                 signal_attach_result(
                     &open_attach_state,
-                    Err(format!("failed to send term:attach: {err}")),
+                    Err(format!("failed to send term:attach/term:reattach: {err}")),
+                );
+            }
+        })
+        .on("term:reattach_ack", move |payload, socket: RawClient| {
+            let Some(value) = payload_as_value(&payload) else {
+                signal_attach_result(
+                    &reattach_ack_attach_state,
+                    Err("malformed term:reattach_ack".to_owned()),
+                );
+                return;
+            };
+            let Some(resume_seq) = value.get("resume_seq").and_then(|v| v.as_u64()) else {
+                signal_attach_result(
+                    &reattach_ack_attach_state,
+                    Err("term:reattach_ack missing resume_seq".to_owned()),
+                );
+                return;
+            };
+            if let Some(replay_bytes) = value.get("replay_bytes").and_then(decode_bytes_field) {
+                if !replay_bytes.is_empty() {
+                    reattach_ack_duplex.push(&replay_bytes);
+                }
+            }
+            reattach_ack_last_ack_seq.store(resume_seq, Ordering::SeqCst);
+            reattach_ack_has_attached_before.store(true, Ordering::SeqCst);
+            signal_attach_result(&reattach_ack_attach_state, Ok(()));
+            spawn_viewer_p2p_negotiation(
+                socket,
+                reattach_ack_duplex.clone(),
+                Arc::clone(&reattach_ack_p2p_signal_cell),
+            );
+        })
+        .on("term:reattach_error", move |payload, socket: RawClient| {
+            let reason =
+                extract_str_field(&payload, "reason").unwrap_or_else(|| "unknown".to_owned());
+            debug!(reason = %reason, "cloud viewer: reattach rejected, falling back to fresh attach");
+            // Fresh session unknown to (or outrun on) the host -- fall back
+            // to a plain attach on this same, already-open socket rather
+            // than erroring the whole connect attempt out. Accepts the
+            // resulting gap in output (same as today's pre-Задача-10
+            // behavior) rather than hanging or retrying a reattach that
+            // will keep failing the same way.
+            if let Err(err) = socket.emit(
+                "term:attach",
+                json!({
+                    "target_token_id": reattach_error_target_token_id,
+                    "viewer_session_id": reattach_error_viewer_session_id,
+                }),
+            ) {
+                signal_attach_result(
+                    &reattach_error_attach_state,
+                    Err(format!("failed to send fallback term:attach: {err}")),
                 );
             }
         })
         .on("term:attach:ack", move |_payload, socket: RawClient| {
+            ack_has_attached_before.store(true, Ordering::SeqCst);
+            ack_last_ack_seq.store(0, Ordering::SeqCst);
             signal_attach_result(&ack_attach_state, Ok(()));
-
-            // Best-effort P2P upgrade (Task 5): the viewer is always the
-            // offerer, since it's the side that just initiated
-            // `term:attach`. Failure/timeout leaves the Socket.IO relay
-            // path (already live via `term:attach:ack`) as the permanent
-            // transport for this attach -- no retry.
-            let emit_offer: Arc<dyn Fn(&str) + Send + Sync> = {
-                let socket = socket.clone();
-                Arc::new(move |sdp: &str| {
-                    if let Err(err) = socket.emit("term:webrtc_offer", json!({"sdp": sdp})) {
-                        warn!(err = %err, "cloud viewer: failed to send term:webrtc_offer");
-                    }
-                })
-            };
-            let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
-                let socket = socket.clone();
-                Arc::new(move |candidate: &str| {
-                    if let Err(err) =
-                        socket.emit("term:webrtc_ice", json!({"candidate": candidate}))
-                    {
-                        warn!(err = %err, "cloud viewer: failed to send term:webrtc_ice");
-                    }
-                })
-            };
-            let emit_answer_unused: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_sdp: &str| {
-                debug_assert!(false, "cloud viewer is always the P2P offerer, never emits an answer");
-            });
-            let on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync> = {
-                let duplex = ack_duplex.clone();
-                Arc::new(move |write_fn| {
-                    duplex.set_write_fn(write_fn);
-                    debug!("cloud viewer: P2P data channel established, switched off relay");
-                })
-            };
-            let on_data: webrtc_p2p::DataCallback = {
-                let duplex = ack_duplex.clone();
-                Arc::new(move |data: &[u8]| duplex.push_p2p(data))
-            };
-            // Task 7: report the negotiation outcome so the backend can
-            // track % direct-P2P vs TURN-relay sessions (pre-mortem Track
-            // Tiger #6). No `viewer_sid` field needed here -- the server
-            // already knows this connection's own sid from the emitting
-            // socket itself.
-            let on_outcome: Arc<dyn Fn(webrtc_p2p::NegotiationOutcome) + Send + Sync> = {
-                let socket = socket.clone();
-                Arc::new(move |outcome: webrtc_p2p::NegotiationOutcome| {
-                    if let Err(err) = socket.emit(
-                        "term:webrtc_stats",
-                        json!({
-                            "established": outcome.established,
-                            "candidate_type": outcome.best_local_candidate_type.unwrap_or("unknown"),
-                        }),
-                    ) {
-                        warn!(err = %err, "cloud viewer: failed to send term:webrtc_stats");
-                    }
-                })
-            };
-
-            let remote_tx = webrtc_p2p::spawn_negotiation(
-                true,
-                cloud_ice_servers(),
-                emit_offer,
-                emit_answer_unused,
-                emit_ice,
-                on_channel_ready,
-                on_data,
-                on_outcome,
-                P2P_NEGOTIATION_TIMEOUT,
-            );
-            *ack_p2p_signal_cell
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(remote_tx);
+            spawn_viewer_p2p_negotiation(socket, ack_duplex.clone(), Arc::clone(&ack_p2p_signal_cell));
         })
         .on("term:attach:error", move |payload, _socket| {
             let reason =
@@ -1057,10 +1717,26 @@ fn connect_viewer_attempt(
         })
         .on("term:frame", move |payload, _socket| {
             if let Some(bytes) = extract_bare_bytes(&payload) {
+                if frame_suspended.swap(false, Ordering::SeqCst) {
+                    debug!("cloud viewer: host resumed sending frames, clearing suspended state");
+                }
+                frame_last_ack_seq.fetch_add(bytes.len() as u64, Ordering::SeqCst);
                 frame_duplex.push(&bytes);
             } else {
                 debug!("cloud viewer: term:frame with unparseable payload");
             }
+        })
+        .on("term:suspended", move |payload, _socket| {
+            // The HOST's own connection to the relay dropped (Задача 2
+            // grace period) -- not this viewer's. Unlike `term:detached`,
+            // the duplex stays open: reads just keep blocking as if the
+            // host were momentarily slow, so the local terminal never sees
+            // an EOF for what may resolve itself within the grace window.
+            suspended_flag.store(true, Ordering::SeqCst);
+            warn!(
+                payload = ?payload,
+                "cloud viewer: host suspended (reconnecting on its end), waiting for it to resume"
+            );
         })
         .on("term:webrtc_answer", move |payload, _socket| {
             let Some(value) = payload_as_value(&payload) else {
@@ -1098,6 +1774,7 @@ fn connect_viewer_attempt(
             // event that follows this one does not try to reconnect, then
             // signal EOF to the local terminal exactly as before.
             detach_detached.store(true, Ordering::SeqCst);
+            detach_suspended.store(false, Ordering::SeqCst);
             detach_duplex.close();
         })
         .on("close", move |payload, _socket| {
@@ -1120,6 +1797,10 @@ fn connect_viewer_attempt(
             let detached = Arc::clone(&close_detached);
             let reconnecting = Arc::clone(&close_reconnecting);
             let p2p_signal_cell = Arc::clone(&close_p2p_signal_cell);
+            let viewer_session_id = close_viewer_session_id.clone();
+            let last_ack_seq = Arc::clone(&close_last_ack_seq);
+            let has_attached_before = Arc::clone(&close_has_attached_before);
+            let suspended = Arc::clone(&close_suspended);
             std::thread::spawn(move || {
                 viewer_reconnect_loop(
                     config,
@@ -1128,8 +1809,12 @@ fn connect_viewer_attempt(
                     duplex,
                     attach_state,
                     detached,
+                    suspended,
                     reconnecting,
                     p2p_signal_cell,
+                    viewer_session_id,
+                    last_ack_seq,
+                    has_attached_before,
                 );
             });
         })
@@ -1161,8 +1846,12 @@ fn viewer_reconnect_loop(
     duplex: CloudDuplex,
     attach_state: Arc<(Mutex<Option<AttachResult>>, Condvar)>,
     detached: Arc<AtomicBool>,
+    suspended: Arc<AtomicBool>,
     reconnecting: Arc<AtomicBool>,
     p2p_signal_cell: Arc<Mutex<Option<std::sync::mpsc::Sender<RemoteSignal>>>>,
+    viewer_session_id: String,
+    last_ack_seq: Arc<std::sync::atomic::AtomicU64>,
+    has_attached_before: Arc<AtomicBool>,
 ) {
     let mut delay = VIEWER_RECONNECT_INITIAL_DELAY;
     loop {
@@ -1179,8 +1868,12 @@ fn viewer_reconnect_loop(
             duplex.clone(),
             Arc::clone(&attach_state),
             Arc::clone(&detached),
+            Arc::clone(&suspended),
             Arc::clone(&reconnecting),
             Arc::clone(&p2p_signal_cell),
+            viewer_session_id.clone(),
+            Arc::clone(&last_ack_seq),
+            Arc::clone(&has_attached_before),
         )
         .and_then(|client| {
             drop(client);
