@@ -1561,6 +1561,10 @@ fn spawn_viewer_p2p_negotiation(
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(remote_tx);
 }
 
+// Reattach/suspend state (Задача 10/2) pushed this past clippy's configured
+// too-many-arguments-threshold=11; grouping into a struct would touch every
+// call site for marginal gain over this explicit, compiler-suggested override.
+#[allow(clippy::too_many_arguments)]
 fn connect_viewer_attempt(
     config: &LegionConfig,
     target_token_id: String,
@@ -1839,6 +1843,7 @@ fn connect_viewer_attempt(
 /// while a retry is in flight). The local terminal never sees an EOF for a
 /// transient network blip -- reads just block a little longer while this
 /// loop is working, same as `CloudDuplex::read`'s existing wait behaviour.
+#[allow(clippy::too_many_arguments)]
 fn viewer_reconnect_loop(
     config: LegionConfig,
     target_token_id: String,
