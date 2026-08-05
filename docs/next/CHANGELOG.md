@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Implement replay buffer for viewer sessions in CloudDuplex
+
 ## [0.1.69] - 2026-08-04
 
 ### Added
