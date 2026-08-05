@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Implement replay buffer for viewer sessions in CloudDuplex
+
+### Changed
+- Bump version to 0.1.70 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.70] - 2026-08-05
 
 ### Added
