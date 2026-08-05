@@ -1,14 +1,24 @@
 {
-  "version": "0.1.69",
+  "version": "0.1.71",
   "protocol": 18,
-  "notes": "### Added\n- Add support for cloud host registration on server launch",
+  "notes": "### Added\n- Implement replay buffer for viewer sessions in CloudDuplex\n\n### Changed\n- Bump version to 0.1.70 and update changelog\n- Populate Unreleased changelog from commits",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.69/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.69/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.69/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.69/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.71": {
+      "notes": "### Added\n- Implement replay buffer for viewer sessions in CloudDuplex\n\n### Changed\n- Bump version to 0.1.70 and update changelog\n- Populate Unreleased changelog from commits",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-macos-aarch64"
+      }
+    },
     "0.1.69": {
       "notes": "### Added\n- Add support for cloud host registration on server launch",
       "protocol": 18,
