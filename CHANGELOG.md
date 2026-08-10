@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add spawn_socket_emit for safe socket emissions from handlers
+
 ## [0.1.71] - 2026-08-05
 
 ### Added
