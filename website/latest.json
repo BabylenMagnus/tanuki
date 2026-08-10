@@ -1,14 +1,24 @@
 {
-  "version": "0.1.71",
+  "version": "0.1.72",
   "protocol": 18,
-  "notes": "### Added\n- Implement replay buffer for viewer sessions in CloudDuplex\n\n### Changed\n- Bump version to 0.1.70 and update changelog\n- Populate Unreleased changelog from commits",
+  "notes": "### Added\n- Add spawn_socket_emit for safe socket emissions from handlers",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.71/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.72": {
+      "notes": "### Added\n- Add spawn_socket_emit for safe socket emissions from handlers",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-macos-aarch64"
+      }
+    },
     "0.1.71": {
       "notes": "### Added\n- Implement replay buffer for viewer sessions in CloudDuplex\n\n### Changed\n- Bump version to 0.1.70 and update changelog\n- Populate Unreleased changelog from commits",
       "protocol": 18,
