@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Parse ICE candidate JSON to avoid double-encoding errors
+
 ## [0.1.72] - 2026-08-10
 
 ### Added
