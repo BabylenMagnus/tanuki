@@ -966,6 +966,20 @@ impl CloudHostTransport {
                         let socket = p2p_socket.clone();
                         let viewer_sid = viewer_sid.clone();
                         Arc::new(move |candidate: &str| {
+                            // `candidate` is already the JSON body of an
+                            // `RTCIceCandidateInit` (see `webrtc_p2p`'s
+                            // `on_ice_candidate`). It must be parsed back
+                            // into a `Value` before nesting it here --
+                            // `json!({"candidate": candidate})` would embed
+                            // it as a JSON *string* (double-encoded),
+                            // which the receiving `serde_json::from_str::
+                            // <RTCIceCandidateInit>` then rejects as
+                            // "invalid type: string ... expected struct".
+                            let Ok(candidate) = serde_json::from_str::<serde_json::Value>(candidate)
+                            else {
+                                warn!("cloud host: failed to parse locally-gathered ICE candidate JSON");
+                                return;
+                            };
                             spawn_socket_emit(
                                 socket.clone(),
                                 "term:webrtc_ice",
@@ -1529,6 +1543,15 @@ fn spawn_viewer_p2p_negotiation(
     let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
         let socket = socket.clone();
         Arc::new(move |candidate: &str| {
+            // See the host-side `emit_ice`'s doc comment in
+            // `connect_attempt` -- `candidate` is already serialized
+            // `RTCIceCandidateInit` JSON and must be parsed back into a
+            // `Value` before nesting, or it gets double-encoded as a
+            // string.
+            let Ok(candidate) = serde_json::from_str::<serde_json::Value>(candidate) else {
+                warn!("cloud viewer: failed to parse locally-gathered ICE candidate JSON");
+                return;
+            };
             spawn_socket_emit(
                 socket.clone(),
                 "term:webrtc_ice",
