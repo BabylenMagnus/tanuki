@@ -341,6 +341,29 @@ fn detach_write_fn(write_fn: Arc<WriteFn>) -> Arc<WriteFn> {
     })
 }
 
+/// Emits `event`/`payload` on `socket` from a dedicated, runtime-free OS
+/// thread, fire-and-forget.
+///
+/// Every `.on(...)` handler registered on a `rust_socketio` client runs
+/// from inside the crate's own dispatch loop, which is itself driven by a
+/// `block_on` call (see `detach_write_fn`'s doc comment for the underlying
+/// `rust_engineio` panic this avoids). Calling `socket.emit(...)` directly
+/// from inside such a handler nests a second `block_on` on top of that one
+/// and panics with "Cannot start a runtime from within a runtime". The
+/// same is true of callbacks invoked from `webrtc_p2p::spawn_negotiation`,
+/// which runs on its own dedicated thread that owns its own Tokio runtime
+/// (see `webrtc_p2p`'s module doc) -- that thread is just as "ambient" as
+/// the dispatch loop's, for this purpose. Route every emit made from
+/// inside a handler or a negotiation callback through this helper instead
+/// of calling `socket.emit(...)` directly.
+fn spawn_socket_emit(socket: RawClient, event: &'static str, payload: serde_json::Value) {
+    std::thread::spawn(move || {
+        if let Err(err) = socket.emit(event, payload) {
+            warn!(event, err = %err, "cloud relay: detached emit failed");
+        }
+    });
+}
+
 /// How long a batched write waits for more bytes to arrive before flushing
 /// what it has -- see [`spawn_batched_emit_thread`]. 10ms is imperceptible
 /// to a human typing but long enough to coalesce a fast burst of keystrokes
@@ -847,9 +870,7 @@ impl CloudHostTransport {
                 *open_host_client_cell
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(socket.clone());
-                if let Err(err) = socket.emit("term:host_hello", json!({})) {
-                    warn!(err = %err, "cloud host: failed to send term:host_hello");
-                }
+                spawn_socket_emit(socket, "term:host_hello", json!({}));
             })
             .on("term:host_hello:ack", |_payload, _socket| {
                 debug!("cloud host: registered with relay server");
@@ -934,24 +955,22 @@ impl CloudHostTransport {
                         let socket = p2p_socket.clone();
                         let viewer_sid = viewer_sid.clone();
                         Arc::new(move |sdp: &str| {
-                            if let Err(err) = socket.emit(
+                            spawn_socket_emit(
+                                socket.clone(),
                                 "term:webrtc_answer",
                                 json!({"viewer_sid": viewer_sid, "sdp": sdp}),
-                            ) {
-                                warn!(err = %err, "cloud host: failed to send term:webrtc_answer");
-                            }
+                            );
                         })
                     };
                     let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
                         let socket = p2p_socket.clone();
                         let viewer_sid = viewer_sid.clone();
                         Arc::new(move |candidate: &str| {
-                            if let Err(err) = socket.emit(
+                            spawn_socket_emit(
+                                socket.clone(),
                                 "term:webrtc_ice",
                                 json!({"viewer_sid": viewer_sid, "candidate": candidate}),
-                            ) {
-                                warn!(err = %err, "cloud host: failed to send term:webrtc_ice");
-                            }
+                            );
                         })
                     };
                     let emit_offer_unused: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_sdp: &str| {
@@ -976,16 +995,15 @@ impl CloudHostTransport {
                         let socket = p2p_socket.clone();
                         let viewer_sid = viewer_sid.clone();
                         Arc::new(move |outcome: webrtc_p2p::NegotiationOutcome| {
-                            if let Err(err) = socket.emit(
+                            spawn_socket_emit(
+                                socket.clone(),
                                 "term:webrtc_stats",
                                 json!({
                                     "viewer_sid": viewer_sid,
                                     "established": outcome.established,
                                     "candidate_type": outcome.best_local_candidate_type.unwrap_or("unknown"),
                                 }),
-                            ) {
-                                warn!(err = %err, "cloud host: failed to send term:webrtc_stats");
-                            }
+                            );
                         })
                     };
 
@@ -1116,7 +1134,8 @@ impl CloudHostTransport {
                     .cloned();
 
                 let Some(duplex) = duplex else {
-                    let _ = socket.emit(
+                    spawn_socket_emit(
+                        socket,
                         "term:reattach_error",
                         json!({"viewer_sid": new_viewer_sid, "reason": "unknown_viewer"}),
                     );
@@ -1128,13 +1147,15 @@ impl CloudHostTransport {
                         // Should be unreachable -- every entry in `sessions`
                         // was created via `new_with_replay` -- but fail
                         // closed rather than panic if it ever happens.
-                        let _ = socket.emit(
+                        spawn_socket_emit(
+                            socket,
                             "term:reattach_error",
                             json!({"viewer_sid": new_viewer_sid, "reason": "unknown_viewer"}),
                         );
                     }
                     Some(Err(ReplayError::TooFarBehind)) => {
-                        let _ = socket.emit(
+                        spawn_socket_emit(
+                            socket,
                             "term:reattach_error",
                             json!({"viewer_sid": new_viewer_sid, "reason": "too_far_behind"}),
                         );
@@ -1169,7 +1190,8 @@ impl CloudHostTransport {
                             .unwrap_or_else(|poisoned| poisoned.into_inner())
                             .insert(new_viewer_sid.to_owned(), viewer_session_id.to_owned());
 
-                        let _ = socket.emit(
+                        spawn_socket_emit(
+                            socket,
                             "term:reattach_ack",
                             json!({
                                 "viewer_sid": new_viewer_sid,
@@ -1501,17 +1523,17 @@ fn spawn_viewer_p2p_negotiation(
     let emit_offer: Arc<dyn Fn(&str) + Send + Sync> = {
         let socket = socket.clone();
         Arc::new(move |sdp: &str| {
-            if let Err(err) = socket.emit("term:webrtc_offer", json!({"sdp": sdp})) {
-                warn!(err = %err, "cloud viewer: failed to send term:webrtc_offer");
-            }
+            spawn_socket_emit(socket.clone(), "term:webrtc_offer", json!({"sdp": sdp}));
         })
     };
     let emit_ice: Arc<dyn Fn(&str) + Send + Sync> = {
         let socket = socket.clone();
         Arc::new(move |candidate: &str| {
-            if let Err(err) = socket.emit("term:webrtc_ice", json!({"candidate": candidate})) {
-                warn!(err = %err, "cloud viewer: failed to send term:webrtc_ice");
-            }
+            spawn_socket_emit(
+                socket.clone(),
+                "term:webrtc_ice",
+                json!({"candidate": candidate}),
+            );
         })
     };
     let emit_answer_unused: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_sdp: &str| {
@@ -1533,15 +1555,14 @@ fn spawn_viewer_p2p_negotiation(
     let on_outcome: Arc<dyn Fn(webrtc_p2p::NegotiationOutcome) + Send + Sync> = {
         let socket = socket.clone();
         Arc::new(move |outcome: webrtc_p2p::NegotiationOutcome| {
-            if let Err(err) = socket.emit(
+            spawn_socket_emit(
+                socket.clone(),
                 "term:webrtc_stats",
                 json!({
                     "established": outcome.established,
                     "candidate_type": outcome.best_local_candidate_type.unwrap_or("unknown"),
                 }),
-            ) {
-                warn!(err = %err, "cloud viewer: failed to send term:webrtc_stats");
-            }
+            );
         })
     };
 
@@ -1631,30 +1652,42 @@ fn connect_viewer_attempt(
             *open_client_cell
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(socket.clone());
-            let emit_result = if open_has_attached_before.load(Ordering::SeqCst) {
-                socket.emit(
-                    "term:reattach",
-                    json!({
-                        "target_token_id": open_target_token_id,
-                        "viewer_session_id": open_viewer_session_id,
-                        "last_seq": open_last_ack_seq.load(Ordering::SeqCst),
-                    }),
-                )
-            } else {
-                socket.emit(
-                    "term:attach",
-                    json!({
-                        "target_token_id": open_target_token_id,
-                        "viewer_session_id": open_viewer_session_id,
-                    }),
-                )
-            };
-            if let Err(err) = emit_result {
-                signal_attach_result(
-                    &open_attach_state,
-                    Err(format!("failed to send term:attach/term:reattach: {err}")),
-                );
-            }
+            let attach_state = Arc::clone(&open_attach_state);
+            let target_token_id = open_target_token_id.clone();
+            let viewer_session_id = open_viewer_session_id.clone();
+            let last_ack_seq = open_last_ack_seq.load(Ordering::SeqCst);
+            let has_attached_before = open_has_attached_before.load(Ordering::SeqCst);
+            // Routed through a dedicated thread rather than
+            // `spawn_socket_emit` because, unlike the fire-and-forget
+            // signaling emits elsewhere in this file, a failure here must
+            // be reported back through `signal_attach_result` so
+            // `wait_for_attach_result` doesn't hang forever.
+            std::thread::spawn(move || {
+                let emit_result = if has_attached_before {
+                    socket.emit(
+                        "term:reattach",
+                        json!({
+                            "target_token_id": target_token_id,
+                            "viewer_session_id": viewer_session_id,
+                            "last_seq": last_ack_seq,
+                        }),
+                    )
+                } else {
+                    socket.emit(
+                        "term:attach",
+                        json!({
+                            "target_token_id": target_token_id,
+                            "viewer_session_id": viewer_session_id,
+                        }),
+                    )
+                };
+                if let Err(err) = emit_result {
+                    signal_attach_result(
+                        &attach_state,
+                        Err(format!("failed to send term:attach/term:reattach: {err}")),
+                    );
+                }
+            });
         })
         .on("term:reattach_ack", move |payload, socket: RawClient| {
             let Some(value) = payload_as_value(&payload) else {
@@ -1695,18 +1728,26 @@ fn connect_viewer_attempt(
             // resulting gap in output (same as today's pre-Задача-10
             // behavior) rather than hanging or retrying a reattach that
             // will keep failing the same way.
-            if let Err(err) = socket.emit(
-                "term:attach",
-                json!({
-                    "target_token_id": reattach_error_target_token_id,
-                    "viewer_session_id": reattach_error_viewer_session_id,
-                }),
-            ) {
-                signal_attach_result(
-                    &reattach_error_attach_state,
-                    Err(format!("failed to send fallback term:attach: {err}")),
-                );
-            }
+            let attach_state = Arc::clone(&reattach_error_attach_state);
+            let target_token_id = reattach_error_target_token_id.clone();
+            let viewer_session_id = reattach_error_viewer_session_id.clone();
+            // Same reasoning as the `open` handler above: needs to report
+            // a failed emit back via `signal_attach_result`, so this can't
+            // just use the fire-and-forget `spawn_socket_emit`.
+            std::thread::spawn(move || {
+                if let Err(err) = socket.emit(
+                    "term:attach",
+                    json!({
+                        "target_token_id": target_token_id,
+                        "viewer_session_id": viewer_session_id,
+                    }),
+                ) {
+                    signal_attach_result(
+                        &attach_state,
+                        Err(format!("failed to send fallback term:attach: {err}")),
+                    );
+                }
+            });
         })
         .on("term:attach:ack", move |_payload, socket: RawClient| {
             ack_has_attached_before.store(true, Ordering::SeqCst);
