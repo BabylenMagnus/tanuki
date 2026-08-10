@@ -1,14 +1,24 @@
 {
-  "version": "0.1.72",
+  "version": "0.1.73",
   "protocol": 18,
-  "notes": "### Added\n- Add spawn_socket_emit for safe socket emissions from handlers",
+  "notes": "### Fixed\n- Parse ICE candidate JSON to avoid double-encoding errors",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.72/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.73": {
+      "notes": "### Fixed\n- Parse ICE candidate JSON to avoid double-encoding errors",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.73/tanuki-macos-aarch64"
+      }
+    },
     "0.1.72": {
       "notes": "### Added\n- Add spawn_socket_emit for safe socket emissions from handlers",
       "protocol": 18,
