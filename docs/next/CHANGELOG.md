@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.74] - 2026-08-12
+
 ### Added
 - Log panic information using tracing for better debugging
 
