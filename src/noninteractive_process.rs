@@ -8,5 +8,13 @@ pub(crate) fn command(program: impl AsRef<OsStr>) -> Command {
 }
 
 pub(crate) fn curl_command() -> Command {
-    command("curl")
+    let mut cmd = command("curl");
+    // Windows' bundled curl uses the Schannel TLS backend, which mishandles
+    // GitHub's TLS 1.3 post-handshake session tickets (misreported as a
+    // renegotiation) and drops the connection with "(52) Empty reply from
+    // server". Pinning TLS 1.2 avoids the broken code path; unaffected on
+    // other platforms since they use OpenSSL/LibreSSL/etc.
+    #[cfg(windows)]
+    cmd.args(["--tlsv1.2", "--tls-max", "1.2"]);
+    cmd
 }

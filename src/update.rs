@@ -411,15 +411,41 @@ fn fetch_preview_manifest() -> Result<PreviewManifest, String> {
     fetch_json_manifest(PREVIEW_UPDATE_MANIFEST_URL)
 }
 
+/// Number of times to reissue the whole curl subprocess (fresh TCP+TLS
+/// connection each time) if the fetch fails. On Windows, curl's own
+/// `--retry` doesn't help here: the Schannel TLS backend intermittently
+/// mishandles GitHub's TLS 1.3 post-handshake session tickets and drops
+/// the connection (curl error 52, "Empty reply from server") *within* a
+/// single curl invocation, retries included. A brand new process gets a
+/// brand new TLS session and empirically succeeds most of the time.
+const MANIFEST_FETCH_ATTEMPTS: u32 = 4;
+
 fn fetch_json_manifest<T>(url: &str) -> Result<T, String>
 where
     T: serde::de::DeserializeOwned,
 {
+    let mut last_err = String::new();
+    for attempt in 1..=MANIFEST_FETCH_ATTEMPTS {
+        match fetch_json_manifest_once(url) {
+            Ok(output) => return parse_manifest_response(&output),
+            Err(err) => {
+                last_err = err;
+                if attempt < MANIFEST_FETCH_ATTEMPTS {
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+            }
+        }
+    }
+    Err(last_err)
+}
+
+fn fetch_json_manifest_once(url: &str) -> Result<Vec<u8>, String> {
     let output = crate::noninteractive_process::curl_command()
         .args([
             "-sfL",
             "--retry",
             "3",
+            "--retry-all-errors",
             "--connect-timeout",
             "10",
             "--max-time",
@@ -433,8 +459,14 @@ where
         return Err("failed to fetch update manifest".into());
     }
 
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("failed to parse update manifest JSON: {e}"))
+    Ok(output.stdout)
+}
+
+fn parse_manifest_response<T>(body: &[u8]) -> Result<T, String>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_slice(body).map_err(|e| format!("failed to parse update manifest JSON: {e}"))
 }
 
 fn handle_manifest_announcement(version: &str, value: Option<&serde_json::Value>) {
