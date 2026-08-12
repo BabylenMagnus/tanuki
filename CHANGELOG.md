@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Port unreleased upstream Herdr agent-detection manifest fixes for claude, codex, cursor, kiro, hermes (refs upstream 9ba32c25, 4473e391, 7ae4b056, fae0b236, 5dd20c0a, 5f1957c2) — restores live "working" status detection for Claude Code 2.1.228's half-circle busy spinner, among other fixes
+
 ## [0.1.75] - 2026-08-13
 
 ### Added
