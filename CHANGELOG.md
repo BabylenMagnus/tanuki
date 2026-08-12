@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Improve curl command handling on Windows for TLS issues
+
 ## [0.1.74] - 2026-08-12
 
 ### Added
