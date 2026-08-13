@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.79] - 2026-08-13
+
 ### Added
 - Add cloud host apply request for immediate relay updates
 

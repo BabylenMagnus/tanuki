@@ -419,10 +419,7 @@ fn live_agent_launch_argv(
         // No agent recognized in this job at all -- not a transient read
         // failure (retrying won't change which processes are running), so
         // don't burn retries on it.
-        let Some((agent, name, process)) = crate::detect::identify_agent_process_in_job(&job)
-        else {
-            return None;
-        };
+        let (agent, name, process) = crate::detect::identify_agent_process_in_job(&job)?;
 
         if let Some(argv) = process.argv {
             return Some(argv);
