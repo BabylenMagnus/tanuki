@@ -816,6 +816,9 @@ pub struct UiConfig {
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
+    /// Format for the outer terminal window title. Empty leaves the title alone.
+    /// Default: "{hostname}: {workspace}".
+    pub window_title: String,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
     /// Expanded sidebar row composition.
@@ -1025,6 +1028,7 @@ impl Default for UiConfig {
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
+            window_title: super::window_title::default_window_title(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),

@@ -67,6 +67,13 @@ pub(crate) fn should_draw_host_cursor_by_default() -> bool {
     true
 }
 
+/// The machine's node name, as shown by tmux's `#h`.
+pub(crate) fn hostname() -> Option<String> {
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .filter(|name| !name.is_empty())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WindowsProcessEntry {
     pid: u32,

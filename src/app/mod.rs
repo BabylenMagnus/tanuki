@@ -67,7 +67,6 @@ pub(crate) fn resolve_locale(language: &str) -> String {
 }
 use std::future::pending;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -1485,6 +1484,9 @@ impl App {
                 diagnostics.push(format!("{diagnostic}; keeping previous [ui] settings"));
             } else {
                 diagnostics.extend(config.ui.sound.diagnostics());
+                diagnostics.extend(crate::config::window_title_diagnostics(
+                    &config.ui.window_title,
+                ));
 
                 self.state.default_sidebar_width = config.ui.sidebar_width;
                 if self.state.sidebar_width_source == state::SidebarWidthSource::ConfigDefault {
@@ -1527,6 +1529,7 @@ impl App {
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
+                self.configure_window_title(&config.ui.window_title);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
                     self.state.request_client_config_reload = true;
                 }

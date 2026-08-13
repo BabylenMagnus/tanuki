@@ -6,6 +6,7 @@ mod model;
 mod sidebar;
 mod sound;
 mod theme;
+mod window_title;
 
 pub use self::{
     io::{
@@ -30,10 +31,12 @@ pub use self::{
     },
     sound::SoundConfig,
     theme::{parse_color, CustomThemeColors, ThemeConfig},
+    window_title::{WindowTitlePart, WindowTitleTemplate, WindowTitleToken},
 };
 
 pub(crate) use self::io::upsert_top_level_bool;
 pub(crate) use self::keybinds::parse_key_combo;
+pub(crate) use self::window_title::{sanitize_window_title_text, window_title_diagnostics};
 
 pub const CONFIG_PATH_ENV_VAR: &str = "TANUKI_CONFIG_PATH";
 pub const DEFAULT_SCROLLBACK_LIMIT_BYTES: usize = 10_000_000;
@@ -72,6 +75,7 @@ impl Config {
             .chain(keybind_diags)
             .chain(self.remote_image_paste_key().err())
             .chain(self.ui.sound.diagnostics())
+            .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
             .collect()
     }
