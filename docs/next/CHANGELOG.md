@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.1.77] - 2026-08-13
+
+### Fixed
+- Windows: the server daemon respawned by `tanuki update` could be silently killed if the parent terminal window (Windows Terminal, WezTerm, etc.) was closed shortly after, with no crash log or warning — the daemon was only detached from the console (`DETACHED_PROCESS`), not from the parent's Windows Job Object. Now requests `CREATE_BREAKAWAY_FROM_JOB` so the daemon survives the parent terminal closing, falling back to the old behavior (with a warning) if the enclosing job doesn't permit breakaway
+- Persisted launch flags (e.g. `--dangerously-skip-permissions`) could silently and permanently drop from a pane across restarts on Windows if a single snapshot save failed to read the live process's command line; this read now retries a few times and logs a warning if it still fails, instead of failing silently
+
 ## [0.1.76] - 2026-08-13
 
 ### Fixed

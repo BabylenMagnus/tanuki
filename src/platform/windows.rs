@@ -30,11 +30,17 @@ use windows_sys::{
             Ole::CF_UNICODETEXT,
             Threading::{
                 GetCurrentProcess, GetExitCodeProcess, OpenProcess, TerminateProcess,
-                CREATE_NO_WINDOW, DETACHED_PROCESS, PROCESS_BASIC_INFORMATION,
-                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+                CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW, DETACHED_PROCESS,
+                PROCESS_BASIC_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
             },
         },
-        UI::Shell::{CommandLineToArgvW, ShellExecuteW},
+        UI::{
+            Shell::{
+                CommandLineToArgvW, ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_TIP,
+                NIIF_INFO, NIIF_NOSOUND, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+            },
+            WindowsAndMessaging::{CreateWindowExW, DestroyWindow, LoadIconW, IDI_APPLICATION},
+        },
     },
 };
 
@@ -226,6 +232,29 @@ pub(crate) fn configure_background_command_platform(command: &mut std::process::
 }
 
 pub fn detach_server_daemon_command(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+
+    // `DETACHED_PROCESS` alone only detaches the child from the parent's
+    // console -- it does *not* exempt the child from the parent's Windows
+    // Job Object. Terminal emulators (Windows Terminal, WezTerm, ...)
+    // commonly run their children in a job with
+    // `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so without
+    // `CREATE_BREAKAWAY_FROM_JOB` a "detached" server daemon silently stays
+    // tied to that job and gets killed the instant the terminal window
+    // closes -- no panic, no shutdown log, just gone. See
+    // `detach_server_daemon_command_without_breakaway` for the fallback used
+    // when the enclosing job doesn't permit breakaway.
+    command.creation_flags(DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB);
+}
+
+/// Fallback for [`detach_server_daemon_command`] when the parent's Job
+/// Object doesn't have `JOB_OBJECT_LIMIT_BREAKAWAY_OK` (or
+/// `SILENT_BREAKAWAY_OK`) set, in which case `CreateProcess` with
+/// `CREATE_BREAKAWAY_FROM_JOB` fails outright (`ERROR_ACCESS_DENIED`).
+/// Retries with plain `DETACHED_PROCESS` so the daemon still starts, at the
+/// cost of staying tied to that job (and thus killable by it) -- strictly
+/// better than not starting at all.
+pub fn detach_server_daemon_command_without_breakaway(command: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
 
     command.creation_flags(DETACHED_PROCESS);
@@ -674,8 +703,110 @@ pub fn read_clipboard_image() -> Option<ClipboardImage> {
     None
 }
 
-pub fn show_desktop_notification(_title: &str, _body: Option<&str>) -> std::io::Result<bool> {
-    Ok(false)
+pub fn show_desktop_notification(title: &str, body: Option<&str>) -> std::io::Result<bool> {
+    let title = title.to_owned();
+    let body = body.unwrap_or(&title).to_owned();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("tanuki-windows-notification".into())
+        .spawn(move || show_desktop_notification_on_thread(&title, &body, ready_tx))?;
+    ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|err| match err {
+            std::sync::mpsc::RecvTimeoutError::Timeout => std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Windows notification setup timed out",
+            ),
+            std::sync::mpsc::RecvTimeoutError::Disconnected => std::io::Error::other(
+                "Windows notification thread exited before reporting readiness",
+            ),
+        })?
+}
+
+fn show_desktop_notification_on_thread(
+    title: &str,
+    body: &str,
+    ready_tx: std::sync::mpsc::SyncSender<std::io::Result<bool>>,
+) {
+    let class_name = wide_null("STATIC");
+    let window_name = wide_null("Tanuki notifications");
+    let hwnd = unsafe {
+        CreateWindowExW(
+            0,
+            class_name.as_ptr(),
+            window_name.as_ptr(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            std::ptr::null(),
+        )
+    };
+    if hwnd.is_null() {
+        let _ = ready_tx.send(Err(std::io::Error::last_os_error()));
+        return;
+    }
+
+    let mut notification = unsafe { std::mem::zeroed::<NOTIFYICONDATAW>() };
+    notification.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+    notification.hWnd = hwnd;
+    notification.uID = 1;
+    notification.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
+    notification.uFlags = NIF_TIP;
+    if !notification.hIcon.is_null() {
+        notification.uFlags |= NIF_ICON;
+    }
+    copy_wide_truncated(&mut notification.szTip, "Tanuki");
+
+    if unsafe { Shell_NotifyIconW(NIM_ADD, &notification) } == 0 {
+        let _ = ready_tx.send(Err(std::io::Error::other(
+            "failed to add Tanuki notification-area icon",
+        )));
+        unsafe {
+            DestroyWindow(hwnd);
+        }
+        return;
+    }
+
+    notification.uFlags = NIF_INFO;
+    notification.dwInfoFlags = NIIF_INFO | NIIF_NOSOUND;
+    copy_wide_truncated(&mut notification.szInfoTitle, title);
+    copy_wide_truncated(&mut notification.szInfo, body);
+    if unsafe { Shell_NotifyIconW(NIM_MODIFY, &notification) } == 0 {
+        unsafe {
+            Shell_NotifyIconW(NIM_DELETE, &notification);
+            DestroyWindow(hwnd);
+        }
+        let _ = ready_tx.send(Err(std::io::Error::other(
+            "failed to show Tanuki desktop notification",
+        )));
+        return;
+    }
+
+    let _ = ready_tx.send(Ok(true));
+    std::thread::sleep(Duration::from_secs(10));
+    unsafe {
+        Shell_NotifyIconW(NIM_DELETE, &notification);
+        DestroyWindow(hwnd);
+    }
+}
+
+fn copy_wide_truncated<const N: usize>(destination: &mut [u16; N], value: &str) {
+    destination.fill(0);
+    let mut offset = 0;
+    for ch in value.chars() {
+        let mut units = [0; 2];
+        let encoded = ch.encode_utf16(&mut units);
+        if offset + encoded.len() >= N {
+            break;
+        }
+        destination[offset..offset + encoded.len()].copy_from_slice(encoded);
+        offset += encoded.len();
+    }
 }
 
 fn wide_null(value: &str) -> Vec<u16> {
@@ -806,6 +937,15 @@ mod tests {
     use windows_sys::Win32::System::Console::{
         AllocConsole, FreeConsole, GetConsoleProcessList, GetConsoleWindow,
     };
+
+    #[test]
+    fn windows_notification_text_is_null_terminated_and_unicode_safe() {
+        let mut destination = [u16::MAX; 6];
+        super::copy_wide_truncated(&mut destination, "abc😀def");
+
+        assert_eq!(String::from_utf16(&destination[..5]).unwrap(), "abc😀");
+        assert_eq!(destination[5], 0);
+    }
 
     #[test]
     fn cmd_agent_command_encodes_edge_arguments_without_cmd_expansion() {

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use tracing::info;
+use tracing::{info, warn};
 
 use super::socket_paths::client_socket_path;
 
@@ -196,9 +196,9 @@ pub fn spawn_server_daemon() -> io::Result<u32> {
 
     info!(exe = %exe.display(), "spawning server daemon");
 
-    let mut command = build_server_daemon_command(exe);
+    let command = build_server_daemon_command(exe);
 
-    let child = command.spawn().map_err(|err: io::Error| {
+    let child = spawn_daemon_command(command).map_err(|err: io::Error| {
         io::Error::new(err.kind(), format!("failed to spawn tanuki server: {err}"))
     })?;
 
@@ -253,7 +253,7 @@ pub fn spawn_server_daemon_for_target(
         }
     }
 
-    let child = command.spawn().map_err(|err: io::Error| {
+    let child = spawn_daemon_command(command).map_err(|err: io::Error| {
         io::Error::new(err.kind(), format!("failed to spawn tanuki server: {err}"))
     })?;
 
@@ -261,6 +261,38 @@ pub fn spawn_server_daemon_for_target(
     info!(pid, "server daemon spawned");
 
     Ok(pid)
+}
+
+/// Spawns a daemon command built by [`build_server_daemon_command`].
+///
+/// On Windows, that command requests `CREATE_BREAKAWAY_FROM_JOB` so the
+/// daemon survives the parent terminal's Job Object being torn down (see
+/// `platform::detach_server_daemon_command`). Some enclosing jobs don't
+/// permit breakaway, in which case `spawn()` fails with `ERROR_ACCESS_DENIED`
+/// -- retry once without that flag so the daemon still starts, and warn
+/// since it will then be killable if the parent job closes.
+#[cfg(windows)]
+fn spawn_daemon_command(mut command: Command) -> io::Result<std::process::Child> {
+    const ERROR_ACCESS_DENIED: i32 = 5;
+
+    match command.spawn() {
+        Ok(child) => Ok(child),
+        Err(err) if err.raw_os_error() == Some(ERROR_ACCESS_DENIED) => {
+            warn!(
+                "server daemon could not break away from the parent's Windows Job Object \
+                 (job doesn't permit breakaway); starting it tied to that job instead -- it \
+                 may be killed if the parent terminal window is closed"
+            );
+            crate::platform::detach_server_daemon_command_without_breakaway(&mut command);
+            command.spawn()
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(not(windows))]
+fn spawn_daemon_command(mut command: Command) -> io::Result<std::process::Child> {
+    command.spawn()
 }
 
 fn build_server_daemon_command(exe: PathBuf) -> Command {

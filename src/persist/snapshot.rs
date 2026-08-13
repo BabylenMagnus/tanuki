@@ -393,14 +393,63 @@ fn capture_tab(
 /// that process's actual argv (including any extra CLI flags) so it can be
 /// persisted and later merged back in on restore -- see
 /// `merge_persisted_launch_flags` in `persist::restore`.
+const LIVE_LAUNCH_ARGV_ATTEMPTS: u32 = 3;
+const LIVE_LAUNCH_ARGV_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+
 fn live_agent_launch_argv(
     terminal_runtimes: &TerminalRuntimeRegistry,
     terminal_id: &crate::terminal::TerminalId,
 ) -> Option<Vec<String>> {
     let pid = terminal_runtimes.get(terminal_id)?.child_pid()?;
-    let job = crate::detect::foreground_job(pid)?;
-    let (_, _, process) = crate::detect::identify_agent_process_in_job(&job)?;
-    process.argv
+
+    for attempt in 1..=LIVE_LAUNCH_ARGV_ATTEMPTS {
+        let Some(job) = crate::detect::foreground_job(pid) else {
+            if attempt == LIVE_LAUNCH_ARGV_ATTEMPTS {
+                tracing::debug!(
+                    pid,
+                    attempts = attempt,
+                    "live_agent_launch_argv: no foreground job for pane's child process"
+                );
+                return None;
+            }
+            std::thread::sleep(LIVE_LAUNCH_ARGV_RETRY_DELAY);
+            continue;
+        };
+
+        // No agent recognized in this job at all -- not a transient read
+        // failure (retrying won't change which processes are running), so
+        // don't burn retries on it.
+        let Some((agent, name, process)) = crate::detect::identify_agent_process_in_job(&job)
+        else {
+            return None;
+        };
+
+        if let Some(argv) = process.argv {
+            return Some(argv);
+        }
+
+        // Agent process was identified but its command line could not be
+        // read (e.g. on Windows, the PEB/RtlUserProcessParameters read via
+        // ReadProcessMemory can fail transiently due to timing or access).
+        // This is the failure mode that silently drops persisted launch
+        // flags like `--dangerously-skip-permissions` across restarts, so
+        // it's worth retrying and logging rather than failing silently.
+        if attempt == LIVE_LAUNCH_ARGV_ATTEMPTS {
+            tracing::warn!(
+                pid,
+                agent_pid = process.pid,
+                agent = %name,
+                agent_kind = ?agent,
+                attempts = attempt,
+                "live_agent_launch_argv: identified agent process but failed to read its \
+                 command line after retries; launch flags will not be persisted for this pane"
+            );
+        } else {
+            std::thread::sleep(LIVE_LAUNCH_ARGV_RETRY_DELAY);
+        }
+    }
+
+    None
 }
 
 /// Capture pane screen history separately from the structural session snapshot.
