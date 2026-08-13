@@ -1,14 +1,24 @@
 {
-  "version": "0.1.74",
+  "version": "0.1.76",
   "protocol": 18,
-  "notes": "### Added\n- Log panic information using tracing for better debugging",
+  "notes": "### Fixed\n- Port unreleased upstream Herdr agent-detection manifest fixes for claude, codex, cursor, kiro, hermes (refs upstream 9ba32c25, 4473e391, 7ae4b056, fae0b236, 5dd20c0a, 5f1957c2) \u2014 restores live \"working\" status detection for Claude Code 2.1.228's half-circle busy spinner, among other fixes\n- Strip Claude Code's half-circle busy-spinner glyphs (\u25d0\u25d3\u25d1\u25d2) from the outer terminal window title, matching the already-ported sidebar detection fix (refs upstream 49e333ae)\n- Recognize `opencode2` as `opencode` in agent detection, protecting the \"Tanuki\" white-label from a Legion binary rename (refs upstream 6fb0d803)\n- Recognize version-suffixed Python runtime wrappers (`python3.12`, etc.), not just bare `python`/`python3`, when detecting agents launched through a Python wrapper script (refs upstream fc824b99)",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.74/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.74/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.74/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.74/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.76": {
+      "notes": "### Fixed\n- Port unreleased upstream Herdr agent-detection manifest fixes for claude, codex, cursor, kiro, hermes (refs upstream 9ba32c25, 4473e391, 7ae4b056, fae0b236, 5dd20c0a, 5f1957c2) \u2014 restores live \"working\" status detection for Claude Code 2.1.228's half-circle busy spinner, among other fixes\n- Strip Claude Code's half-circle busy-spinner glyphs (\u25d0\u25d3\u25d1\u25d2) from the outer terminal window title, matching the already-ported sidebar detection fix (refs upstream 49e333ae)\n- Recognize `opencode2` as `opencode` in agent detection, protecting the \"Tanuki\" white-label from a Legion binary rename (refs upstream 6fb0d803)\n- Recognize version-suffixed Python runtime wrappers (`python3.12`, etc.), not just bare `python`/`python3`, when detecting agents launched through a Python wrapper script (refs upstream fc824b99)",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.76/tanuki-macos-aarch64"
+      }
+    },
     "0.1.74": {
       "notes": "### Added\n- Log panic information using tracing for better debugging",
       "protocol": 18,
