@@ -269,6 +269,21 @@ pub fn current_process_is_detached_server_daemon() -> bool {
     unsafe { IsProcessInJob(GetCurrentProcess(), null_mut(), &mut in_job) != 0 && in_job == 0 }
 }
 
+/// Whether a given process (by pid) is a member of any Windows Job Object,
+/// i.e. whether it can be killed en masse if that job is torn down (e.g. a
+/// terminal emulator closing). Used right after spawning the server daemon
+/// to log ground truth about job membership instead of only inferring it
+/// from whether the `CREATE_BREAKAWAY_FROM_JOB` spawn attempt itself failed
+/// -- see `spawn_daemon_command` in `server::autodetect`.
+pub fn process_is_in_job(pid: u32) -> Option<bool> {
+    let process = ProcessHandle::open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?;
+    let mut in_job = 0;
+    if unsafe { IsProcessInJob(process.0, null_mut(), &mut in_job) } == 0 {
+        return None;
+    }
+    Some(in_job != 0)
+}
+
 pub fn foreground_job(child_pid: u32) -> Option<ForegroundJob> {
     let entries = snapshot_processes();
     select_pane_foreground_job(child_pid, &entries)

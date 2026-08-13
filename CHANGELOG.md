@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.1.78] - 2026-08-13
+
+### Added
+- Windows: log the server daemon's actual Windows Job Object membership right after spawn (checked directly via `IsProcessInJob`, not inferred from whether the breakaway `CreateProcess` attempt reported an error), so it's immediately clear from the log whether a given daemon process was ever vulnerable to being killed alongside its parent terminal's job
+
 ## [0.1.77] - 2026-08-13
 
 ### Fixed

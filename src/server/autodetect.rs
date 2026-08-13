@@ -275,8 +275,8 @@ pub fn spawn_server_daemon_for_target(
 fn spawn_daemon_command(mut command: Command) -> io::Result<std::process::Child> {
     const ERROR_ACCESS_DENIED: i32 = 5;
 
-    match command.spawn() {
-        Ok(child) => Ok(child),
+    let child = match command.spawn() {
+        Ok(child) => child,
         Err(err) if err.raw_os_error() == Some(ERROR_ACCESS_DENIED) => {
             warn!(
                 "server daemon could not break away from the parent's Windows Job Object \
@@ -284,9 +284,48 @@ fn spawn_daemon_command(mut command: Command) -> io::Result<std::process::Child>
                  may be killed if the parent terminal window is closed"
             );
             crate::platform::detach_server_daemon_command_without_breakaway(&mut command);
-            command.spawn()
+            let child = command.spawn()?;
+            log_daemon_job_membership(child.id(), false);
+            return Ok(child);
         }
-        Err(err) => Err(err),
+        Err(err) => return Err(err),
+    };
+
+    log_daemon_job_membership(child.id(), true);
+    Ok(child)
+}
+
+/// Logs ground truth about the freshly-spawned daemon's actual Windows Job
+/// Object membership, checked directly via `IsProcessInJob` right after
+/// spawn -- not inferred from whether the breakaway `CreateProcess` attempt
+/// itself reported an error. This is the one thing that can still be
+/// recorded if the daemon is later killed by its enclosing job being torn
+/// down: the log will show, for that exact pid, whether it was ever
+/// actually outside a job in the first place. A hard external
+/// `TerminateProcess`/`TerminateJobObject` still can't be logged from
+/// inside the process being killed -- nothing runs at that point, not even
+/// `Drop` impls -- so this is the closest available substitute: knowing in
+/// advance whether the process *was* vulnerable to it.
+#[cfg(windows)]
+fn log_daemon_job_membership(pid: u32, breakaway_requested: bool) {
+    match crate::platform::process_is_in_job(pid) {
+        Some(true) => warn!(
+            pid,
+            breakaway_requested,
+            "server daemon is a member of a Windows Job Object after spawn -- it can be \
+             killed en masse if that job (e.g. the parent terminal window) is torn down"
+        ),
+        Some(false) => info!(
+            pid,
+            breakaway_requested,
+            "server daemon confirmed outside any Windows Job Object -- immune to the parent \
+             terminal's job being torn down"
+        ),
+        None => warn!(
+            pid,
+            breakaway_requested,
+            "could not determine server daemon's Windows Job Object membership after spawn"
+        ),
     }
 }
 
