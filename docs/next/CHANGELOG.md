@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.1.76] - 2026-08-13
+
+### Fixed
+- Port unreleased upstream Herdr agent-detection manifest fixes for claude, codex, cursor, kiro, hermes (refs upstream 9ba32c25, 4473e391, 7ae4b056, fae0b236, 5dd20c0a, 5f1957c2) — restores live "working" status detection for Claude Code 2.1.228's half-circle busy spinner, among other fixes
+- Strip Claude Code's half-circle busy-spinner glyphs (◐◓◑◒) from the outer terminal window title, matching the already-ported sidebar detection fix (refs upstream 49e333ae)
+- Recognize `opencode2` as `opencode` in agent detection, protecting the "Tanuki" white-label from a Legion binary rename (refs upstream 6fb0d803)
+- Recognize version-suffixed Python runtime wrappers (`python3.12`, etc.), not just bare `python`/`python3`, when detecting agents launched through a Python wrapper script (refs upstream fc824b99)
+
 ## [0.1.75] - 2026-08-13
 
 ### Added
