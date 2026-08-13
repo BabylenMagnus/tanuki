@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Add cloud host apply request for immediate relay updates
+
+### Changed
+- Bump version to 0.1.79 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.79] - 2026-08-13
 
 ### Added
