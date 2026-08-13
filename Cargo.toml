@@ -1,6 +1,6 @@
 [package]
 name = "tanuki"
-version = "0.1.80"
+version = "0.1.81"
 edition = "2021"
 build = "build.rs"
 description = "terminal workspace manager for AI coding agents"
@@ -62,6 +62,19 @@ native-tls = { version = "0.2.11", features = ["vendored"] }
 
 [patch.crates-io]
 portable-pty = { path = "vendor/portable-pty" }
+# rust_engineio 0.6.0's sync `Client::poll()` panics (`unreachable!()`) if
+# the server sends a second `PacketId::Open` after the initial handshake --
+# observed live against tanuki_api's Socket.IO server on a browser
+# (`TerminalAnsi`-encoding) cloud-relay attach, killing the poll thread and
+# silently breaking `tanuki server --cloud-host`. Unfixed upstream (still
+# present on `main` as of this writing, last relevant commit 2024) -- see
+# wiki/tanuki-terminal-cloud-relay-rust-engineio-open-packet-panic.md.
+# Patched locally: that one match arm ignores the packet instead of
+# panicking. The async client in the same crate already handles this
+# correctly (`Err(InvalidPacket)` instead of `unreachable!()`); migrating
+# `cloud.rs` off the sync client entirely is tracked as a separate,
+# larger follow-up.
+rust_engineio = { path = "vendor/rust-socketio-patched/engineio" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

@@ -3004,13 +3004,11 @@ dependencies = [
 [[package]]
 name = "rust_engineio"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3d3572ceba6c5d79eecedf3be93640ca9512fa4100dff6a70f96c514adf4f1f"
 dependencies = [
  "adler32",
  "async-stream",
  "async-trait",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bytes",
  "futures-util",
  "http",
@@ -3653,7 +3651,7 @@ dependencies = [
 
 [[package]]
 name = "tanuki"
-version = "0.1.80"
+version = "0.1.81"
 dependencies = [
  "base64 0.22.1",
  "bincode",

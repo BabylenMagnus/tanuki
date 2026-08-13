@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use super::App;
 
 impl App {
@@ -83,7 +81,7 @@ impl App {
         }
         self.state.theme_name = theme_name;
         self.state.palette = palette;
-        self.render_dirty.store(true, Ordering::Release);
+        self.render_dirty.request_generic();
         self.render_notify.notify_one();
         true
     }
@@ -94,7 +92,7 @@ impl App {
         }
         self.push_host_color_scheme_to_panes();
 
-        self.render_dirty.store(true, Ordering::Release);
+        self.render_dirty.request_generic();
         self.render_notify.notify_one();
     }
 

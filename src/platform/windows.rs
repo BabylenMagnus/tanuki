@@ -1115,6 +1115,7 @@ mod tests {
             ("background", super::configure_background_command_platform),
             ("server daemon", super::detach_server_daemon_command),
         ];
+        const ERROR_ACCESS_DENIED: i32 = 5;
         for (mode, configure) in configurations {
             let mut child = Command::new(&test_exe);
             child
@@ -1126,7 +1127,32 @@ mod tests {
                 .stderr(Stdio::null());
             configure(&mut child);
 
-            let status = child.status().expect("spawn console isolation test child");
+            let status = match child.status() {
+                Ok(status) => status,
+                // `detach_server_daemon_command` requests CREATE_BREAKAWAY_FROM_JOB,
+                // which CreateProcess legitimately refuses with ERROR_ACCESS_DENIED
+                // when the enclosing Windows Job Object doesn't permit breakaway
+                // (e.g. a CI runner's own job) -- the exact case `spawn_daemon_command`
+                // (server/autodetect.rs) already falls back on in production. Mirror
+                // that fallback here instead of treating it as a hard failure, so this
+                // test asserts the real invariant (no console) rather than assuming
+                // breakaway is always available in the environment it runs in.
+                Err(err) if mode == "server daemon" && err.raw_os_error() == Some(ERROR_ACCESS_DENIED) => {
+                    let mut fallback_child = Command::new(&test_exe);
+                    fallback_child
+                        .arg("windows_background_and_server_daemon_commands_do_not_have_consoles")
+                        .env(CONSOLE_TEST_CHILD_ENV, mode)
+                        .env(CONSOLE_TEST_PARENT_PID_ENV, &parent_pid)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+                    super::detach_server_daemon_command_without_breakaway(&mut fallback_child);
+                    fallback_child
+                        .status()
+                        .expect("spawn console isolation test child (breakaway fallback)")
+                }
+                Err(err) => panic!("spawn console isolation test child: {err}"),
+            };
             assert!(
                 status.success(),
                 "{mode} child opened or inherited a console"
