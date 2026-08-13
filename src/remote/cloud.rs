@@ -674,13 +674,26 @@ impl Write for CloudDuplex {
 
 /// Manages one Socket.IO connection acting as a tanuki cloud host.
 ///
-/// Kept alive for as long as cloud hosting should stay active; dropping it
-/// does not currently tear down the underlying connection (see the final
-/// report's note on lifecycle -- shutdown wiring is left to the CLI-flag
-/// follow-up task).
+/// Kept alive for as long as cloud hosting should stay active. Call
+/// [`CloudHostTransport::shutdown`] before dropping to tear the connection
+/// down gracefully (`term:host_bye`, heartbeat thread stopped, no
+/// auto-reconnect); a bare drop without calling `shutdown` first leaves the
+/// heartbeat thread and any in-flight reconnect loop running forever, since
+/// neither is owned by this struct's fields (see `host_client_cell` above).
 pub(crate) struct CloudHostTransport {
     #[allow(dead_code)]
     client: rust_socketio::client::Client,
+    /// Always-current live connection handle, updated by every
+    /// `connect_attempt`'s "open" callback (initial connect or reconnect).
+    /// `client` above can go stale after a host-side reconnect; `shutdown`
+    /// must emit through this cell instead, not `client`, to reach whatever
+    /// connection is actually live right now.
+    host_client_cell: Arc<Mutex<Option<RawClient>>>,
+    /// Set by `shutdown` before emitting `term:host_bye`. Checked by the
+    /// heartbeat thread (to stop looping) and by the `"close"` handler (to
+    /// skip scheduling a reconnect) so a deliberate toggle-off doesn't
+    /// silently reconnect a moment later.
+    host_stop: Arc<AtomicBool>,
     viewers: Arc<Mutex<HashMap<String, CloudDuplex>>>,
     /// Same duplexes as `viewers`, indexed by the viewer-generated, sid-independent
     /// `viewer_session_id` instead of the current Socket.IO sid. Needed for
@@ -729,6 +742,11 @@ impl CloudHostTransport {
         // "close" fires more than once for the same underlying disconnect
         // -- same pattern as the viewer side's `reconnecting`.
         let host_reconnecting = Arc::new(AtomicBool::new(false));
+        // Set only by `shutdown` (a deliberate toggle-off), never by a
+        // transient network drop -- distinguishes "stop trying to stay
+        // connected" from "close" events the heartbeat/reconnect paths
+        // should otherwise treat as something to recover from.
+        let host_stop = Arc::new(AtomicBool::new(false));
         let client_id_allocator: Arc<dyn Fn() -> u64 + Send + Sync> = Arc::new(client_id_allocator);
 
         // Runs for the process lifetime, independent of any single
@@ -737,11 +755,17 @@ impl CloudHostTransport {
         // every `connect_attempt`'s "open" handler, initial or reconnect),
         // so it survives host-side reconnects without needing to be
         // respawned. Refreshes the TTL'd `term:host_sid:{token}`
-        // registration on the backend (`_HOST_TTL_SECONDS`).
+        // registration on the backend (`_HOST_TTL_SECONDS`). Exits once
+        // `shutdown` sets `host_stop`, so a toggled-off host doesn't keep
+        // re-registering itself after `term:host_bye` was already sent.
         {
             let heartbeat_host_client_cell = Arc::clone(&host_client_cell);
+            let heartbeat_host_stop = Arc::clone(&host_stop);
             std::thread::spawn(move || loop {
                 std::thread::sleep(HOST_HEARTBEAT_INTERVAL);
+                if heartbeat_host_stop.load(Ordering::SeqCst) {
+                    return;
+                }
                 let guard = heartbeat_host_client_cell
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -778,6 +802,7 @@ impl CloudHostTransport {
             let negotiations = Arc::clone(&negotiations);
             let host_client_cell = Arc::clone(&host_client_cell);
             let host_reconnecting = Arc::clone(&host_reconnecting);
+            let host_stop = Arc::clone(&host_stop);
             std::thread::spawn(move || {
                 let _ = result_tx.send(Self::connect_attempt(
                     client_id_allocator,
@@ -790,6 +815,7 @@ impl CloudHostTransport {
                     negotiations,
                     host_client_cell,
                     host_reconnecting,
+                    host_stop,
                 ));
             });
         }
@@ -799,9 +825,32 @@ impl CloudHostTransport {
 
         Ok(Self {
             client,
+            host_client_cell,
+            host_stop,
             viewers,
             sessions,
         })
+    }
+
+    /// Gracefully stops cloud hosting: marks `host_stop` so the heartbeat
+    /// thread exits and the `"close"` handler doesn't schedule a
+    /// reconnect, then sends `term:host_bye` on whatever connection is
+    /// currently live (`term_relay.py`'s `on_term_host_bye` tears down the
+    /// backend-side registration and notifies attached viewers). Does not
+    /// itself drop the transport -- the caller drops it afterwards once
+    /// this returns, at which point `client`'s own `Drop` closes the
+    /// socket.
+    pub(crate) fn shutdown(&self) {
+        self.host_stop.store(true, Ordering::SeqCst);
+        let guard = self
+            .host_client_cell
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(client) = guard.as_ref() {
+            if let Err(err) = client.emit("term:host_bye", json!({})) {
+                warn!(err = %err, "cloud host: failed to send term:host_bye on shutdown");
+            }
+        }
     }
 
     /// One connection attempt -- used both for the initial connect (from
@@ -822,6 +871,7 @@ impl CloudHostTransport {
         negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>>,
         host_client_cell: Arc<Mutex<Option<RawClient>>>,
         host_reconnecting: Arc<AtomicBool>,
+        host_stop: Arc<AtomicBool>,
     ) -> io::Result<rust_socketio::client::Client> {
         let config = load_legion_config()?;
         let auth = auth_payload(&config, "term-host");
@@ -862,6 +912,7 @@ impl CloudHostTransport {
         let close_negotiations = Arc::clone(&negotiations);
         let close_host_client_cell = Arc::clone(&host_client_cell);
         let close_host_reconnecting = Arc::clone(&host_reconnecting);
+        let close_host_stop = Arc::clone(&host_stop);
 
         let client = ClientBuilder::new(config.server_url.clone())
             .transport_type(TransportType::Websocket)
@@ -1279,6 +1330,11 @@ impl CloudHostTransport {
                 warn!(payload = ?payload, "cloud host: socket.io error");
             })
             .on("close", move |payload, _socket| {
+                if close_host_stop.load(Ordering::SeqCst) {
+                    // Deliberate shutdown (see CloudHostTransport::shutdown) --
+                    // this close was expected, do not reconnect.
+                    return;
+                }
                 if close_host_reconnecting.swap(true, Ordering::SeqCst) {
                     // A reconnect loop from a previous "close" is already running.
                     return;
@@ -1297,6 +1353,7 @@ impl CloudHostTransport {
                 let negotiations = Arc::clone(&close_negotiations);
                 let host_client_cell = Arc::clone(&close_host_client_cell);
                 let host_reconnecting = Arc::clone(&close_host_reconnecting);
+                let host_stop = Arc::clone(&close_host_stop);
                 std::thread::spawn(move || {
                     host_reconnect_loop(
                         client_id_allocator,
@@ -1309,6 +1366,7 @@ impl CloudHostTransport {
                         negotiations,
                         host_client_cell,
                         host_reconnecting,
+                        host_stop,
                     );
                 });
             })
@@ -1324,7 +1382,6 @@ impl CloudHostTransport {
     }
 
     /// Number of viewers currently attached to this host session.
-    #[allow(dead_code)]
     pub(crate) fn attached_viewer_count(&self) -> usize {
         self.viewers
             .lock()
@@ -1351,10 +1408,18 @@ fn host_reconnect_loop(
     negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>>,
     host_client_cell: Arc<Mutex<Option<RawClient>>>,
     host_reconnecting: Arc<AtomicBool>,
+    host_stop: Arc<AtomicBool>,
 ) {
     let mut delay = VIEWER_RECONNECT_INITIAL_DELAY;
     loop {
         std::thread::sleep(delay);
+
+        if host_stop.load(Ordering::SeqCst) {
+            // Shutdown requested while a retry was in flight/sleeping --
+            // stop trying to reconnect.
+            host_reconnecting.store(false, Ordering::SeqCst);
+            return;
+        }
 
         let attempt = CloudHostTransport::connect_attempt(
             Arc::clone(&client_id_allocator),
@@ -1367,6 +1432,7 @@ fn host_reconnect_loop(
             Arc::clone(&negotiations),
             Arc::clone(&host_client_cell),
             Arc::clone(&host_reconnecting),
+            Arc::clone(&host_stop),
         );
 
         match attempt {

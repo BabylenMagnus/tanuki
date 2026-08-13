@@ -1423,7 +1423,7 @@ impl ExperimentSetting {
             Self::SwitchAsciiInputSourceInPrefix => {
                 "switch to ascii input source in prefix (macOS)"
             }
-            Self::CloudHost => "register as Tanuki Cloud host on launch",
+            Self::CloudHost => "allow connections from tanukicode.ru",
         }
     }
 
@@ -1912,6 +1912,16 @@ pub struct AppState {
     /// Set when the headless server should ask attached clients to reload
     /// their client-local sound config from disk.
     pub request_client_config_reload: bool,
+    /// Set when the Settings UI's cloud-access toggle was saved and the
+    /// headless server should hot-attach/detach its own cloud relay
+    /// connection to match the new `cloud_host` value, without restarting.
+    /// Cleared by `HeadlessServer::drain_cloud_host_apply_request`.
+    pub request_cloud_host_apply: bool,
+    /// Live cloud relay status for the Settings UI: `None` while not
+    /// connected, `Some(viewer_count)` while connected. Kept in sync by
+    /// `HeadlessServer::sync_cloud_host_status`, since the underlying
+    /// `CloudHostTransport` lives on `HeadlessServer`, not here.
+    pub cloud_host_viewer_count: Option<usize>,
     /// Set when UI interaction requested a clipboard write that must be
     /// handled by the outer App/event loop instead of directly from AppState.
     pub request_clipboard_write: Option<Vec<u8>>,
@@ -2301,6 +2311,8 @@ impl AppState {
             request_submit_worktree_remove: false,
             request_reload_config: false,
             request_client_config_reload: false,
+            request_cloud_host_apply: false,
+            cloud_host_viewer_count: None,
             request_clipboard_write: None,
             creating_new_tab: false,
             requested_new_tab_name: None,

@@ -603,6 +603,8 @@ impl App {
             request_submit_worktree_remove: false,
             request_reload_config: false,
             request_client_config_reload: false,
+            request_cloud_host_apply: false,
+            cloud_host_viewer_count: None,
             request_clipboard_write: None,
             creating_new_tab: false,
             requested_new_tab_name: None,

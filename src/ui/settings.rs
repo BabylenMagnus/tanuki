@@ -484,8 +484,18 @@ fn render_settings_experiments(app: &AppState, frame: &mut Frame, area: Rect) {
             Style::default().fg(p.subtext0)
         };
         let row = Rect::new(list_area.x, list_area.y + idx as u16, list_area.width, 1);
+        let status_suffix = if setting == ExperimentSetting::CloudHost {
+            match app.cloud_host_viewer_count {
+                Some(0) => "  (connected — 0 viewers)".to_owned(),
+                Some(n) => format!("  (connected — {n} viewers)"),
+                None if setting.enabled(app) => "  (connecting…)".to_owned(),
+                None => String::new(),
+            }
+        } else {
+            String::new()
+        };
         frame.render_widget(
-            Paragraph::new(format!(" {} {marker}", setting.label())).style(style),
+            Paragraph::new(format!(" {} {marker}{status_suffix}", setting.label())).style(style),
             row,
         );
     }

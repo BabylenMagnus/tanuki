@@ -144,6 +144,11 @@ impl App {
             crate::config::upsert_section_bool(content, "remote", "cloud_host", enabled)
         }) {
             self.apply_config_from_disk(false);
+            // Ask the headless server to hot-attach/detach its cloud relay
+            // connection to match, right now, instead of only taking effect
+            // on the next `tanuki server` spawn -- see
+            // `HeadlessServer::drain_cloud_host_apply_request`.
+            self.state.request_cloud_host_apply = true;
         }
     }
 

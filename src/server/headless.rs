@@ -325,13 +325,22 @@ pub struct HeadlessServer {
     server_event_rx: mpsc::Receiver<ServerEvent>,
     /// Sender for server events (cloned for each client thread).
     server_event_tx: mpsc::Sender<ServerEvent>,
-    /// Cloud relay host connection, present only when this server was
-    /// started with `cloud_host: true`. Kept alive for the lifetime of the
-    /// server; not currently read after construction (viewer attach/detach
-    /// is driven entirely by its own background callback threads), hence
-    /// `#[allow(dead_code)]`.
-    #[allow(dead_code)]
+    /// Cloud relay host connection, present whenever cloud hosting is
+    /// currently active -- either because the server was started with
+    /// `cloud_host: true`, or because [`HeadlessServer::enable_cloud_host`]
+    /// was called afterwards from a live client toggle. Torn down via
+    /// [`HeadlessServer::disable_cloud_host`], not by dropping this field
+    /// directly (see `CloudHostTransport::shutdown`).
     cloud_host: Option<crate::remote::cloud::CloudHostTransport>,
+    /// Allocates client ids for cloud-relayed viewers, disjoint from
+    /// `next_client_id`'s local-socket namespace (see the comment where
+    /// this was previously inlined in `new_with_cloud_host`). Kept as a
+    /// field so [`HeadlessServer::enable_cloud_host`] can reuse the same
+    /// counter across repeated enable/disable cycles instead of restarting
+    /// it from 1,000,000,000 every time, which would risk colliding with
+    /// ids allocated during a previous cloud-host session that a
+    /// disconnecting viewer might still reference.
+    next_cloud_client_id: Arc<std::sync::atomic::AtomicU64>,
 }
 
 fn apply_terminal_attach_scroll(
@@ -513,19 +522,23 @@ impl HeadlessServer {
         #[cfg(not(unix))]
         let _ = api_tx;
 
+        // Cloud-relayed viewers get client ids from a namespace disjoint
+        // from the local listener's `next_client_id` counter (which starts
+        // at 1 and is mutated only from the main event loop thread). The
+        // cloud host allocates ids from a Socket.IO callback thread
+        // instead, so it cannot safely share that counter; a large fixed
+        // offset keeps the two id spaces from ever colliding in practice.
+        // Created once here regardless of `cloud_host`, and kept as a
+        // field, so a later `enable_cloud_host` call (from the runtime
+        // toggle) reuses the same counter rather than restarting it from
+        // the same offset every time. Revisit with a single shared atomic
+        // counter if/when local and cloud accept paths are unified.
+        let next_cloud_client_id = Arc::new(std::sync::atomic::AtomicU64::new(1_000_000_000));
+
         let cloud_host_transport = if cloud_host {
-            // Cloud-relayed viewers get client ids from a namespace disjoint
-            // from the local listener's `next_client_id` counter (which
-            // starts at 1 and is mutated only from the main event loop
-            // thread). The cloud host allocates ids from a Socket.IO
-            // callback thread instead, so it cannot safely share that
-            // counter; a large fixed offset keeps the two id spaces from
-            // ever colliding in practice. Revisit with a single shared
-            // atomic counter if/when local and cloud accept paths are
-            // unified.
-            let next_cloud_client_id = std::sync::atomic::AtomicU64::new(1_000_000_000);
+            let allocator = Arc::clone(&next_cloud_client_id);
             match crate::remote::cloud::CloudHostTransport::spawn(
-                move || next_cloud_client_id.fetch_add(1, Ordering::Relaxed),
+                move || allocator.fetch_add(1, Ordering::Relaxed),
                 server_event_tx.clone(),
                 should_quit.clone(),
             ) {
@@ -566,7 +579,38 @@ impl HeadlessServer {
             server_event_rx,
             server_event_tx,
             cloud_host: cloud_host_transport,
+            next_cloud_client_id,
         })
+    }
+
+    /// Hot-attaches the cloud relay connection to this already-running
+    /// server, without restarting it. No-op if cloud hosting is already
+    /// active. Mirrors the `cloud_host: true` branch of
+    /// [`HeadlessServer::new_with_cloud_host`], reusing the same client-id
+    /// allocator (see `next_cloud_client_id`'s doc comment) rather than a
+    /// fresh one, so ids stay unique across repeated enable/disable cycles.
+    pub(crate) fn enable_cloud_host(&mut self) -> io::Result<()> {
+        if self.cloud_host.is_some() {
+            return Ok(());
+        }
+        let allocator = Arc::clone(&self.next_cloud_client_id);
+        let transport = crate::remote::cloud::CloudHostTransport::spawn(
+            move || allocator.fetch_add(1, Ordering::Relaxed),
+            self.server_event_tx.clone(),
+            self.should_quit.clone(),
+        )?;
+        self.cloud_host = Some(transport);
+        Ok(())
+    }
+
+    /// Gracefully detaches the cloud relay connection, if one is active.
+    /// No-op if cloud hosting is already off. See
+    /// `CloudHostTransport::shutdown` for what "graceful" covers
+    /// (`term:host_bye`, heartbeat thread stopped, no auto-reconnect).
+    pub(crate) fn disable_cloud_host(&mut self) {
+        if let Some(transport) = self.cloud_host.take() {
+            transport.shutdown();
+        }
     }
 
     /// Runs the headless server event loop until shutdown.
@@ -732,6 +776,8 @@ impl HeadlessServer {
             self.cancel_inactive_pane_graphics_streams();
 
             self.drain_client_config_reload_request();
+            self.drain_cloud_host_apply_request();
+            self.sync_cloud_host_status();
             self.stream_host_mouse_capture_mode();
 
             self.app.sync_headless_animation_timer(now);
@@ -2568,6 +2614,56 @@ impl HeadlessServer {
         }
         self.app.state.request_client_config_reload = false;
         self.send_to_all_clients(ServerMessage::ReloadSoundConfig);
+    }
+
+    /// Applies a Settings-UI cloud-access toggle to this already-running
+    /// server: hot-attaches or detaches the cloud relay connection to match
+    /// `self.app.state.cloud_host`, without restarting. See
+    /// `App::save_cloud_host`, which sets the request flag right after
+    /// persisting the new value to the config file.
+    fn drain_cloud_host_apply_request(&mut self) {
+        if !self.app.state.request_cloud_host_apply {
+            return;
+        }
+        self.app.state.request_cloud_host_apply = false;
+        if self.app.state.cloud_host {
+            if let Err(err) = self.enable_cloud_host() {
+                warn!(err = %err, "failed to enable cloud host from Settings toggle");
+                // No inline pairing flow exists yet (see PM/features/
+                // spelflow-tanuki-terminal-cloud-toggle-tasks.md, "Inline
+                // device pairing" -- deferred). Surface a specific,
+                // actionable toast for the unpaired case so the user isn't
+                // left with a silently-failed toggle and only a log line.
+                let context = if err.kind() == io::ErrorKind::NotFound {
+                    "device not paired — run the Legion installer, then retry".to_string()
+                } else {
+                    format!("connection failed: {err}")
+                };
+                self.app.state.toast = Some(crate::app::state::ToastNotification {
+                    kind: crate::app::state::ToastKind::NeedsAttention,
+                    title: "cloud access failed".to_string(),
+                    context,
+                    position: None,
+                    target: None,
+                });
+                self.app.state.cloud_host = false;
+            }
+        } else {
+            self.disable_cloud_host();
+        }
+    }
+
+    /// Keeps `AppState::cloud_host_viewer_count` (read by the Settings UI's
+    /// status line) in sync with the live `CloudHostTransport`. Cheap
+    /// enough (a mutex lock + `len()`) to call unconditionally on every
+    /// main loop iteration, unlike `drain_cloud_host_apply_request` which
+    /// only fires on an explicit toggle -- viewer count changes on its own
+    /// as viewers attach/detach, with no toggle involved.
+    fn sync_cloud_host_status(&mut self) {
+        self.app.state.cloud_host_viewer_count = self
+            .cloud_host
+            .as_ref()
+            .map(crate::remote::cloud::CloudHostTransport::attached_viewer_count);
     }
 
     /// Encodes a server message into a length-prefixed frame.
@@ -4904,6 +5000,7 @@ mod tests {
             server_event_rx,
             server_event_tx,
             cloud_host: None,
+            next_cloud_client_id: Arc::new(std::sync::atomic::AtomicU64::new(1_000_000_000)),
         }
     }
 
