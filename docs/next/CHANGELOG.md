@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.84] - 2026-08-14
+
 ### Added
 - Add configurable outer terminal window title support and bump version to 0.1.83
 - Add diagnostics for client frame handling and logging recovery
