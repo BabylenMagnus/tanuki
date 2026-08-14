@@ -1352,6 +1352,38 @@ fn run_client_with_mode(
 /// baseline plus a handful of changed row segments) -- once `frame_data` is
 /// assembled, both cases blit identically.
 fn write_semantic_frame(state: &mut ClientState, frame_data: FrameData) {
+    // Diagnostic wrapper for a still-unexplained client-death bug (2026-08-14):
+    // the process disappears mid-session with no panic logged and no Windows
+    // crash report, always during heavy frame traffic. If the frame-apply
+    // path itself panics, catch it here so we get a logged panic message and
+    // a dropped frame instead of a silent process death indistinguishable
+    // from whatever is actually happening. Entry/exit are `debug!` (off by
+    // default, enable via `TANUKI_LOG=tanuki=debug`) so the last line before
+    // a future crash pinpoints exactly which frame never finished.
+    tracing::debug!(event = "client.render.frame.start", bytes = frame_data.width as u32 * frame_data.height as u32, "applying frame");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        write_semantic_frame_inner(state, frame_data);
+    }));
+    match result {
+        Ok(()) => {
+            tracing::debug!(event = "client.render.frame.end", "frame applied");
+        }
+        Err(payload) => {
+            let panic_message = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "non-string panic payload".to_string());
+            tracing::error!(
+                event = "client.render.frame.panic",
+                panic = %panic_message,
+                "write_semantic_frame panicked; frame dropped, client kept running"
+            );
+        }
+    }
+}
+
+fn write_semantic_frame_inner(state: &mut ClientState, frame_data: FrameData) {
     let frame_data = if state.draw_host_cursor {
         render_ansi::frame_with_drawn_cursor(frame_data)
     } else {
@@ -1388,8 +1420,16 @@ fn write_semantic_frame(state: &mut ClientState, frame_data: FrameData) {
     } else {
         &[]
     };
+    tracing::debug!(
+        event = "client.render.frame.write_start",
+        bytes = encoded.bytes.len(),
+        graphics = graphics.len(),
+        force_full,
+        "writing encoded frame to stdout"
+    );
     let _ = write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics, force_full);
     let _ = stdout.flush();
+    tracing::debug!(event = "client.render.frame.write_end", "encoded frame written");
     state.blit_encoder.commit(frame_data, encoded);
 }
 

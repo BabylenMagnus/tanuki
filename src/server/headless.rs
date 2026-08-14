@@ -4066,6 +4066,19 @@ impl HeadlessServer {
                 ws_idx,
                 info.id,
             ) else {
+                // Diagnostic for a still-open bug (2026-08-14, see
+                // tanuki-terminal-session-restore-render-crash in the wiki):
+                // this fallback fires at ~100% on session restores dense
+                // with claude --resume panes. `debug!` (off by default) so
+                // enabling TANUKI_LOG=tanuki=debug next time this happens
+                // shows exactly which pane/workspace never got a registered
+                // runtime, instead of just a counter increment.
+                tracing::debug!(
+                    event = "retained_fallback.missing_runtime.detail",
+                    ws_idx,
+                    pane_id = ?info.id,
+                    "pane has no registered TerminalRuntime"
+                );
                 retained_fallback!("missing_runtime");
             };
             match runtime.collect_dirty_patch(info.inner_rect.width, info.inner_rect.height) {

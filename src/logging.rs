@@ -454,9 +454,16 @@ struct RotatingFileGuard {
 
 impl Write for RotatingFileGuard {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let Ok(mut state) = self.state.lock() else {
-            return Ok(buf.len());
-        };
+        // Recover from a poisoned lock instead of silently dropping the
+        // write: if some other thread ever panics while holding this lock
+        // (e.g. inside a nested tracing call), a poisoned-lock write would
+        // otherwise permanently no-op every subsequent log line for the
+        // rest of the process -- including the panic hook's own "PANIC: ..."
+        // line for that very panic.
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.disabled {
             return Ok(buf.len());
         }
@@ -481,9 +488,10 @@ impl Write for RotatingFileGuard {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let Ok(mut state) = self.state.lock() else {
-            return Ok(());
-        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.disabled {
             return Ok(());
         }
