@@ -1,14 +1,24 @@
 {
-  "version": "0.1.84",
+  "version": "0.1.85",
   "protocol": 18,
-  "notes": "### Added\n- Add configurable outer terminal window title support and bump version to 0.1.83\n- Add diagnostics for client frame handling and logging recovery\n- Add configurable outer terminal window title support and update version to 0.1.82\n- Add configurable outer terminal window title support\n- Bump version to 0.1.81 and update changelog entries\n- Add cloud host apply request for immediate relay updates\n\n### Changed\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.80 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.79 and update changelog\n- Populate Unreleased changelog from commits",
+  "notes": "### Added\n- Persist full argv in agent resume and add regression tests",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.84/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.84/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.84/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.84/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.85": {
+      "notes": "### Added\n- Persist full argv in agent resume and add regression tests",
+      "protocol": 18,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.85/tanuki-macos-aarch64"
+      }
+    },
     "0.1.84": {
       "notes": "### Added\n- Add configurable outer terminal window title support and bump version to 0.1.83\n- Add diagnostics for client frame handling and logging recovery\n- Add configurable outer terminal window title support and update version to 0.1.82\n- Add configurable outer terminal window title support\n- Bump version to 0.1.81 and update changelog entries\n- Add cloud host apply request for immediate relay updates\n\n### Changed\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.80 and update changelog\n- Populate Unreleased changelog from commits\n- Bump version to 0.1.79 and update changelog\n- Populate Unreleased changelog from commits",
       "protocol": 18,
