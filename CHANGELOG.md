@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Persist full argv in agent resume and add regression tests
+
 ## [0.1.84] - 2026-08-14
 
 ### Added
