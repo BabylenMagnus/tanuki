@@ -319,6 +319,14 @@ const DEFAULT_CONFIG: &str = r##"# tanuki configuration
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false
 
+# Title tanuki_terminal writes to the terminal it runs in, which is what window
+# managers show in title, tab, and group bars. Tokens are {hostname}, {workspace},
+# {tab}, {pane}, and {terminal_title}; {{ and }} are literal braces.
+# The title renders on the tanuki_terminal server, so {hostname} names the host the
+# panes run on even when attaching from a remote client.
+# Set to "" to leave the outer terminal title alone.
+# window_title = "{hostname}: {workspace}"
+
 # Agent panel ordering: "spaces" (grouped by space) or "priority" (attention queue).
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = "spaces"
