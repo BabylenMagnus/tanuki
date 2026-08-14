@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Add locks to prevent concurrent access in config tests
+
 ## [0.1.85] - 2026-08-14
 
 ### Added
