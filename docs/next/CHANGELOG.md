@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+- Add configurable outer terminal window title support and bump version to 0.1.83
+- Add diagnostics for client frame handling and logging recovery
+- Add configurable outer terminal window title support and update version to 0.1.82
+- Add configurable outer terminal window title support
+- Bump version to 0.1.81 and update changelog entries
+- Add cloud host apply request for immediate relay updates
+
+### Changed
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.80 and update changelog
+- Populate Unreleased changelog from commits
+- Bump version to 0.1.79 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.83] - 2026-08-14
 
 ### Added
