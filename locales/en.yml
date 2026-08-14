@@ -37,6 +37,22 @@ settings.sound.description:
   en: play sounds when agents change state in background
   ru: проигрывать звук при смене статуса агента в фоне
   ru-pre1918: проигрывать звукъ при смѣнѣ статуса агента въ фоне
+settings.indicators.title:
+  en: agent status indicators
+  ru: индикаторы статуса агентов
+  ru-pre1918: индикаторы статуса агентовъ
+settings.indicators.description:
+  en: choose color dots or distinct symbols for each state
+  ru: выберите цветные точки или отдельные символы для каждого статуса
+  ru-pre1918: выберите цвѣтные точки или отдѣльные символы для каждаго статуса
+settings.indicators.dots:
+  en: color dots
+  ru: цветные точки
+  ru-pre1918: цвѣтные точки
+settings.indicators.symbols:
+  en: distinct symbols
+  ru: отдельные символы
+  ru-pre1918: отдѣльные символы
 settings.toast.title:
   en: notification popups
   ru: всплывающие уведомления
@@ -99,6 +115,10 @@ settings.tab.theme:
   en: theme
   ru: тема
   ru-pre1918: тема
+settings.tab.indicators:
+  en: indicators
+  ru: индикаторы
+  ru-pre1918: индикаторы
 settings.tab.sound:
   en: sound
   ru: звук

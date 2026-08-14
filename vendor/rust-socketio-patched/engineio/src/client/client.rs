@@ -344,9 +344,21 @@ impl Client {
                     self.emit(Packet::new(PacketId::Pong, Bytes::new()))?;
                 }
                 PacketId::Pong => {
-                    // this will never happen as the pong packet is
-                    // only sent by the client
-                    unreachable!();
+                    // Upstream assumes a Pong packet can never arrive from the
+                    // server (only the client sends Pong, in reply to the
+                    // server's Ping) and treats it as unreachable. The async
+                    // client (`asynchronous/async_socket.rs`) already
+                    // disagrees with this assumption in practice -- it
+                    // handles an incoming `Pong` without panicking (returning
+                    // a recoverable `Err(Error::InvalidPacket())` instead).
+                    // Observed live against `tanuki_api`'s Socket.IO server
+                    // on a cloud-host relay connection: this `unreachable!()`
+                    // panicked the sync client's poll thread, taking down
+                    // the whole host process the moment cloud access was
+                    // enabled. Same bug class, same fix as the sibling
+                    // `PacketId::Open` case above: ignore it instead of
+                    // panicking -- there is nothing this packet needs to
+                    // trigger on the client side.
                 }
                 PacketId::Noop => (),
             }

@@ -6,7 +6,7 @@ use crate::{
         state::{AppState, ExperimentSetting, KeybindSetting, SettingsSection, THEME_NAMES},
         App, Mode,
     },
-    config::ToastDelivery,
+    config::{StatusIndicatorStyle, ToastDelivery},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +14,7 @@ use crate::{
 #[allow(clippy::enum_variant_names)]
 pub(super) enum SettingsAction {
     SaveTheme(String),
+    SaveStatusIndicators(StatusIndicatorStyle),
     SaveSound(bool),
     SaveToastDelivery(ToastDelivery),
     SaveAgentBorderLabels(bool),
@@ -48,6 +49,7 @@ impl App {
         if let Some(action) = update_settings_state(&mut self.state, key) {
             match action {
                 SettingsAction::SaveTheme(name) => self.save_theme(&name),
+                SettingsAction::SaveStatusIndicators(style) => self.save_status_indicators(style),
                 SettingsAction::SaveSound(enabled) => self.save_sound(enabled),
                 SettingsAction::SaveToastDelivery(delivery) => self.save_toast_delivery(delivery),
                 SettingsAction::SaveAgentBorderLabels(enabled) => {
@@ -87,6 +89,21 @@ fn current_theme_index(theme_name: &str) -> usize {
         .iter()
         .position(|name| normalize_theme_name(name) == normalized)
         .unwrap_or(0)
+}
+
+fn status_indicator_index(style: StatusIndicatorStyle) -> usize {
+    match style {
+        StatusIndicatorStyle::Dots => 0,
+        StatusIndicatorStyle::Symbols => 1,
+    }
+}
+
+fn status_indicator_for_index(idx: usize) -> StatusIndicatorStyle {
+    if idx == 0 {
+        StatusIndicatorStyle::Dots
+    } else {
+        StatusIndicatorStyle::Symbols
+    }
 }
 
 fn toast_delivery_index(delivery: ToastDelivery) -> usize {
@@ -196,8 +213,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 }
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Sound;
-                state.settings.list.selected = usize::from(!state.sound_enabled());
+                state.settings.section = SettingsSection::Indicators;
+                state.settings.list.selected = status_indicator_index(state.status_indicators);
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                 state.settings.section = SettingsSection::Experiments;
@@ -208,6 +225,30 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 Some(super::modal::ModalAction::Close) => cancel_settings(state),
                 _ => {}
             },
+        },
+        SettingsSection::Indicators => match key.code {
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                state.settings.list.selected = 1 - state.settings.list.selected.min(1);
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let style = status_indicator_for_index(state.settings.list.selected);
+                return Some(SettingsAction::SaveStatusIndicators(style));
+            }
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                state.settings.section = SettingsSection::Theme;
+                state.settings.list.selected = current_theme_index(&state.theme_name);
+            }
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                state.settings.section = SettingsSection::Sound;
+                state.settings.list.selected = usize::from(!state.sound_enabled());
+            }
+            _ => {
+                if let Some(super::modal::ModalAction::Close) =
+                    super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS)
+                {
+                    cancel_settings(state);
+                }
+            }
         },
         SettingsSection::Sound => match key.code {
             KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
@@ -222,8 +263,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 state.settings.list.selected = toast_delivery_index(state.toast_delivery());
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::Theme;
-                state.settings.list.selected = current_theme_index(&state.theme_name);
+                state.settings.section = SettingsSection::Indicators;
+                state.settings.list.selected = status_indicator_index(state.status_indicators);
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -446,6 +487,7 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
     state.settings.section = section;
     state.settings.list.selected = match section {
         SettingsSection::Theme => current_theme_index(&state.theme_name),
+        SettingsSection::Indicators => status_indicator_index(state.status_indicators),
         SettingsSection::Sound => usize::from(!state.sound_enabled()),
         SettingsSection::Toast => toast_delivery_index(state.toast_delivery()),
         SettingsSection::PaneLabels => usize::from(!state.agent_border_labels_enabled()),
@@ -527,7 +569,7 @@ impl AppState {
                 let idx = scroll + (row - area.y) as usize;
                 (idx < THEME_NAMES.len()).then_some(idx)
             }
-            SettingsSection::Sound => {
+            SettingsSection::Indicators | SettingsSection::Sound => {
                 let list_y = area.y + 3;
                 if row >= list_y && row < list_y + 2 {
                     Some((row - list_y) as usize)
@@ -593,6 +635,9 @@ impl AppState {
                     self.settings.section = section;
                     self.settings.list.select(match section {
                         SettingsSection::Theme => current_theme_index(&self.theme_name),
+                        SettingsSection::Indicators => {
+                            status_indicator_index(self.status_indicators)
+                        }
                         SettingsSection::Sound => usize::from(!self.sound_enabled()),
                         SettingsSection::Toast => toast_delivery_index(self.toast_delivery()),
                         SettingsSection::PaneLabels => {
@@ -617,6 +662,9 @@ impl AppState {
                             preview_selected_theme(self);
                             None
                         }
+                        SettingsSection::Indicators => Some(SettingsAction::SaveStatusIndicators(
+                            status_indicator_for_index(idx),
+                        )),
                         SettingsSection::Sound => {
                             let enabled = idx == 0;
                             Some(SettingsAction::SaveSound(enabled))
@@ -689,7 +737,7 @@ mod tests {
         );
         assert_eq!(
             state.settings.section,
-            crate::app::state::SettingsSection::Sound
+            crate::app::state::SettingsSection::Indicators
         );
 
         update_settings_state(

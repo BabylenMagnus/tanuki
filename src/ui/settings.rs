@@ -17,7 +17,7 @@ use crate::{
         state::{ExperimentSetting, KeybindSetting, Palette},
         AppState,
     },
-    config::ToastDelivery,
+    config::{StatusIndicatorStyle, ToastDelivery},
 };
 
 // Minimum needed to fit the longest tab strip (ru-pre1918, all tabs + update badge)
@@ -120,6 +120,24 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
     match app.settings.section {
         SettingsSection::Theme => {
             render_settings_theme(app, frame, content_area);
+        }
+        SettingsSection::Indicators => {
+            let dots_label = format!("{}  ● ● ● ○ ·", t!("settings.indicators.dots"));
+            let symbols_label = format!("{}  × ◐ ✓ ○ ·", t!("settings.indicators.symbols"));
+            render_modal_choice_list(
+                frame,
+                content_area,
+                &t!("settings.indicators.title"),
+                &t!("settings.indicators.description"),
+                &[
+                    (dots_label.as_str(), StatusIndicatorStyle::Dots),
+                    (symbols_label.as_str(), StatusIndicatorStyle::Symbols),
+                ],
+                app.status_indicators,
+                app.settings.list.selected,
+                p,
+                1,
+            );
         }
         SettingsSection::Sound => {
             render_settings_toggle(
