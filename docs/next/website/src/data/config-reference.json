@@ -705,6 +705,16 @@
           ]
         },
         {
+          "key": "ui.status_indicators",
+          "type": "enum",
+          "default": "\"dots\"",
+          "description": "Agent status indicator style. \"dots\" shows compact colored dots; \"symbols\" shows distinct static glyphs per state for colorblind accessibility.",
+          "values": [
+            "dots",
+            "symbols"
+          ]
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",
