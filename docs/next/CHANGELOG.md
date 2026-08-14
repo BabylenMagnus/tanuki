@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.88] - 2026-08-14
+
 ### Added
 - Add status indicators configuration and functionality
 

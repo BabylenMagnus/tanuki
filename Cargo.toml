@@ -1,6 +1,6 @@
 [package]
 name = "tanuki"
-version = "0.1.87"
+version = "0.1.88"
 edition = "2021"
 build = "build.rs"
 description = "terminal workspace manager for AI coding agents"
