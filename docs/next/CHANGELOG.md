@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Add status indicators configuration and functionality
+
+### Changed
+- Update version to 0.1.87 and add changelog entry
+- Populate Unreleased changelog from commits
+
 ## [0.1.87] - 2026-08-14
 
 ### Added
