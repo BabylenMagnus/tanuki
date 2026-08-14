@@ -664,6 +664,33 @@ mod tests {
     }
 
     #[test]
+    fn capture_tab_keeps_known_launch_argv_with_extra_flags() {
+        let mut state = state_with_workspaces(&["launch-argv-snapshot"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let argv = vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "claude-session".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .launch_argv = Some(argv.clone());
+
+        // Empty registry: if capture ever fell back to reading a live
+        // process's argv here, it would find nothing and silently drop the
+        // already-known flags. It must prefer the known value instead.
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+        assert_eq!(pane.launch_argv.as_deref(), Some(argv.as_slice()));
+    }
+
+    #[test]
     fn round_trip_empty_session() {
         let snap = SessionSnapshot {
             version: SNAPSHOT_VERSION,

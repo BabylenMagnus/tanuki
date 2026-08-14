@@ -664,4 +664,42 @@ mod tests {
 
         let _ = fs::remove_dir_all(dir);
     }
+
+    // Regression test for the 2026-08-14 client-death investigation (see
+    // wiki: tanuki-terminal-session-restore-render-crash). Before this fix,
+    // write()/flush() bailed out silently on a poisoned lock -- meaning a
+    // single panic anywhere while holding this mutex (e.g. inside a nested
+    // tracing call) would permanently no-op every future log line for the
+    // rest of the process, including the panic hook's own "PANIC: ..." line
+    // for that very panic. Confirm a poisoned lock now recovers instead.
+    #[test]
+    fn write_recovers_after_the_shared_lock_is_poisoned() {
+        let path = temp_log_path("poison-recovery");
+        let dir = path.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&dir).unwrap();
+
+        let writer = RotatingFileMakeWriter::new(dir.clone(), "tanuki.log", 0, 0).unwrap();
+        let state = Arc::clone(&writer.state);
+
+        // Poison the mutex: panic on a different thread while holding the lock.
+        let poisoner = std::thread::spawn(move || {
+            let _guard = state.lock().unwrap();
+            panic!("intentionally poisoning the logging mutex for the test");
+        });
+        assert!(poisoner.join().is_err());
+        assert!(writer.state.is_poisoned());
+
+        // A write through a fresh guard on the same (now-poisoned) shared
+        // state must still actually reach disk, not silently no-op.
+        let mut guard = writer.make_writer();
+        guard.write_all(b"still logging after poison").unwrap();
+        guard.flush().unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "still logging after poison"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
 }

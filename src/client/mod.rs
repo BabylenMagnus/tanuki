@@ -2324,6 +2324,7 @@ fn init_logging() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::CellData;
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
 
@@ -3141,5 +3142,62 @@ mod tests {
         unsafe {
             std::env::remove_var("SSH_CONNECTION");
         }
+    }
+
+    fn test_client_state() -> ClientState {
+        ClientState {
+            blit_encoder: render_ansi::BlitEncoder::new(),
+            mouse_capture_active: false,
+            reported_size: (80, 24),
+            sound_config: crate::config::SoundConfig::default(),
+            kitty_graphics_enabled: false,
+            attach_escape: None,
+            #[cfg(unix)]
+            mouse_scroll_lines: 3,
+            #[cfg(unix)]
+            remote_image_paste_key: None,
+            redraw_on_focus_gained: false,
+            draw_host_cursor: false,
+        }
+    }
+
+    // Regression test for the 2026-08-14 client-death investigation (see
+    // wiki: tanuki-terminal-session-restore-render-crash). `FrameData`
+    // documents "cells.len() must equal width * height" but nothing
+    // enforces it at the type level, and `render_ansi::write_all_cells`
+    // indexes `frame.cells[idx]` for every row/col with no bounds check.
+    // Confirm both halves: the malformed frame really does panic the
+    // unwrapped encode path (so this test would be vacuous otherwise), and
+    // `write_semantic_frame`'s `catch_unwind` wrapper keeps that panic from
+    // taking the whole client down.
+    fn malformed_frame() -> FrameData {
+        FrameData {
+            cells: vec![CellData {
+                symbol: String::new(),
+                fg: 0,
+                bg: 0,
+                modifier: 0,
+                skip: false,
+                hyperlink: None,
+            }], // only 1 cell
+            width: 2,
+            height: 2, // claims 4 cells -- out of bounds on the 2nd row
+            cursor: None,
+            hyperlinks: Vec::new(),
+            graphics: Vec::new(),
+            is_full: true, // forces the unconditional write_all_cells path
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn malformed_frame_data_panics_the_unwrapped_encode_path() {
+        write_semantic_frame_inner(&mut test_client_state(), malformed_frame());
+    }
+
+    #[test]
+    fn write_semantic_frame_survives_malformed_frame_data() {
+        // Must return normally, not propagate the inner panic.
+        write_semantic_frame(&mut test_client_state(), malformed_frame());
     }
 }

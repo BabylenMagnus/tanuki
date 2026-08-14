@@ -361,7 +361,7 @@ impl Client {
         self.socket.is_connected()
     }
 
-    pub fn iter(&self) -> Iter {
+    pub fn iter(&self) -> Iter<'_> {
         Iter { socket: self }
     }
 }

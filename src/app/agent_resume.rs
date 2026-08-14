@@ -279,6 +279,12 @@ impl App {
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
             terminal.respawn_shell_on_exit = false;
+            // Record the exact argv we just typed into the shell so the next
+            // snapshot doesn't have to rediscover it by reading the live
+            // child process's memory (PEB on Windows), which can fail
+            // transiently and silently drop flags like
+            // `--dangerously-skip-permissions` across restarts.
+            terminal.launch_argv = Some(plan.argv);
         }
         true
     }
@@ -443,6 +449,80 @@ mod tests {
                 .contains(marker),
             "deferred restore should inject the resume argv into the restored shell"
         );
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+    }
+
+    // Regression test for the 2026-08-14 launch-argv loss investigation
+    // (see wiki: tanuki-terminal-session-restore-launch-argv-research).
+    // `start_pending_agent_resume` types the merged resume command
+    // (including extra flags like `--dangerously-skip-permissions`) into a
+    // fresh shell, but used to forget that argv afterwards -- leaving
+    // `TerminalState.launch_argv` at `None` and forcing the next snapshot
+    // to rediscover it by reading the live child process's memory, which
+    // can fail transiently and silently drop the flags for good. Confirm
+    // the plan's full argv is now recorded directly.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pending_agent_resume_persists_full_argv_including_extra_flags() {
+        let mut app = test_app();
+        let workspace = crate::workspace::Workspace::test_new("restored");
+        let pane_id = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.terminal_id(pane_id).cloned().unwrap();
+        let pane_infos = workspace.tabs[0]
+            .layout
+            .panes(ratatui::layout::Rect::new(0, 0, 100, 30));
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 100, 30);
+        app.state.view.pane_infos = pane_infos;
+        app.state.host_terminal_theme = crate::terminal_theme::TerminalTheme {
+            foreground: Some(crate::terminal_theme::RgbColor {
+                r: 220,
+                g: 220,
+                b: 220,
+            }),
+            background: Some(crate::terminal_theme::RgbColor {
+                r: 20,
+                g: 20,
+                b: 20,
+            }),
+        };
+
+        let argv = vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "claude-session".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            agent: "claude".into(),
+            argv: argv.clone(),
+            dedupe_key: "tanuki:claude\0claude\0Id\0claude-session".into(),
+        });
+
+        assert!(app.start_pending_agent_resumes(false));
+        assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+
+        let terminal = app
+            .state
+            .terminals
+            .get(&terminal_id)
+            .expect("terminal should survive launch");
+        assert_eq!(
+            terminal.launch_argv.as_deref(),
+            Some(argv.as_slice()),
+            "the argv actually used to launch the agent must be persisted, \
+             not rediscovered later via a fragile live-process read"
+        );
+        assert!(terminal.pending_agent_resume_plan.is_none());
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
