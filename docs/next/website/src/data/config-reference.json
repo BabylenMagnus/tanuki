@@ -689,6 +689,12 @@
           "description": "Hide the tab row when the workspace has one tab."
         },
         {
+          "key": "ui.window_title",
+          "type": "string",
+          "default": "\"{hostname}: {workspace}\"",
+          "description": "Format for the outer terminal window title. Empty leaves the title alone."
+        },
+        {
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",

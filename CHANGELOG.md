@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.83] - 2026-08-14
+
 ### Added
 - Add configurable outer terminal window title support
 - Bump version to 0.1.81 and update changelog entries
