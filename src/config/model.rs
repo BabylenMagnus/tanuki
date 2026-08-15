@@ -566,6 +566,14 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     resize_mode: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    resize_pane_left: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resize_pane_down: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resize_pane_up: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resize_pane_right: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     equalize_splits: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     toggle_sidebar: Option<BindingConfig>,
@@ -646,6 +654,10 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(close_pane);
         apply_field!(zoom);
         apply_field!(resize_mode);
+        apply_field!(resize_pane_left);
+        apply_field!(resize_pane_down);
+        apply_field!(resize_pane_up);
+        apply_field!(resize_pane_right);
         apply_field!(equalize_splits);
         apply_field!(toggle_sidebar);
         apply_field!(indexed);
@@ -747,6 +759,10 @@ impl KeysConfig {
         copy_effective_action_field!(close_pane, keybinds.close_pane);
         copy_effective_action_field!(zoom, keybinds.zoom);
         copy_effective_action_field!(resize_mode, keybinds.resize_mode);
+        copy_effective_action_field!(resize_pane_left, keybinds.resize_pane_left);
+        copy_effective_action_field!(resize_pane_down, keybinds.resize_pane_down);
+        copy_effective_action_field!(resize_pane_up, keybinds.resize_pane_up);
+        copy_effective_action_field!(resize_pane_right, keybinds.resize_pane_right);
         copy_effective_action_field!(equalize_splits, keybinds.equalize_splits);
         copy_effective_action_field!(toggle_sidebar, keybinds.toggle_sidebar);
         copy_user_field!(indexed);

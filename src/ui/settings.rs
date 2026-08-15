@@ -576,8 +576,40 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(search_line), search_area);
 
     let filtered = KeybindSetting::filtered(&app.settings.keybind_search);
+    let query = app.settings.keybind_search.to_lowercase();
+    let row_matches = |label: &str, value: &str| {
+        label.to_lowercase().contains(&query) || value.to_lowercase().contains(&query)
+    };
 
-    if filtered.is_empty() && app.keybinds.custom_commands.is_empty() {
+    let workspace_label = t!("settings.keybinds.switch_workspace").to_string();
+    let workspace_value = indexed_keybind_label(&app.keybinds.switch_workspace);
+    let workspace_matches = row_matches(&workspace_label, &workspace_value);
+
+    let focus_agent_label = t!("settings.keybinds.focus_agent").to_string();
+    let focus_agent_value = indexed_keybind_label(&app.keybinds.focus_agent);
+    let focus_agent_matches = row_matches(&focus_agent_label, &focus_agent_value);
+
+    let switch_tab_label = t!("settings.keybinds.switch_tab").to_string();
+    let switch_tab_value = indexed_keybind_label(&app.keybinds.switch_tab);
+    let switch_tab_matches = row_matches(&switch_tab_label, &switch_tab_value);
+
+    let matching_custom_commands: Vec<_> = app
+        .keybinds
+        .custom_commands
+        .iter()
+        .filter(|command| {
+            let description = command
+                .description
+                .clone()
+                .unwrap_or_else(|| command.command.clone());
+            row_matches(&description, &command.label)
+        })
+        .collect();
+
+    let readonly_visible =
+        workspace_matches || focus_agent_matches || switch_tab_matches || !matching_custom_commands.is_empty();
+
+    if filtered.is_empty() && !readonly_visible {
         frame.render_widget(
             Paragraph::new(format!(" {}", t!("settings.keybinds.no_matches")))
                 .style(Style::default().fg(p.overlay1)),
@@ -622,58 +654,48 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
     // single-key-capture list above, so they're shown as read-only reference
     // rows rather than folded into the selectable/editable set -- matching
     // how the old standalone keybind-help overlay displayed them before it
-    // was unified into this tab. Only shown with no active search filter.
-    if app.settings.keybind_search.is_empty() {
+    // was unified into this tab. Each row participates in the search filter
+    // individually so a query can still surface it (e.g. searching "tab"
+    // should find switch_tab even though it isn't in the editable list above).
+    if workspace_matches || focus_agent_matches || switch_tab_matches {
         items.push(ListItem::new(Line::from(Span::styled(
             format!(" {}", t!("settings.keybinds.workspaces_tabs_readonly")),
             header_style,
         ))));
-        items.push(ListItem::new(Line::from(vec![
-            Span::raw(format!(
-                "   {:<22}",
-                t!("settings.keybinds.switch_workspace").to_string()
-            )),
-            Span::styled(
-                indexed_keybind_label(&app.keybinds.switch_workspace),
-                Style::default().fg(p.overlay1),
-            ),
-        ])));
-        items.push(ListItem::new(Line::from(vec![
-            Span::raw(format!(
-                "   {:<22}",
-                t!("settings.keybinds.focus_agent").to_string()
-            )),
-            Span::styled(
-                indexed_keybind_label(&app.keybinds.focus_agent),
-                Style::default().fg(p.overlay1),
-            ),
-        ])));
-        items.push(ListItem::new(Line::from(vec![
-            Span::raw(format!(
-                "   {:<22}",
-                t!("settings.keybinds.switch_tab").to_string()
-            )),
-            Span::styled(
-                indexed_keybind_label(&app.keybinds.switch_tab),
-                Style::default().fg(p.overlay1),
-            ),
-        ])));
+        if workspace_matches {
+            items.push(ListItem::new(Line::from(vec![
+                Span::raw(format!("   {:<22}", workspace_label)),
+                Span::styled(workspace_value, Style::default().fg(p.overlay1)),
+            ])));
+        }
+        if focus_agent_matches {
+            items.push(ListItem::new(Line::from(vec![
+                Span::raw(format!("   {:<22}", focus_agent_label)),
+                Span::styled(focus_agent_value, Style::default().fg(p.overlay1)),
+            ])));
+        }
+        if switch_tab_matches {
+            items.push(ListItem::new(Line::from(vec![
+                Span::raw(format!("   {:<22}", switch_tab_label)),
+                Span::styled(switch_tab_value, Style::default().fg(p.overlay1)),
+            ])));
+        }
+    }
 
-        if !app.keybinds.custom_commands.is_empty() {
-            items.push(ListItem::new(Line::from(Span::styled(
-                format!(" {}", t!("settings.keybinds.custom_readonly")),
-                header_style,
-            ))));
-            for command in &app.keybinds.custom_commands {
-                let description = command
-                    .description
-                    .clone()
-                    .unwrap_or_else(|| command.command.clone());
-                items.push(ListItem::new(Line::from(vec![
-                    Span::raw(format!("   {:<22}", description)),
-                    Span::styled(command.label.clone(), Style::default().fg(p.overlay1)),
-                ])));
-            }
+    if !matching_custom_commands.is_empty() {
+        items.push(ListItem::new(Line::from(Span::styled(
+            format!(" {}", t!("settings.keybinds.custom_readonly")),
+            header_style,
+        ))));
+        for command in matching_custom_commands {
+            let description = command
+                .description
+                .clone()
+                .unwrap_or_else(|| command.command.clone());
+            items.push(ListItem::new(Line::from(vec![
+                Span::raw(format!("   {:<22}", description)),
+                Span::styled(command.label.clone(), Style::default().fg(p.overlay1)),
+            ])));
         }
     }
 
@@ -809,5 +831,55 @@ mod tests {
             .collect::<String>();
 
         assert!(rendered.contains("switch to ascii input source in prefix (macOS) [✓]"));
+    }
+
+    #[test]
+    fn keybinds_search_surfaces_matching_readonly_indexed_rows() {
+        let mut app = AppState::test_new();
+        app.settings.section = SettingsSection::Keybinds;
+        app.settings.keybind_search = "tab".to_string();
+        app.mode = Mode::Settings;
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(80, 24)).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_settings_overlay(&app, frame, Rect::new(0, 0, 80, 24)))
+            .expect("settings overlay should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains(t!("settings.keybinds.switch_tab").as_ref()));
+        assert!(!rendered.contains(t!("settings.keybinds.switch_workspace").as_ref()));
+        assert!(!rendered.contains(t!("settings.keybinds.focus_agent").as_ref()));
+    }
+
+    #[test]
+    fn keybinds_search_hides_readonly_indexed_rows_without_a_match() {
+        let mut app = AppState::test_new();
+        app.settings.section = SettingsSection::Keybinds;
+        app.settings.keybind_search = "zzz_no_such_keybind".to_string();
+        app.mode = Mode::Settings;
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(80, 24)).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_settings_overlay(&app, frame, Rect::new(0, 0, 80, 24)))
+            .expect("settings overlay should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains(t!("settings.keybinds.no_matches").as_ref()));
     }
 }

@@ -49,6 +49,10 @@ use super::{ClipboardImage, ForegroundJob, Signal};
 const STILL_ACTIVE: u32 = 259;
 const FOREGROUND_PROCESS_SNAPSHOT_CACHE_TTL: Duration = Duration::from_millis(250);
 
+pub(crate) fn terminal_title_for_presentation(title: &str) -> &str {
+    title.strip_prefix("Administrator: ").unwrap_or(title)
+}
+
 #[derive(Debug)]
 struct CachedProcessSnapshot {
     built_at: Instant,

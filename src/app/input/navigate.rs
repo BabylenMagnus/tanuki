@@ -2686,6 +2686,44 @@ navigate_pane_right = "ctrl+l"
     }
 
     #[test]
+    fn terminal_direct_resize_pane_shortcut_maps_to_navigation_action() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds.resize_pane_right =
+            crate::config::ActionKeybinds::direct("ctrl+shift+alt+right");
+
+        let action = terminal_direct_navigation_action(
+            &state,
+            TerminalKey::new(
+                KeyCode::Right,
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT | KeyModifiers::ALT,
+            ),
+        );
+
+        assert_eq!(action, Some(NavigateAction::ResizePaneRight));
+    }
+
+    #[test]
+    fn prefix_resize_pane_binding_maps_to_navigation_action() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+resize_pane_left = "prefix+shift+left"
+"#,
+        )
+        .unwrap();
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds = config.keybinds();
+
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Left, KeyModifiers::SHIFT),
+            BindingDispatch::Prefix,
+        );
+
+        assert_eq!(action, Some(NavigateAction::ResizePaneLeft));
+    }
+
+    #[test]
     fn terminal_direct_last_pane_shortcut_maps_to_navigation_action() {
         let mut state = state_with_workspaces(&["test"]);
         state.keybinds.last_pane = crate::config::ActionKeybinds::direct("alt+l");

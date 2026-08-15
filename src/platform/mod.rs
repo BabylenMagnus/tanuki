@@ -42,6 +42,11 @@ pub(crate) fn configure_background_command(command: &mut std::process::Command) 
 #[cfg(not(windows))]
 fn configure_background_command_platform(_command: &mut std::process::Command) {}
 
+#[cfg(not(windows))]
+pub(crate) fn terminal_title_for_presentation(title: &str) -> &str {
+    title
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PlatformCapabilities {
     pub(crate) live_handoff: bool,

@@ -199,6 +199,8 @@ const DEFAULT_CONFIG: &str = r##"# tanuki configuration
 # rename_tab = "prefix+shift+t"
 # previous_tab = "prefix+p"
 # next_tab = "prefix+n"
+# move_tab_previous = ""   # optional, e.g. "alt+shift+left" moves the tab toward the front
+# move_tab_next = ""       # optional, e.g. "alt+shift+right" moves the tab toward the back
 # switch_tab = "prefix+1..9"
 # switch_workspace = ""   # optional indexed binding, e.g. "prefix+shift+1..9"
 # close_tab = "prefix+shift+x"
@@ -216,6 +218,10 @@ const DEFAULT_CONFIG: &str = r##"# tanuki configuration
 # close_pane = "prefix+x"
 # zoom = "prefix+z"       # legacy alias: fullscreen
 # resize_mode = "prefix+r"
+# resize_pane_left = ""   # optional, e.g. "ctrl+shift+alt+left" resizes without entering resize mode
+# resize_pane_down = ""   # optional, e.g. "ctrl+shift+alt+down"
+# resize_pane_up = ""     # optional, e.g. "ctrl+shift+alt+up"
+# resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
 # toggle_sidebar = "prefix+b"
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
@@ -439,6 +445,9 @@ pane_history = false
 # scrollback_limit_bytes = 10000000
 "##;
 
+// Bundled at build time so the printed skill always matches this binary's release.
+const SKILL: &str = include_str!("../SKILL.md");
+
 fn should_block_nested(config: &config::Config) -> bool {
     should_block_nested_for_env(config, std::env::var(TANUKI_ENV_VAR).ok().as_deref())
 }
@@ -500,7 +509,7 @@ fn main() -> io::Result<()> {
         && !args.iter().any(|a| {
             matches!(
                 a.as_str(),
-                "--help" | "-h" | "--version" | "-V" | "--default-config"
+                "--help" | "-h" | "--version" | "-V" | "--default-config" | "--skill"
             )
         })
     {
@@ -520,7 +529,7 @@ fn main() -> io::Result<()> {
         && !args.iter().any(|a| {
             matches!(
                 a.as_str(),
-                "--help" | "-h" | "--version" | "-V" | "--default-config"
+                "--help" | "-h" | "--version" | "-V" | "--default-config" | "--skill"
             )
         })
     {
@@ -687,6 +696,7 @@ fn main() -> io::Result<()> {
         println!("                      session through the Tanuki backend relay");
         println!("  --handoff           Opt into live handoff for update or remote attach");
         println!("  --default-config    Print default configuration and exit");
+        println!("  --skill             Print the agent skill file and exit");
         println!("  --version, -V       Print version and exit");
         println!("  --help, -h          Show this help");
         println!();
@@ -694,6 +704,7 @@ fn main() -> io::Result<()> {
         println!("Logs:   {}", logging::help_log_paths_summary());
         println!("Env:    TANUKI_CONFIG_PATH overrides config file path");
         println!("Home:   https://tanuki.example");
+        println!("Skill:  tanuki --skill prints agent instructions for driving tanuki from a pane");
         return Ok(());
     }
 
@@ -707,6 +718,11 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
+    if args.iter().any(|a| a == "--skill") {
+        print!("{SKILL}");
+        return Ok(());
+    }
+
     // Reject unknown flags
     let known_flags = [
         "--no-session",
@@ -717,6 +733,7 @@ fn main() -> io::Result<()> {
         "--version",
         "-V",
         "--default-config",
+        "--skill",
         "--help",
         "-h",
     ];

@@ -9,14 +9,18 @@
 //! (`CloudDuplex`'s original write path, `cloud.rs`) is left completely
 //! untouched -- this module never tears down or blocks that fallback.
 //!
-//! NOT BUILD-VERIFIED. This environment has no working `tanuki_terminal`
-//! toolchain (no `zig` for `build.rs`'s vendored `libghostty-vt` step -- see
-//! `wiki/tanuki-terminal-stability-implementation.md`, "Verification
-//! status"). This module was written by reading `webrtc-rs`'s own
-//! `examples/data-channels-offer-answer` pattern from memory and has never
-//! been compiled. Treat it as a reviewed draft, not a proven
-//! implementation, until it has actually built and been exercised against
-//! a real host/viewer pair.
+//! BUILD-VERIFIED (2026-08-15, `cargo check`/`cargo clippy` clean against the
+//! prebuilt `libghostty-vt`) but NOT yet exercised end-to-end against a real
+//! host/viewer pair over an actual network. This module was originally
+//! written by reading `webrtc-rs`'s own `examples/data-channels-offer-answer`
+//! pattern from memory; that first draft had a real, since-fixed bug (see
+//! `spawn_negotiation`'s doc comment: the negotiation thread's own Tokio
+//! runtime was dropped, and so forcibly cancelled the just-opened data
+//! channel's serving tasks, within microseconds of a successful negotiation
+//! -- every P2P upgrade was self-destructing on success). Treat live P2P
+//! sessions as still worth watching closely (via `term:webrtc_stats`
+//! telemetry / `warn!` logs) until this has actually been run against a real
+//! host/viewer pair across two machines.
 //!
 //! ## Design
 //!
@@ -174,6 +178,17 @@ pub(crate) fn spawn_negotiation(
         let best_candidate: Arc<Mutex<Option<(u8, &'static str)>>> = Arc::new(Mutex::new(None));
 
         rt.block_on(async move {
+            // Only the handshake (up to the data channel opening) is
+            // timeout-bounded. Once open, `established` below carries the
+            // peer connection and the signaling task's `JoinHandle` back
+            // out *unconsumed* -- awaiting the handle after this timeout
+            // (see below) is what keeps this thread's runtime alive for as
+            // long as the caller holds `remote_tx`, instead of tearing it
+            // (and every webrtc-rs background task riding on it: the mux
+            // demuxer, the SCTP association, the data channel reader, and
+            // `make_write_fn`'s own forwarder) down the instant the channel
+            // opens. See this module's doc comment and `spawn_negotiation`'s
+            // caller-facing doc for the full story.
             let outcome = tokio::time::timeout(
                 timeout,
                 run_negotiation(
@@ -189,17 +204,16 @@ pub(crate) fn spawn_negotiation(
                 ),
             )
             .await;
-            let established = match &outcome {
-                Ok(Ok(())) => true,
+            let established = matches!(outcome, Ok(Ok(_)));
+            match &outcome {
+                Ok(Ok(_)) => {}
                 Ok(Err(err)) => {
                     debug!(err = %err, "p2p: negotiation failed, staying on relay fallback");
-                    false
                 }
                 Err(_) => {
                     debug!("p2p: negotiation timed out, staying on relay fallback");
-                    false
                 }
-            };
+            }
             let best_local_candidate_type = best_candidate
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -208,6 +222,19 @@ pub(crate) fn spawn_negotiation(
                 established,
                 best_local_candidate_type,
             });
+
+            // Not timeout-bounded: `signaling_handle` only resolves once
+            // `remote_rx` closes, which happens when the caller drops
+            // `remote_tx` -- already exactly how `negotiations`/
+            // `p2p_signal_cell` end a P2P leg's life in `cloud.rs` (viewer
+            // detach on the host side, reconnect/replace on the viewer
+            // side). Blocking on it here, inside the still-alive `rt`, is
+            // what keeps `peer_connection` (and its background tasks) from
+            // being cancelled while the data channel is still in use.
+            if let Ok(Ok((peer_connection, signaling_handle))) = outcome {
+                let _ = signaling_handle.await;
+                drop(peer_connection);
+            }
         });
     });
 
@@ -237,7 +264,7 @@ async fn run_negotiation(
     on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync>,
     on_data: DataCallback,
     best_candidate: Arc<Mutex<Option<(u8, &'static str)>>>,
-) -> Result<(), String> {
+) -> Result<(Arc<webrtc::peer_connection::RTCPeerConnection>, tokio::task::JoinHandle<()>), String> {
     let mut media_engine = MediaEngine::default();
     // No audio/video codecs registered -- data-channel-only usage still
     // requires a MediaEngine per webrtc-rs's API, left at defaults.
@@ -414,26 +441,24 @@ async fn run_negotiation(
         }
     };
 
-    // Runs for the lifetime of the negotiation (answer/ICE application) --
-    // spawned unconditionally rather than raced against `ready_rx` in a
-    // `select!`, since a `select!` would need to both poll this future
-    // *and* potentially move it into `tokio::spawn` from the other
-    // branch's body, which the borrow checker rejects (a future can't be
-    // polled and moved-out-of at the same time). The outer
-    // `tokio::time::timeout` in `spawn_negotiation` still bounds how long
-    // this whole function waits below.
-    tokio::spawn(signaling_loop);
+    // Runs concurrently with waiting for `ready_rx` below (answer/ICE
+    // application must keep happening while the channel is still opening),
+    // and keeps running after: it only ends once `remote_rx` closes, i.e.
+    // once the caller drops `remote_tx`. `spawn_negotiation` awaits this
+    // handle *after* the handshake timeout window (see there), which is
+    // what keeps this negotiation's dedicated runtime -- and therefore
+    // `peer_connection` and every webrtc-rs task riding on it -- alive for
+    // the life of the P2P leg instead of being torn down the instant the
+    // channel opens.
+    let signaling_handle = tokio::spawn(signaling_loop);
 
-    let data_channel = ready_rx
-        .await
-        .map_err(|_| "data channel never became ready".to_owned())?;
+    let data_channel = ready_rx.await.map_err(|_| {
+        signaling_handle.abort();
+        "data channel never became ready".to_owned()
+    })?;
     let write_fn = make_write_fn(data_channel);
     (on_channel_ready)(write_fn);
-    // Keep `peer_connection` alive for the process lifetime by relying on
-    // the Arc clone already captured inside `signaling_loop`'s spawned
-    // task; this function's own local binding can be dropped safely.
-    drop(peer_connection);
-    Ok(())
+    Ok((peer_connection, signaling_handle))
 }
 
 fn wire_data_channel(
