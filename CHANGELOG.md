@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add tab movement and pane resizing actions
+
 ## [0.1.88] - 2026-08-14
 
 ### Added
