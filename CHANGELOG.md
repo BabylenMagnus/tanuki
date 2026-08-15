@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.91] - 2026-08-16
+
 ### Added
 - Rename Herdr to Tanuki and update related documentation
 
