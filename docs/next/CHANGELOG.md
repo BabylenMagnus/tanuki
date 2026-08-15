@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Add tab movement and pane resizing actions
+
+### Changed
+- Bump version to 0.1.89 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.89] - 2026-08-15
 
 ### Added
