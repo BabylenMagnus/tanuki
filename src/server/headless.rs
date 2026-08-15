@@ -4918,6 +4918,7 @@ fn is_keybinding_config_diagnostic(diagnostic: &str) -> bool {
 /// Run the headless server. This is the entry point called from main.rs.
 pub fn run_server() -> io::Result<()> {
     init_logging();
+    install_headless_panic_hook();
     crate::platform::raise_server_nofile_limit();
 
     let args: Vec<String> = std::env::args().collect();
@@ -5015,6 +5016,21 @@ pub fn run_server() -> io::Result<()> {
     rt.shutdown_timeout(Duration::from_millis(100));
     crate::logging::shutdown("server");
     result
+}
+
+/// The headless server has no controlling terminal — a detached daemon's
+/// stderr goes nowhere, so a panic that unwinds through `run_server()`'s
+/// `rt.block_on()` previously vanished without a trace (see
+/// wiki: tanuki-terminal-cloud-viewer-headless-panic-on-pane-death). Route it
+/// through `tracing::error!` first, same pattern already used for the
+/// monolithic-mode hook in `main.rs`, so the next occurrence leaves a real
+/// panic message in the server log instead of silence.
+fn install_headless_panic_hook() {
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("PANIC (headless server): {info}");
+        original_hook(info);
+    }));
 }
 
 fn seed_startup_workspace_if_empty(app: &mut app::App) {
