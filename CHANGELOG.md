@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- Add clipboard image support for Windows platform
+
+### Fixed
+- Unused import, needless mut, and get(0) clippy lints in CI checks
+
+### Changed
+- Cargo fmt
+
 ## [0.1.91] - 2026-08-16
 
 ### Added
