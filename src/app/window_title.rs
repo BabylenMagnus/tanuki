@@ -61,7 +61,8 @@ impl App {
                 WindowTitlePart::Token(WindowTitleToken::Workspace) => {
                     if let Some(workspace) = workspace {
                         title.push_str(
-                            &workspace.display_name_from(&self.state.terminals, &self.terminal_runtimes),
+                            &workspace
+                                .display_name_from(&self.state.terminals, &self.terminal_runtimes),
                         );
                     }
                 }

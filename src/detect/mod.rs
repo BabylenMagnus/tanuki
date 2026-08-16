@@ -680,11 +680,7 @@ mod tests {
             process_group_id: 42,
             processes: vec![
                 foreground_process(42, "bash", &["bash"]),
-                foreground_process(
-                    43,
-                    "claude",
-                    &["claude", "--dangerously-skip-permissions"],
-                ),
+                foreground_process(43, "claude", &["claude", "--dangerously-skip-permissions"]),
             ],
         };
 
@@ -707,7 +703,11 @@ mod tests {
     fn identify_agent_process_in_job_agrees_with_identify_agent_in_job() {
         let job = crate::platform::ForegroundJob {
             process_group_id: 123,
-            processes: vec![foreground_process(1, "codex", &["codex", "--model", "gpt-5"])],
+            processes: vec![foreground_process(
+                1,
+                "codex",
+                &["codex", "--model", "gpt-5"],
+            )],
         };
 
         assert_eq!(

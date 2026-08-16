@@ -521,7 +521,11 @@ mod tests {
         }
     }
 
-    fn one_row_patch(frame: &FrameData, row: u16, symbol: &str) -> (FrameData, Vec<FramePatchSegment>) {
+    fn one_row_patch(
+        frame: &FrameData,
+        row: u16,
+        symbol: &str,
+    ) -> (FrameData, Vec<FramePatchSegment>) {
         let width = usize::from(frame.width);
         let mut target = frame.clone();
         for x in 0..width {

@@ -264,7 +264,13 @@ async fn run_negotiation(
     on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync>,
     on_data: DataCallback,
     best_candidate: Arc<Mutex<Option<(u8, &'static str)>>>,
-) -> Result<(Arc<webrtc::peer_connection::RTCPeerConnection>, tokio::task::JoinHandle<()>), String> {
+) -> Result<
+    (
+        Arc<webrtc::peer_connection::RTCPeerConnection>,
+        tokio::task::JoinHandle<()>,
+    ),
+    String,
+> {
     let mut media_engine = MediaEngine::default();
     // No audio/video codecs registered -- data-channel-only usage still
     // requires a MediaEngine per webrtc-rs's API, left at defaults.

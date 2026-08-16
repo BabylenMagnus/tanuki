@@ -1148,7 +1148,10 @@ mod tests {
                 // that fallback here instead of treating it as a hard failure, so this
                 // test asserts the real invariant (no console) rather than assuming
                 // breakaway is always available in the environment it runs in.
-                Err(err) if mode == "server daemon" && err.raw_os_error() == Some(ERROR_ACCESS_DENIED) => {
+                Err(err)
+                    if mode == "server daemon"
+                        && err.raw_os_error() == Some(ERROR_ACCESS_DENIED) =>
+                {
                     let mut fallback_child = Command::new(&test_exe);
                     fallback_child
                         .arg("windows_background_and_server_daemon_commands_do_not_have_consoles")

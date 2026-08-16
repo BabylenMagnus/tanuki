@@ -48,7 +48,8 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
 
     let p = &app.palette;
     let popup_width = settings_popup_width(area.width);
-    let Some(popup) = centered_popup_rect(area, popup_width, settings_popup_height(app, popup_width))
+    let Some(popup) =
+        centered_popup_rect(area, popup_width, settings_popup_height(app, popup_width))
     else {
         return;
     };
@@ -252,18 +253,25 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ↑↓", Style::default().fg(p.overlay0)),
-                Span::styled(format!(" {}  ", t!("settings.footer.select")), Style::default().fg(p.overlay1)),
-                Span::styled(t!("settings.footer.tab").to_string(), Style::default().fg(p.overlay0)),
-                Span::styled(format!(" {}", t!("settings.footer.section")), Style::default().fg(p.overlay1)),
+                Span::styled(
+                    format!(" {}  ", t!("settings.footer.select")),
+                    Style::default().fg(p.overlay1),
+                ),
+                Span::styled(
+                    t!("settings.footer.tab").to_string(),
+                    Style::default().fg(p.overlay0),
+                ),
+                Span::styled(
+                    format!(" {}", t!("settings.footer.section")),
+                    Style::default().fg(p.overlay1),
+                ),
             ])),
             footer_rows[0],
         );
     }
 }
 
-pub(crate) fn settings_primary_button_label(
-    section: crate::app::state::SettingsSection,
-) -> String {
+pub(crate) fn settings_primary_button_label(section: crate::app::state::SettingsSection) -> String {
     match section {
         crate::app::state::SettingsSection::Integrations => t!("settings.install").to_string(),
         _ => t!("settings.apply").to_string(),
@@ -606,8 +614,10 @@ fn render_settings_keybinds(app: &AppState, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
-    let readonly_visible =
-        workspace_matches || focus_agent_matches || switch_tab_matches || !matching_custom_commands.is_empty();
+    let readonly_visible = workspace_matches
+        || focus_agent_matches
+        || switch_tab_matches
+        || !matching_custom_commands.is_empty();
 
     if filtered.is_empty() && !readonly_visible {
         frame.render_widget(

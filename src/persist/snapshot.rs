@@ -676,11 +676,7 @@ mod tests {
             "claude-session".to_string(),
             "--dangerously-skip-permissions".to_string(),
         ];
-        state
-            .terminals
-            .get_mut(&terminal_id)
-            .unwrap()
-            .launch_argv = Some(argv.clone());
+        state.terminals.get_mut(&terminal_id).unwrap().launch_argv = Some(argv.clone());
 
         // Empty registry: if capture ever fell back to reading a live
         // process's argv here, it would find nothing and silently drop the

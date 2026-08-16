@@ -695,7 +695,10 @@ pub(super) fn apply_context_menu_action(
             state.request_new_linked_worktree = Some(ws_idx);
             leave_modal(state);
         }
-        (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::DeleteWorktreeCheckout)) => {
+        (
+            ContextMenuKind::GitWorkspace { ws_idx, .. },
+            Some(ContextMenuItem::DeleteWorktreeCheckout),
+        ) => {
             state.request_remove_linked_worktree = Some(ws_idx);
             leave_modal(state);
         }
@@ -1124,7 +1127,10 @@ impl App {
                 self.state.request_new_linked_worktree = Some(ws_idx);
                 leave_modal(&mut self.state);
             }
-            (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some(ContextMenuItem::DeleteWorktreeCheckout)) => {
+            (
+                ContextMenuKind::GitWorkspace { ws_idx, .. },
+                Some(ContextMenuItem::DeleteWorktreeCheckout),
+            ) => {
                 self.state.request_remove_linked_worktree = Some(ws_idx);
                 leave_modal(&mut self.state);
             }

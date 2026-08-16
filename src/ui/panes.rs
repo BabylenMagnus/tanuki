@@ -937,7 +937,10 @@ pub(super) fn render_empty(app: &AppState, frame: &mut Frame, area: Rect) {
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled(format!("  {} ", t!("panes.press")), Style::default().fg(p.overlay0)),
+            Span::styled(
+                format!("  {} ", t!("panes.press")),
+                Style::default().fg(p.overlay0),
+            ),
             Span::styled(
                 app.keybinds
                     .new_workspace
@@ -945,7 +948,10 @@ pub(super) fn render_empty(app: &AppState, frame: &mut Frame, area: Rect) {
                     .unwrap_or_else(|| t!("settings.keybinds.unset").to_string()),
                 Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(format!(" {}", t!("panes.to_create_one")), Style::default().fg(p.overlay0)),
+            Span::styled(
+                format!(" {}", t!("panes.to_create_one")),
+                Style::default().fg(p.overlay0),
+            ),
         ]),
     ];
     frame.render_widget(

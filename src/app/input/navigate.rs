@@ -7,10 +7,10 @@ use std::{
 
 use bytes::Bytes;
 use crossterm::event::KeyCode;
-use rust_i18n::t;
 #[cfg(test)]
 use crossterm::event::KeyEvent;
 use ratatui::layout::Direction;
+use rust_i18n::t;
 
 use crate::{
     app::{
@@ -403,7 +403,10 @@ impl App {
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::EqualizeSplits => {
-                if let Some(ws) = self.state.active.and_then(|idx| self.state.workspaces.get_mut(idx))
+                if let Some(ws) = self
+                    .state
+                    .active
+                    .and_then(|idx| self.state.workspaces.get_mut(idx))
                 {
                     if let Some(tab) = ws.active_tab_mut() {
                         tab.layout.equalize();
@@ -2389,9 +2392,12 @@ mod tests {
             let ws = state.workspaces.get_mut(0).expect("workspace");
             let tab = ws.active_tab_mut().expect("active tab");
             tab.layout.focus_pane(tab.layout.focused());
-            let second = tab.layout.split_focused_with_ratio(Direction::Horizontal, 0.9);
+            let second = tab
+                .layout
+                .split_focused_with_ratio(Direction::Horizontal, 0.9);
             tab.layout.focus_pane(second);
-            tab.layout.split_focused_with_ratio(Direction::Horizontal, 0.9);
+            tab.layout
+                .split_focused_with_ratio(Direction::Horizontal, 0.9);
         }
 
         handle_navigate_key(

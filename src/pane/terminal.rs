@@ -222,7 +222,12 @@ impl RenderedRowCache {
     /// Apply rows produced by `collect_dirty_patch` so a later full `render()`
     /// does not serve stale cells when ghostty's terminal dirty flags were
     /// already consumed by the patch path's `RenderState::update()`.
-    fn apply_patch_rows(&mut self, area_width: u16, area_height: u16, patch_rows: &[(u16, Vec<CellData>)]) {
+    fn apply_patch_rows(
+        &mut self,
+        area_width: u16,
+        area_height: u16,
+        patch_rows: &[(u16, Vec<CellData>)],
+    ) {
         if patch_rows.is_empty() {
             return;
         }
@@ -250,8 +255,9 @@ impl RenderedRowCache {
         self.area_width = width;
         self.area_height = height;
         self.rows.clear();
-        self.rows
-            .resize_with(height as usize, || vec![ratatui::buffer::Cell::default(); width as usize]);
+        self.rows.resize_with(height as usize, || {
+            vec![ratatui::buffer::Cell::default(); width as usize]
+        });
     }
 }
 
@@ -1169,7 +1175,11 @@ impl GhosttyPaneTerminal {
         let should_push = if let Ok(core) = self.core.lock() {
             let previous = core.host_color_scheme.swap(scheme as u8, Ordering::AcqRel);
             let changed = previous != scheme as u8;
-            changed && core.terminal.mode_get(crate::ghostty::MODE_REPORT_COLOR_SCHEME).unwrap_or(false)
+            changed
+                && core
+                    .terminal
+                    .mode_get(crate::ghostty::MODE_REPORT_COLOR_SCHEME)
+                    .unwrap_or(false)
         } else {
             false
         };
@@ -5331,7 +5341,10 @@ mod tests {
 
         pane.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Dark);
         let result = pane.process_pty_bytes(pane_id, 0, b"\x1b[?996n", &tx);
-        assert_eq!(result.terminal_responses, vec![Bytes::from_static(b"\x1b[?997;1n")]);
+        assert_eq!(
+            result.terminal_responses,
+            vec![Bytes::from_static(b"\x1b[?997;1n")]
+        );
         assert!(rx.try_recv().is_err());
     }
 

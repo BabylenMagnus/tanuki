@@ -89,11 +89,7 @@ pub(super) fn render_copy_mode_overlay(app: &AppState, frame: &mut Frame, area: 
             Span::styled(prompt.query.clone(), Style::default().fg(app.palette.text)),
             Span::styled("█", key),
             Span::styled(
-                format!(
-                    "  {} search  esc {}",
-                    t!("menus.enter"),
-                    t!("menus.cancel")
-                ),
+                format!("  {} search  esc {}", t!("menus.enter"), t!("menus.cancel")),
                 dim,
             ),
         ])
@@ -109,16 +105,15 @@ pub(super) fn render_copy_mode_overlay(app: &AppState, frame: &mut Frame, area: 
             .map(|current| format!(" {}/{}", current + 1, copy_mode.search.matches.len()))
             .or_else(|| (!copy_mode.search.query.is_empty()).then(|| " 0/0".to_string()))
             .unwrap_or_default();
-        let (exit_keys, exit_label) = if copy_mode.search.query.is_empty()
-            && copy_mode.selection.is_none()
-        {
-            ("q/esc".to_string(), format!(" {}", t!("menus.exit")))
-        } else {
-            (
-                "esc".to_string(),
-                format!(" {}  q {}", t!("menus.clear"), t!("menus.exit")),
-            )
-        };
+        let (exit_keys, exit_label) =
+            if copy_mode.search.query.is_empty() && copy_mode.selection.is_none() {
+                ("q/esc".to_string(), format!(" {}", t!("menus.exit")))
+            } else {
+                (
+                    "esc".to_string(),
+                    format!(" {}  q {}", t!("menus.clear"), t!("menus.exit")),
+                )
+            };
         Line::from(vec![
             Span::styled(format!(" {} ", t!("menus.mode_copy")), mode_style),
             Span::raw(" "),

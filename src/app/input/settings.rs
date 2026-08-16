@@ -323,9 +323,10 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
         },
         SettingsSection::Language => match key.code {
             KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
-            KeyCode::Down | KeyCode::Char('j') => {
-                state.settings.list.move_next(crate::app::SUPPORTED_LOCALES.len() + 1)
-            }
+            KeyCode::Down | KeyCode::Char('j') => state
+                .settings
+                .list
+                .move_next(crate::app::SUPPORTED_LOCALES.len() + 1),
             KeyCode::Enter | KeyCode::Char(' ') => {
                 return Some(SettingsAction::SaveLanguage(language_for_index(
                     state.settings.list.selected,
@@ -1085,7 +1086,11 @@ mod tests {
                     section.translated_label().chars().count() as u16 + 3 + badge_width
                 })
                 .sum::<u16>();
-        let dotted_width = SettingsSection::Integrations.translated_label().chars().count() as u16 + 4;
+        let dotted_width = SettingsSection::Integrations
+            .translated_label()
+            .chars()
+            .count() as u16
+            + 4;
 
         assert_eq!(
             state.settings_tab_at(integrations_x + dotted_width - 1, tab_y),

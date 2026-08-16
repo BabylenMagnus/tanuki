@@ -1674,9 +1674,7 @@ impl ContextMenuItem {
             Self::NewTab => t!("menus.context.new_tab").to_string(),
             Self::RenamePane => t!("menus.context.rename_pane").to_string(),
             Self::ClearPaneName => t!("menus.context.clear_pane_name").to_string(),
-            Self::SwapWithFocusedPane => {
-                t!("menus.context.swap_with_focused_pane").to_string()
-            }
+            Self::SwapWithFocusedPane => t!("menus.context.swap_with_focused_pane").to_string(),
             Self::SplitRight => t!("menus.context.split_right").to_string(),
             Self::SplitDown => t!("menus.context.split_down").to_string(),
             Self::Zoom => t!("menus.context.zoom").to_string(),

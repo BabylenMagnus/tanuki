@@ -1304,7 +1304,10 @@ fn render_workspace_list(
                 Span::styled(menu_label, Style::default().fg(p.overlay0)),
             ])
         } else {
-            Line::from(vec![Span::styled(menu_label, Style::default().fg(p.overlay0))])
+            Line::from(vec![Span::styled(
+                menu_label,
+                Style::default().fg(p.overlay0),
+            )])
         };
         frame.render_widget(
             Paragraph::new(menu_line).alignment(Alignment::Right),

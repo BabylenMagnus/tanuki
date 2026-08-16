@@ -25,8 +25,8 @@ mod theme_sync;
 mod window_title;
 mod worktrees;
 
-use std::collections::{HashMap, HashSet};
 use rust_i18n::t;
+use std::collections::{HashMap, HashSet};
 
 /// Locales the UI ships translations for, in display order. Each entry is
 /// `(locale code — stored in config and passed to `rust_i18n::set_locale`,

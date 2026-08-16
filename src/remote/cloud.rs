@@ -731,9 +731,12 @@ impl CloudHostTransport {
         // would. Mirrors the viewer side's `connect_viewer` hoisting its own
         // per-call state (`viewer_session_id`/`last_ack_seq`/etc.) once,
         // outside `connect_viewer_attempt`.
-        let viewers: Arc<Mutex<HashMap<String, CloudDuplex>>> = Arc::new(Mutex::new(HashMap::new()));
-        let sessions: Arc<Mutex<HashMap<String, CloudDuplex>>> = Arc::new(Mutex::new(HashMap::new()));
-        let sid_to_session: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+        let viewers: Arc<Mutex<HashMap<String, CloudDuplex>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let sessions: Arc<Mutex<HashMap<String, CloudDuplex>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let sid_to_session: Arc<Mutex<HashMap<String, String>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let detach_epoch: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
         let negotiations: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<RemoteSignal>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -1626,7 +1629,10 @@ fn spawn_viewer_p2p_negotiation(
         })
     };
     let emit_answer_unused: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_sdp: &str| {
-        debug_assert!(false, "cloud viewer is always the P2P offerer, never emits an answer");
+        debug_assert!(
+            false,
+            "cloud viewer is always the P2P offerer, never emits an answer"
+        );
     });
     let on_channel_ready: Arc<dyn Fn(Arc<WriteFn>) + Send + Sync> = {
         let duplex = duplex.clone();

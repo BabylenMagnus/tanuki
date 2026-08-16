@@ -2529,9 +2529,7 @@ impl HeadlessServer {
 
                 // Only render if the pane's effective state/agent label actually
                 // changed, or a toast was shown -- both are already computed above.
-                next_state != prev_state
-                    || next_agent_label != prev_agent_label
-                    || toast_shown
+                next_state != prev_state || next_agent_label != prev_agent_label || toast_shown
             }
             AppEvent::HookStateReported {
                 pane_id,
@@ -2624,9 +2622,7 @@ impl HeadlessServer {
                     );
                 }
 
-                next_state != prev_state
-                    || next_agent_label != prev_agent_label
-                    || toast_shown
+                next_state != prev_state || next_agent_label != prev_agent_label || toast_shown
             }
             AppEvent::UpdateReady {
                 version,

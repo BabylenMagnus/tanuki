@@ -1360,7 +1360,11 @@ fn write_semantic_frame(state: &mut ClientState, frame_data: FrameData) {
     // from whatever is actually happening. Entry/exit are `debug!` (off by
     // default, enable via `TANUKI_LOG=tanuki=debug`) so the last line before
     // a future crash pinpoints exactly which frame never finished.
-    tracing::debug!(event = "client.render.frame.start", bytes = frame_data.width as u32 * frame_data.height as u32, "applying frame");
+    tracing::debug!(
+        event = "client.render.frame.start",
+        bytes = frame_data.width as u32 * frame_data.height as u32,
+        "applying frame"
+    );
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         write_semantic_frame_inner(state, frame_data);
     }));
@@ -1429,7 +1433,10 @@ fn write_semantic_frame_inner(state: &mut ClientState, frame_data: FrameData) {
     );
     let _ = write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics, force_full);
     let _ = stdout.flush();
-    tracing::debug!(event = "client.render.frame.write_end", "encoded frame written");
+    tracing::debug!(
+        event = "client.render.frame.write_end",
+        "encoded frame written"
+    );
     state.blit_encoder.commit(frame_data, encoded);
 }
 
@@ -2554,10 +2561,7 @@ mod tests {
         let mut output = Vec::new();
         write_encoded_frame_with_graphics(&mut output, b"text", b"graphics", true).unwrap();
 
-        assert_eq!(
-            output,
-            b"\x1b[?2026htext\x1b7graphics\x1b8\x1b[?2026l"
-        );
+        assert_eq!(output, b"\x1b[?2026htext\x1b7graphics\x1b8\x1b[?2026l");
     }
 
     #[test]

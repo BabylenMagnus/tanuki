@@ -809,7 +809,9 @@ fn merge_persisted_launch_flags(
         let token = &saved[index];
         let takes_value = token.starts_with('-')
             && !token.contains('=')
-            && saved.get(index + 1).is_some_and(|next| !next.starts_with('-'));
+            && saved
+                .get(index + 1)
+                .is_some_and(|next| !next.starts_with('-'));
 
         if base_argv.contains(token) {
             index += if takes_value { 2 } else { 1 };
@@ -1302,11 +1304,7 @@ mod tests {
         // trailing positional -- Claude Code's CLI treats a positional after
         // `--resume <id>` as an initial prompt, so a leftover id would be
         // sent to the agent as a message on every restart.
-        let base = vec![
-            "claude".into(),
-            "--resume".into(),
-            "new-session".into(),
-        ];
+        let base = vec!["claude".into(), "--resume".into(), "new-session".into()];
         let saved = vec![
             "claude".to_string(),
             "--resume".to_string(),

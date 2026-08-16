@@ -1837,10 +1837,9 @@ impl PaneRuntime {
                 let result =
                     terminal.process_pty_bytes(pane_id, shell_pid, bytes, &response_writer);
                 observe_detection_content_change(bytes, &detection_content_seq);
-                let title_requested = result.terminal_title_changed
-                    && render_dirty.request_terminal_title(pane_id);
-                let render_requested =
-                    result.request_render && render_dirty.request_pty(pane_id);
+                let title_requested =
+                    result.terminal_title_changed && render_dirty.request_terminal_title(pane_id);
+                let render_requested = result.request_render && render_dirty.request_pty(pane_id);
                 if title_requested || render_requested {
                     render_notify.notify_one();
                 }
@@ -2001,10 +2000,9 @@ impl PaneRuntime {
                 if agent_detection == AgentDetection::Enabled {
                     observe_detection_content_change(bytes, &detection_content_seq);
                 }
-                let title_requested = result.terminal_title_changed
-                    && render_dirty.request_terminal_title(pane_id);
-                let render_requested =
-                    result.request_render && render_dirty.request_pty(pane_id);
+                let title_requested =
+                    result.terminal_title_changed && render_dirty.request_terminal_title(pane_id);
+                let render_requested = result.request_render && render_dirty.request_pty(pane_id);
                 if title_requested || render_requested {
                     render_notify.notify_one();
                 }
@@ -3440,7 +3438,10 @@ mod tests {
 
         // No prior pty read/write happened — this must not depend on one.
         runtime.apply_host_color_scheme(crate::terminal_theme::HostAppearance::Dark);
-        assert_eq!(rx.recv().await.unwrap(), Bytes::from_static(b"\x1b[?997;1n"));
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            Bytes::from_static(b"\x1b[?997;1n")
+        );
     }
 
     #[tokio::test]

@@ -1562,8 +1562,8 @@ prefix = "ö"
         // physical C key position is carried separately in `physical_char`
         // (from the kitty protocol's base-layout-key field or, on Windows,
         // the VK code).
-        let key = TerminalKey::new(KeyCode::Char('с'), KeyModifiers::CONTROL)
-            .with_physical_char('c');
+        let key =
+            TerminalKey::new(KeyCode::Char('с'), KeyModifiers::CONTROL).with_physical_char('c');
         assert!(terminal_key_matches_combo(
             key,
             (KeyCode::Char('c'), KeyModifiers::CONTROL)
@@ -1585,8 +1585,8 @@ prefix = "ö"
 
     #[test]
     fn mismatched_physical_char_does_not_create_false_match() {
-        let key = TerminalKey::new(KeyCode::Char('q'), KeyModifiers::CONTROL)
-            .with_physical_char('q');
+        let key =
+            TerminalKey::new(KeyCode::Char('q'), KeyModifiers::CONTROL).with_physical_char('q');
         assert!(!terminal_key_matches_combo(
             key,
             (KeyCode::Char('c'), KeyModifiers::CONTROL)

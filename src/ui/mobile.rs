@@ -1331,11 +1331,10 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let labels: Vec<String> =
-            agent_summary_segments(counts, StatusIndicatorStyle::Symbols)
-                .into_iter()
-                .map(|(text, _)| text)
-                .collect();
+        let labels: Vec<String> = agent_summary_segments(counts, StatusIndicatorStyle::Symbols)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
         assert_eq!(
             labels,
             ["× 2 blocked", "✓ 1 done", "◐ 2 working", "○ 1 idle"]

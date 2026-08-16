@@ -863,10 +863,7 @@ mod tests {
             .map(|(_, rect)| rect.width)
             .collect();
         assert_eq!(widths.len(), 4);
-        let (min, max) = (
-            *widths.iter().min().unwrap(),
-            *widths.iter().max().unwrap(),
-        );
+        let (min, max) = (*widths.iter().min().unwrap(), *widths.iter().max().unwrap());
         // Ratatui's integer layout rounding can differ by at most one column
         // between panes when 100 doesn't divide evenly by 4.
         assert!(max - min <= 1, "expected near-equal widths, got {widths:?}");

@@ -86,12 +86,18 @@ fn windows_stop_and_restart_running_sessions(release: &ReleaseInfo) {
         }
     };
 
-    let running: Vec<_> = sessions.into_iter().filter(|session| session.running).collect();
+    let running: Vec<_> = sessions
+        .into_iter()
+        .filter(|session| session.running)
+        .collect();
     if running.is_empty() {
         return;
     }
 
-    eprintln!("restarting running tanuki sessions to use {}...", release.label());
+    eprintln!(
+        "restarting running tanuki sessions to use {}...",
+        release.label()
+    );
     for session in running {
         let name = if session.default {
             None
@@ -1478,9 +1484,10 @@ fn recover_failed_live_handoff_for_update(
         FailedHandoffServerState::OldServerRunning(status) => {
             if prompt_to_stop_old_server_after_failed_handoff(plan, release, &status)? {
                 stop_running_server_for_update(plan)?;
-                if let Err(err) =
-                    respawn_server_daemon_after_update(plan.target.name.as_deref(), plan.socket_path())
-                {
+                if let Err(err) = respawn_server_daemon_after_update(
+                    plan.target.name.as_deref(),
+                    plan.socket_path(),
+                ) {
                     eprintln!(
                         "stopped {} {}, but could not restart it automatically: {err}",
                         plan.target_noun(),
