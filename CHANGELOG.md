@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.92] - 2026-08-16
+
 ### Added
 - Add clipboard image support for Windows platform
 
