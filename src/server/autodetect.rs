@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use tracing::{info, warn};
+use tracing::info;
 
 use super::socket_paths::client_socket_path;
 
@@ -278,7 +278,7 @@ fn spawn_daemon_command(mut command: Command) -> io::Result<std::process::Child>
     let child = match command.spawn() {
         Ok(child) => child,
         Err(err) if err.raw_os_error() == Some(ERROR_ACCESS_DENIED) => {
-            warn!(
+            tracing::warn!(
                 "server daemon could not break away from the parent's Windows Job Object \
                  (job doesn't permit breakaway); starting it tied to that job instead -- it \
                  may be killed if the parent terminal window is closed"
@@ -309,7 +309,7 @@ fn spawn_daemon_command(mut command: Command) -> io::Result<std::process::Child>
 #[cfg(windows)]
 fn log_daemon_job_membership(pid: u32, breakaway_requested: bool) {
     match crate::platform::process_is_in_job(pid) {
-        Some(true) => warn!(
+        Some(true) => tracing::warn!(
             pid,
             breakaway_requested,
             "server daemon is a member of a Windows Job Object after spawn -- it can be \
@@ -321,7 +321,7 @@ fn log_daemon_job_membership(pid: u32, breakaway_requested: bool) {
             "server daemon confirmed outside any Windows Job Object -- immune to the parent \
              terminal's job being torn down"
         ),
-        None => warn!(
+        None => tracing::warn!(
             pid,
             breakaway_requested,
             "could not determine server daemon's Windows Job Object membership after spawn"

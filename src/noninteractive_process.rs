@@ -8,6 +8,7 @@ pub(crate) fn command(program: impl AsRef<OsStr>) -> Command {
 }
 
 pub(crate) fn curl_command() -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = command("curl");
     // Windows' bundled curl uses the Schannel TLS backend, which mishandles
     // GitHub's TLS 1.3 post-handshake session tickets (misreported as a

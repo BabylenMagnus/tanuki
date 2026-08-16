@@ -2405,7 +2405,7 @@ mod tests {
             KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
         );
 
-        let ws = state.workspaces.get(0).expect("workspace");
+        let ws = state.workspaces.first().expect("workspace");
         let tab = ws.active_tab().expect("active tab");
         let widths: Vec<u16> = tab
             .layout
