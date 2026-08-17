@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.94] - 2026-08-18
+
 ### Fixed
 - Update update manifest URLs to point to GitHub releases
 
