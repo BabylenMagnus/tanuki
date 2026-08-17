@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+- Update update manifest URLs to point to GitHub releases
+
+### Changed
+- Bump version to 0.1.94 and update changelog
+- Populate Unreleased changelog from commits
+
 ## [0.1.94] - 2026-08-18
 
 ### Fixed
