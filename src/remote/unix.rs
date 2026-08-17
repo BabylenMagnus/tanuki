@@ -37,8 +37,11 @@ const BRIDGE_SOCKET_PERMISSION_MODE: u32 = 0o600;
 const REMOTE_SERVER_SHUTDOWN_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
 const REMOTE_SERVER_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const CURRENT_PROTOCOL: u32 = crate::protocol::PROTOCOL_VERSION;
-const STABLE_UPDATE_MANIFEST_URL: &str = "https://tanuki.example/latest.json";
-const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://tanuki.example/preview.json";
+const STABLE_UPDATE_MANIFEST_URL: &str =
+    "https://github.com/BabylenMagnus/tanuki/releases/latest/download/manifest.json";
+// No preview channel is published yet — falls back to the stable manifest, matching update.rs.
+const PREVIEW_UPDATE_MANIFEST_URL: &str =
+    "https://github.com/BabylenMagnus/tanuki/releases/latest/download/manifest.json";
 const REMOTE_BINARY_ENV_VAR: &str = "TANUKI_REMOTE_BINARY";
 #[cfg(unix)]
 const SSH_CONTROL_SOCKET_NAME: &str = "ctl";
