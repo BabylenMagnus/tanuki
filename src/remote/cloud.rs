@@ -1463,6 +1463,167 @@ fn host_reconnect_loop(
 
 type AttachResult = Result<(), String>;
 
+// ---------------------------------------------------------------------------
+// Sibling-device listing (spelflow-device-navigator, Задача 2)
+// ---------------------------------------------------------------------------
+
+/// Device-token-id the in-terminal navigator wants to connect to once the
+/// current interactive session exits. `tanuki_terminal`'s local session and
+/// `client::run_cloud_viewer` are two mutually-exclusive top-level run modes
+/// chosen once at process start (`main.rs`), not runtime-switchable in the
+/// same event loop -- so "connect from inside the navigator" is implemented
+/// as "cleanly quit the local session, then re-enter as `tanuki --cloud
+/// <id>` would" rather than attaching a second live session in-process. Set
+/// by the navigator's Enter handler (alongside `should_quit = true`), read
+/// once by `main.rs` right after the local session's run loop returns.
+static PENDING_CONNECT_TARGET: Mutex<Option<String>> = Mutex::new(None);
+
+pub(crate) fn set_pending_connect_target(target: String) {
+    *PENDING_CONNECT_TARGET
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(target);
+}
+
+pub(crate) fn take_pending_connect_target() -> Option<String> {
+    PENDING_CONNECT_TARGET
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
+
+/// One entry from `term:list_devices:result` (`tanuki_api/app/socket_handlers/term_relay.py`).
+/// Mirrors the browser dashboard's `GET /legion/devices` shape minus
+/// `rootPath`, which the in-terminal navigator has no use for.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SiblingDevice {
+    #[serde(rename = "deviceId")]
+    pub id: String,
+    #[serde(rename = "deviceName")]
+    pub name: String,
+    pub status: String,
+}
+
+impl SiblingDevice {
+    pub(crate) fn is_online(&self) -> bool {
+        self.status == "online"
+    }
+}
+
+/// How long [`list_sibling_devices`] waits for `term:list_devices:result`
+/// before giving up. Short, deliberately -- this backs an interactive menu
+/// (Task 2's navigator screen), not a background/retrying connection like
+/// `connect_viewer`'s attach.
+const LIST_DEVICES_TIMEOUT: Duration = Duration::from_secs(10);
+
+type ListDevicesResult = Result<Vec<SiblingDevice>, String>;
+
+fn signal_list_devices_result(
+    state: &Arc<(Mutex<Option<ListDevicesResult>>, Condvar)>,
+    result: ListDevicesResult,
+) {
+    let (lock, cvar) = &**state;
+    let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.is_none() {
+        *guard = Some(result);
+        cvar.notify_all();
+    }
+}
+
+fn wait_for_list_devices_result(
+    state: &Arc<(Mutex<Option<ListDevicesResult>>, Condvar)>,
+) -> io::Result<Vec<SiblingDevice>> {
+    let (lock, cvar) = &**state;
+    let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let deadline = Instant::now() + LIST_DEVICES_TIMEOUT;
+
+    loop {
+        if let Some(result) = guard.take() {
+            return result.map_err(|reason| {
+                io::Error::other(format!("cloud: failed to list sibling devices: {reason}"))
+            });
+        }
+
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "cloud: timed out waiting for term:list_devices:result",
+            ));
+        }
+
+        let (next_guard, wait_result) = cvar
+            .wait_timeout(guard, deadline - now)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard = next_guard;
+        if wait_result.timed_out() && guard.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "cloud: timed out waiting for term:list_devices:result",
+            ));
+        }
+    }
+}
+
+/// Fetches every other Legion device paired to this device's own account,
+/// for the in-terminal device navigator. Opens a short-lived Socket.IO
+/// connection (authenticated the same way as `host_hello`/`connect_viewer`,
+/// via `~/.legion/config.json`), asks once, and disconnects -- no retry,
+/// no reconnect loop, unlike `connect_viewer`'s long-lived attach.
+pub(crate) fn list_sibling_devices() -> io::Result<Vec<SiblingDevice>> {
+    let config = load_legion_config()?;
+    let auth = auth_payload(&config, "term-list");
+
+    let result_state: Arc<(Mutex<Option<ListDevicesResult>>, Condvar)> =
+        Arc::new((Mutex::new(None), Condvar::new()));
+
+    let open_state = Arc::clone(&result_state);
+    let result_state_cb = Arc::clone(&result_state);
+
+    let client = ClientBuilder::new(config.server_url.clone())
+        .transport_type(TransportType::Websocket)
+        .auth(auth)
+        .on("open", move |_payload, socket: RawClient| {
+            let state = Arc::clone(&open_state);
+            std::thread::spawn(move || {
+                if let Err(err) = socket.emit("term:list_devices", json!({})) {
+                    signal_list_devices_result(
+                        &state,
+                        Err(format!("failed to send term:list_devices: {err}")),
+                    );
+                }
+            });
+        })
+        .on("term:list_devices:result", move |payload, _socket| {
+            let Some(value) = payload_as_value(&payload) else {
+                signal_list_devices_result(
+                    &result_state_cb,
+                    Err("malformed term:list_devices:result".to_owned()),
+                );
+                return;
+            };
+            let devices = value
+                .get("devices")
+                .cloned()
+                .and_then(|v| serde_json::from_value::<Vec<SiblingDevice>>(v).ok())
+                .unwrap_or_default();
+            signal_list_devices_result(&result_state_cb, Ok(devices));
+        })
+        .on("error", |payload, _socket| {
+            warn!(payload = ?payload, "list sibling devices: socket.io error");
+        })
+        .connect()
+        .map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!("cloud: failed to connect for device list: {err}"),
+            )
+        })?;
+
+    let outcome = wait_for_list_devices_result(&result_state);
+    let _ = client.disconnect();
+    outcome
+}
+
 /// Opaque per-connect_viewer-call correlation id, not a security token --
 /// only needs to be practically unique among concurrent viewer sessions
 /// from this device, which PID + nanosecond timestamp + a process-local

@@ -81,11 +81,13 @@ pub(crate) enum GlobalMenuAction {
     Keybinds,
     ReloadConfig,
     Settings,
+    CloudDevices,
 }
 
 pub(super) fn global_menu_actions(state: &AppState) -> Vec<GlobalMenuAction> {
     let mut actions = vec![
         GlobalMenuAction::Settings,
+        GlobalMenuAction::CloudDevices,
         GlobalMenuAction::Keybinds,
         GlobalMenuAction::ReloadConfig,
     ];
@@ -145,6 +147,43 @@ pub(super) fn apply_global_menu_action(state: &mut AppState, action: GlobalMenuA
             leave_modal(state);
         }
         GlobalMenuAction::Settings => super::settings::open_settings(state),
+        GlobalMenuAction::CloudDevices => open_cloud_devices(state),
+    }
+}
+
+pub(super) fn open_cloud_devices(state: &mut AppState) {
+    state.cloud_devices = crate::app::state::CloudDevicesState {
+        loading: true,
+        ..Default::default()
+    };
+    state.mode = Mode::CloudDevices;
+}
+
+pub(crate) fn handle_cloud_devices_key(state: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => leave_modal(state),
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.cloud_devices.highlighted = state.cloud_devices.highlighted.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let last = state.cloud_devices.devices.len().saturating_sub(1);
+            state.cloud_devices.highlighted = (state.cloud_devices.highlighted + 1).min(last);
+        }
+        KeyCode::Enter => {
+            let Some(device) = state
+                .cloud_devices
+                .devices
+                .get(state.cloud_devices.highlighted)
+            else {
+                return;
+            };
+            if !device.is_online() {
+                return;
+            }
+            crate::remote::cloud::set_pending_connect_target(device.id.clone());
+            state.should_quit = true;
+        }
+        _ => {}
     }
 }
 

@@ -8,8 +8,11 @@ use ratatui::{
 
 use rust_i18n::t;
 
-use super::widgets::{panel_contrast_fg, render_panel_shell};
+use super::widgets::{panel_contrast_fg, render_modal_header, render_modal_shell, render_panel_shell};
 use crate::app::AppState;
+
+const CLOUD_DEVICES_POPUP_WIDTH: u16 = 46;
+const CLOUD_DEVICES_POPUP_HEIGHT: u16 = 12;
 
 fn prefix_rhs_label(bindings: &crate::config::ActionKeybinds) -> String {
     bindings
@@ -268,6 +271,99 @@ pub(super) fn render_global_launcher_menu(app: &AppState, frame: &mut Frame) {
         };
         frame.render_widget(Paragraph::new(line).alignment(Alignment::Left), rect);
     }
+}
+
+/// In-terminal device navigator (spelflow-device-navigator, Задача 2):
+/// lists sibling devices fetched via `remote::cloud::list_sibling_devices`
+/// (`app::input::mod::spawn_cloud_devices_fetch`), online devices selectable
+/// with Enter (`app::input::modal::handle_cloud_devices_key`).
+pub(super) fn render_cloud_devices_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
+    super::dim_background(frame, area);
+
+    let Some(inner) = render_modal_shell(
+        frame,
+        area,
+        CLOUD_DEVICES_POPUP_WIDTH,
+        CLOUD_DEVICES_POPUP_HEIGHT,
+        &app.palette,
+    ) else {
+        return;
+    };
+    if inner.height < 3 {
+        return;
+    }
+
+    render_modal_header(
+        frame,
+        Rect::new(inner.x, inner.y, inner.width, 1),
+        &t!("menus.cloud_devices.title"),
+        &app.palette,
+    );
+
+    let list_area = Rect::new(
+        inner.x,
+        inner.y + 2,
+        inner.width,
+        inner.height.saturating_sub(3),
+    );
+
+    let state = &app.cloud_devices;
+    if state.loading {
+        frame.render_widget(
+            Paragraph::new(t!("menus.cloud_devices.loading").to_string())
+                .style(Style::default().fg(app.palette.overlay0)),
+            list_area,
+        );
+        return;
+    }
+    if let Some(error) = &state.error {
+        frame.render_widget(
+            Paragraph::new(format!("{}: {error}", t!("menus.cloud_devices.error")))
+                .style(Style::default().fg(app.palette.red)),
+            list_area,
+        );
+        return;
+    }
+    if state.devices.is_empty() {
+        frame.render_widget(
+            Paragraph::new(t!("menus.cloud_devices.empty").to_string())
+                .style(Style::default().fg(app.palette.overlay0)),
+            list_area,
+        );
+        return;
+    }
+
+    let items: Vec<ListItem> = state
+        .devices
+        .iter()
+        .map(|device| {
+            let dot_style = if device.is_online() {
+                Style::default().fg(app.palette.green)
+            } else {
+                Style::default().fg(app.palette.overlay0)
+            };
+            let name_style = if device.is_online() {
+                Style::default().fg(app.palette.text)
+            } else {
+                Style::default().fg(app.palette.overlay0)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled("● ", dot_style),
+                Span::styled(device.name.clone(), name_style),
+            ]))
+        })
+        .collect();
+    let list = List::new(items)
+        .style(Style::default().fg(app.palette.text))
+        .highlight_style(
+            Style::default()
+                .bg(app.palette.accent)
+                .fg(panel_contrast_fg(&app.palette))
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(" ");
+    let mut list_state = ListState::default().with_selected(Some(state.highlighted));
+    frame.render_stateful_widget(list, list_area, &mut list_state);
 }
 
 pub(super) fn render_resize_overlay(app: &AppState, frame: &mut Frame, area: Rect) {

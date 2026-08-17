@@ -48,8 +48,8 @@ mod terminal;
 
 pub(crate) use self::{
     modal::{
-        handle_global_menu_key, handle_navigator_key, insert_navigator_search_text,
-        insert_rename_input_text, open_new_workspace_dialog,
+        handle_cloud_devices_key, handle_global_menu_key, handle_navigator_key,
+        insert_navigator_search_text, insert_rename_input_text, open_new_workspace_dialog,
     },
     navigate::{
         terminal_direct_indexed_navigation_action, terminal_direct_non_indexed_navigation_action,
@@ -106,13 +106,31 @@ impl App {
                     self.handle_context_menu_key_via_api(key_event);
                 }
                 Mode::Settings => self.handle_settings_key(key_event),
-                Mode::GlobalMenu => handle_global_menu_key(&mut self.state, key_event),
+                Mode::GlobalMenu => {
+                    handle_global_menu_key(&mut self.state, key_event);
+                    if self.state.mode == Mode::CloudDevices && self.state.cloud_devices.loading {
+                        self.spawn_cloud_devices_fetch();
+                    }
+                }
                 Mode::Navigator => {
                     handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
                 }
+                Mode::CloudDevices => handle_cloud_devices_key(&mut self.state, key_event),
                 Mode::Terminal => unreachable!(),
             },
         }
+    }
+
+    /// In-terminal device navigator (spelflow-device-navigator, Задача 2):
+    /// fetches sibling devices off the UI thread and reports the result
+    /// back through the normal `AppEvent` channel (same idiom as
+    /// `WorktreeAddFinished`/`WorktreeRemoveFinished` in `worktrees.rs`).
+    pub(super) fn spawn_cloud_devices_fetch(&mut self) {
+        let event_tx = self.event_tx.clone();
+        std::thread::spawn(move || {
+            let result = crate::remote::cloud::list_sibling_devices().map_err(|err| err.to_string());
+            let _ = event_tx.blocking_send(crate::events::AppEvent::CloudDevicesFetched { result });
+        });
     }
 
     pub(super) async fn handle_paste(&mut self, text: String) {

@@ -592,6 +592,7 @@ impl App {
             selected,
             mode,
             should_quit: false,
+            cloud_devices: crate::app::state::CloudDevicesState::default(),
             detach_exits: no_session,
             detach_requested: false,
             request_new_workspace: false,
@@ -1813,6 +1814,12 @@ impl App {
             }
             Mode::GlobalMenu => {
                 input::handle_global_menu_key(&mut self.state, key_event);
+                if self.state.mode == Mode::CloudDevices && self.state.cloud_devices.loading {
+                    self.spawn_cloud_devices_fetch();
+                }
+            }
+            Mode::CloudDevices => {
+                input::handle_cloud_devices_key(&mut self.state, key_event);
             }
             Mode::Onboarding => {
                 self.handle_onboarding_key(key_event);

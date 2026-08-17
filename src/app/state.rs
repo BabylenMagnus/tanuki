@@ -810,6 +810,7 @@ pub enum Mode {
     Settings,
     GlobalMenu,
     Navigator,
+    CloudDevices,
 }
 
 impl Mode {
@@ -834,8 +835,23 @@ impl Mode {
                 | Mode::ConfirmRemoveWorktree
                 | Mode::ContextMenu
                 | Mode::GlobalMenu
+                | Mode::CloudDevices
         )
     }
+}
+
+/// State for the in-terminal device navigator overlay
+/// (spelflow-device-navigator, Задача 2): lets the user connect to another
+/// of their own paired devices without knowing its device-token-id, by
+/// picking it from a list fetched over the same cloud-relay connection
+/// `term:host_hello` already uses (`term:list_devices`,
+/// `remote::cloud::list_sibling_devices`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CloudDevicesState {
+    pub loading: bool,
+    pub error: Option<String>,
+    pub devices: Vec<crate::remote::cloud::SiblingDevice>,
+    pub highlighted: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1895,6 +1911,10 @@ pub struct AppState {
     pub selected: usize,
     pub mode: Mode,
     pub should_quit: bool,
+    /// In-terminal device navigator (spelflow-device-navigator, Задача 2):
+    /// state of the "Connect to device..." overlay opened from the global
+    /// menu.
+    pub(crate) cloud_devices: CloudDevicesState,
     /// In monolithic --no-session mode, detach exits the app because there is no server to detach from.
     pub detach_exits: bool,
     /// Set when the current client should detach from the persistent session.
@@ -2147,7 +2167,7 @@ impl AppState {
             self.update_available.is_some() || self.latest_release_notes_available;
         match idx {
             0 => self.integration_updates_available(), // settings
-            3 if has_update_or_notes_entry => self.update_available.is_some(), // update ready / what's new
+            4 if has_update_or_notes_entry => self.update_available.is_some(), // update ready / what's new
             _ => false,
         }
     }
@@ -2300,6 +2320,7 @@ impl AppState {
             selected: 0,
             mode: Mode::Navigate,
             should_quit: false,
+            cloud_devices: CloudDevicesState::default(),
             detach_exits: false,
             detach_requested: false,
             request_new_workspace: false,

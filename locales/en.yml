@@ -437,6 +437,26 @@ sidebar.global_menu.settings:
   en: settings
   ru: настройки
   ru-pre1918: настройки
+sidebar.global_menu.cloud_devices:
+  en: connect to device...
+  ru: подключиться к устройству...
+  ru-pre1918: подключиться к устройству...
+menus.cloud_devices.title:
+  en: connect to device
+  ru: подключиться к устройству
+  ru-pre1918: подключиться к устройству
+menus.cloud_devices.loading:
+  en: loading devices...
+  ru: загрузка устройств...
+  ru-pre1918: загрузка устройствъ...
+menus.cloud_devices.error:
+  en: failed to load devices
+  ru: не удалось загрузить устройства
+  ru-pre1918: не удалось загрузить устройства
+menus.cloud_devices.empty:
+  en: no other paired devices
+  ru: нет других спаренных устройств
+  ru-pre1918: нѣтъ другихъ спаренныхъ устройствъ
 sidebar.global_menu.keybinds:
   en: keybinds
   ru: горячие клавиши

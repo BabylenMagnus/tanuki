@@ -151,6 +151,23 @@ impl App {
             return;
         }
 
+        if let AppEvent::CloudDevicesFetched { result } = ev {
+            if self.state.mode == crate::app::state::Mode::CloudDevices {
+                self.state.cloud_devices.loading = false;
+                match result {
+                    Ok(devices) => {
+                        self.state.cloud_devices.devices = devices;
+                        self.state.cloud_devices.error = None;
+                        self.state.cloud_devices.highlighted = 0;
+                    }
+                    Err(reason) => self.state.cloud_devices.error = Some(reason),
+                }
+                self.render_dirty.request_generic();
+                self.render_notify.notify_one();
+            }
+            return;
+        }
+
         if let AppEvent::PaneDied { pane_id } = &ev {
             if self
                 .state

@@ -202,6 +202,7 @@ impl AppState {
         use rust_i18n::t;
         let mut labels = vec![
             t!("sidebar.global_menu.settings").to_string(),
+            t!("sidebar.global_menu.cloud_devices").to_string(),
             t!("sidebar.global_menu.keybinds").to_string(),
             t!("sidebar.global_menu.reload_config").to_string(),
         ];

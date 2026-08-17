@@ -800,6 +800,17 @@ fn main() -> io::Result<()> {
             eprintln!("tanuki: {err}");
             std::process::exit(1);
         }
+        // In-terminal device navigator (spelflow-device-navigator, Задача 2):
+        // the session may have quit specifically to connect to another of
+        // the user's own devices, picked from the navigator overlay. See
+        // `remote::cloud::PENDING_CONNECT_TARGET`'s doc comment for why this
+        // is a post-exit handoff rather than an in-process mode switch.
+        if let Some(target) = remote::cloud::take_pending_connect_target() {
+            if let Err(err) = client::run_cloud_viewer(target) {
+                eprintln!("error: {err}");
+                std::process::exit(1);
+            }
+        }
         return Ok(());
     }
 

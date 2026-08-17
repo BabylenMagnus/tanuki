@@ -156,4 +156,9 @@ pub enum AppEvent {
     WorktreeAddFinished(Box<WorktreeAddResult>),
     /// Background `git worktree remove` completed.
     WorktreeRemoveFinished(Box<WorktreeRemoveResult>),
+    /// In-terminal device navigator (spelflow-device-navigator, Задача 2):
+    /// background fetch of sibling Legion devices finished.
+    CloudDevicesFetched {
+        result: Result<Vec<crate::remote::cloud::SiblingDevice>, String>,
+    },
 }
