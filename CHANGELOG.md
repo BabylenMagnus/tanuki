@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add cloud devices navigator and related UI components
+
 ## [0.1.92] - 2026-08-16
 
 ### Added
