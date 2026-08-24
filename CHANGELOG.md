@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Merge sticky launch flags into terminal restore process
+
 ## [0.1.95] - 2026-08-18
 
 ### Fixed
