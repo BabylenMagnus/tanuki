@@ -107,6 +107,8 @@ pub struct PaneSnapshot {
     pub agent_session: Option<PaneAgentSessionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticky_launch_flags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -364,6 +366,7 @@ fn capture_tab(
                     value: session.session_ref.value.clone(),
                 })
         });
+        let sticky_launch_flags = terminal.and_then(|terminal| terminal.sticky_launch_flags.clone());
         panes.insert(
             id.raw(),
             PaneSnapshot {
@@ -373,6 +376,7 @@ fn capture_tab(
                 managed_agent_kind,
                 agent_session,
                 launch_argv,
+                sticky_launch_flags,
             },
         );
     }
@@ -739,6 +743,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                sticky_launch_flags: None,
             },
         );
         panes.insert(
@@ -750,6 +755,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                sticky_launch_flags: None,
             },
         );
 
@@ -1292,6 +1298,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                sticky_launch_flags: None,
             },
         );
         panes.insert(
@@ -1305,6 +1312,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                sticky_launch_flags: None,
             },
         );
 

@@ -491,6 +491,15 @@ fn restore_tab(
             .and_then(|pane| pane.managed_agent_kind.as_deref())
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
+        let saved_sticky_launch_flags = saved_pane.and_then(|p| p.sticky_launch_flags.clone());
+        // Sticky flags never depend on what was observed -- merge them onto
+        // whatever launch_argv we do have. If there's no launch_argv at all,
+        // there's no known command template to attach them to (see the
+        // Windows bare-shell respawn note in `api.rs` for the same
+        // constraint): don't try to synthesize one from flags alone.
+        let final_launch_argv = saved_launch_argv
+            .clone()
+            .map(|argv| merge_sticky_launch_flags(argv, saved_sticky_launch_flags.as_deref()));
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
@@ -529,10 +538,14 @@ fn restore_tab(
             startup.restore_plan.clone()
         };
         if let Some(mut plan) = pending_native_agent_restore {
-            plan.argv = merge_persisted_launch_flags(plan.argv, saved_launch_argv.as_deref());
+            plan.argv = merge_sticky_launch_flags(
+                merge_persisted_launch_flags(plan.argv, saved_launch_argv.as_deref()),
+                saved_sticky_launch_flags.as_deref(),
+            );
             let terminal_id = TerminalId::alloc();
             let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone())
                 .with_pending_agent_resume_plan(plan);
+            terminal.set_sticky_launch_flags(saved_sticky_launch_flags.clone());
             if let Some(label) = saved_label {
                 terminal.set_manual_label(label);
             }
@@ -576,7 +589,7 @@ fn restore_tab(
         let cold_restart_argv: Option<&[String]> = if was_imported {
             None
         } else {
-            saved_launch_argv.as_deref()
+            final_launch_argv.as_deref()
         };
         let runtime_result = {
             #[cfg(unix)]
@@ -670,7 +683,7 @@ fn restore_tab(
                     if let Some(argv) = saved_launch_argv {
                         terminal = terminal.with_launch_argv(argv).with_respawn_shell_on_exit();
                     }
-                } else if let Some(argv) = saved_launch_argv {
+                } else if let Some(argv) = final_launch_argv {
                     // Cold restart, no native-resume plan: the runtime above was already
                     // spawned with this argv (`cold_restart_argv`) -- just record it on
                     // the terminal so future snapshots keep seeing it. No
@@ -680,6 +693,7 @@ fn restore_tab(
                     // on restart.
                     terminal = terminal.with_launch_argv(argv);
                 }
+                terminal.set_sticky_launch_flags(saved_sticky_launch_flags.clone());
                 if let Some(label) = saved_label {
                     terminal.set_manual_label(label);
                 }
@@ -795,25 +809,42 @@ fn merge_persisted_launch_flags(
     let Some(saved) = saved_launch_argv else {
         return base_argv;
     };
+    // saved[0] is the binary name (e.g. "claude"), not a flag -- skip it.
+    merge_extra_flags(base_argv, saved.get(1..).unwrap_or_default())
+}
 
-    // Walk saved[1..] as (flag, value) pairs rather than independent tokens.
-    // A saved flag that's already represented in `base_argv` (e.g. `--resume`,
-    // whose value is rebuilt fresh from the current session ref) is dropped
-    // together with its value -- otherwise a stale value token (an old
-    // session id captured from a live process's argv, see
-    // `live_agent_launch_argv`) survives as a stray trailing positional,
-    // which agent CLIs like Claude Code interpret as an initial prompt.
+/// Appends the panel's sticky launch flags (set only through the
+/// pane-properties UI, see `TerminalState::sticky_launch_flags`) onto an
+/// already-built argv, so they survive regardless of what was last observed
+/// from a live process or a previously saved `launch_argv`. Unlike
+/// `merge_persisted_launch_flags`, `sticky` is a flags-only list (no leading
+/// binary name).
+fn merge_sticky_launch_flags(argv: Vec<String>, sticky: Option<&[String]>) -> Vec<String> {
+    let Some(sticky) = sticky else {
+        return argv;
+    };
+    merge_extra_flags(argv, sticky)
+}
+
+// Walks `extra_flags` as (flag, value) pairs rather than independent tokens.
+// A flag that's already represented in `base_argv` (e.g. `--resume`, whose
+// value is rebuilt fresh from the current session ref) is dropped together
+// with its value -- otherwise a stale value token (an old session id
+// captured from a live process's argv, see `live_agent_launch_argv`)
+// survives as a stray trailing positional, which agent CLIs like Claude Code
+// interpret as an initial prompt.
+fn merge_extra_flags(base_argv: Vec<String>, extra_flags: &[String]) -> Vec<String> {
     let mut extra: Vec<String> = Vec::new();
-    let mut index = 1;
-    while index < saved.len() {
-        let token = &saved[index];
+    let mut index = 0;
+    while index < extra_flags.len() {
+        let token = &extra_flags[index];
         let takes_value = token.starts_with('-')
             && !token.contains('=')
-            && saved
+            && extra_flags
                 .get(index + 1)
                 .is_some_and(|next| !next.starts_with('-'));
 
-        if base_argv.contains(token) {
+        if base_argv.contains(token) || extra.contains(token) {
             index += if takes_value { 2 } else { 1 };
             continue;
         }
@@ -821,7 +852,7 @@ fn merge_persisted_launch_flags(
         extra.push(token.clone());
         if takes_value {
             index += 1;
-            extra.push(saved[index].clone());
+            extra.push(extra_flags[index].clone());
         }
         index += 1;
     }
@@ -1330,6 +1361,112 @@ mod tests {
         );
     }
 
+    #[test]
+    fn merge_sticky_launch_flags_appends_missing_flags_without_duplicating() {
+        let argv = vec!["claude".into(), "--resume".into(), "id".into()];
+        let sticky = vec![
+            "--dangerously-skip-permissions".to_string(),
+            "--resume".to_string(), // already present -- must not duplicate
+        ];
+        assert_eq!(
+            merge_sticky_launch_flags(argv, Some(&sticky)),
+            vec!["claude", "--resume", "id", "--dangerously-skip-permissions"]
+        );
+    }
+
+    #[test]
+    fn merge_sticky_launch_flags_is_noop_without_sticky_flags() {
+        let argv = vec!["claude".into(), "--resume".into(), "id".into()];
+        assert_eq!(merge_sticky_launch_flags(argv.clone(), None), argv);
+    }
+
+    #[tokio::test]
+    async fn restore_applies_sticky_flags_to_native_resume_even_without_saved_launch_argv() {
+        // Native resume always has a known command template (the resume plan
+        // itself), so sticky flags apply even when there was never an
+        // observed `launch_argv` for this pane -- unlike the cold-restart
+        // path, this one isn't blocked by the "no known template" constraint
+        // (pre-mortem launch-blocking Tiger #1).
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(
+                        0,
+                        super::super::snapshot::PaneSnapshot {
+                            cwd,
+                            label: Some("claude".into()),
+                            agent_name: Some("claude".into()),
+                            managed_agent_kind: Some("claude".into()),
+                            agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
+                                source: "tanuki:claude".into(),
+                                agent: "claude".into(),
+                                kind: crate::agent_resume::AgentSessionRefKind::Id,
+                                value: "claude-session".into(),
+                            }),
+                            launch_argv: None,
+                            sticky_launch_flags: Some(vec![
+                                "--dangerously-skip-permissions".into(),
+                            ]),
+                        },
+                    )]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        let plan = terminal
+            .pending_agent_resume_plan
+            .as_ref()
+            .expect("native agent resume should be pending");
+        assert_eq!(
+            plan.argv,
+            vec!["claude", "--resume", "claude-session", "--dangerously-skip-permissions"]
+        );
+        assert_eq!(
+            terminal.sticky_launch_flags.as_deref(),
+            Some(["--dangerously-skip-permissions".to_string()].as_slice())
+        );
+    }
+
     #[tokio::test]
     async fn restore_preserves_custom_launch_flags_across_native_agent_resume() {
         let cwd = std::env::current_dir().unwrap();
@@ -1364,6 +1501,7 @@ mod tests {
                                 "claude".into(),
                                 "--dangerously-skip-permissions".into(),
                             ]),
+                            sticky_launch_flags: None,
                         },
                     )]),
                     zoomed: false,
@@ -1440,6 +1578,7 @@ mod tests {
                             managed_agent_kind: None,
                             agent_session: None,
                             launch_argv: Some(argv.clone()),
+                            sticky_launch_flags: None,
                         },
                     )]),
                     zoomed: false,
@@ -1512,6 +1651,7 @@ mod tests {
                                 value: "opencode-session".into(),
                             }),
                             launch_argv: None,
+                            sticky_launch_flags: None,
                         },
                     )]),
                     zoomed: false,
@@ -1593,6 +1733,7 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                sticky_launch_flags: None,
                             },
                         ),
                         (
@@ -1604,6 +1745,7 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                sticky_launch_flags: None,
                             },
                         ),
                     ]),
@@ -1657,6 +1799,7 @@ mod tests {
                     managed_agent_kind: None,
                     agent_session: None,
                     launch_argv: None,
+                    sticky_launch_flags: None,
                 },
             )
         };
@@ -1672,6 +1815,7 @@ mod tests {
                 value: "codex-session".into(),
             }),
             launch_argv: None,
+            sticky_launch_flags: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1823,6 +1967,7 @@ mod tests {
                                 value: "codex-session".into(),
                             }),
                             launch_argv: None,
+                            sticky_launch_flags: None,
                         },
                     )]),
                     zoomed: false,
@@ -1984,6 +2129,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                sticky_launch_flags: None,
             },
         );
         let history = SessionHistorySnapshot {

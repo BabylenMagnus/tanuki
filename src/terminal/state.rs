@@ -121,6 +121,11 @@ pub struct TerminalState {
     pub last_agent_state_change_seq: Option<u64>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
+    /// Explicit, user-set launch flags for this pane (e.g. `--dangerously-skip-permissions`).
+    /// Unlike `launch_argv`, this is never inferred from a live process or from what was
+    /// last typed into the shell -- it only changes through the pane-properties UI, and is
+    /// always merged onto the resume/respawn argv regardless of what was last observed.
+    pub sticky_launch_flags: Option<Vec<String>>,
     pub respawn_shell_on_exit: bool,
     recent_agent_process_exit_at: Option<Instant>,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
@@ -153,6 +158,7 @@ impl TerminalState {
             last_agent_state_change_seq: None,
             revision: 0,
             launch_argv: None,
+            sticky_launch_flags: None,
             respawn_shell_on_exit: false,
             recent_agent_process_exit_at: None,
             pending_agent_resume_plan: None,
@@ -184,6 +190,15 @@ impl TerminalState {
     pub fn with_launch_argv(mut self, argv: Vec<String>) -> Self {
         self.launch_argv = Some(argv);
         self
+    }
+
+    /// Sets sticky launch flags via the pane-properties UI. This is the only
+    /// place that should ever write `sticky_launch_flags` -- never from
+    /// observing a live process or a typed shell command (see the field doc
+    /// comment for why: it exists precisely so a manual retype without a
+    /// flag doesn't silently and permanently drop it).
+    pub fn set_sticky_launch_flags(&mut self, flags: Option<Vec<String>>) {
+        self.sticky_launch_flags = flags.filter(|flags| !flags.is_empty());
     }
 
     pub fn with_respawn_shell_on_exit(mut self) -> Self {
