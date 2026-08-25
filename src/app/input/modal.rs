@@ -384,7 +384,17 @@ pub(super) fn open_rename_pane(state: &mut AppState, pane_id: crate::layout::Pan
         .and_then(|t| t.manual_label.clone())
         .unwrap_or_default();
     state.name_input_replace_on_type = terminal.and_then(|t| t.manual_label.as_ref()).is_none();
+    state.launch_flags_input = terminal
+        .and_then(|t| t.sticky_launch_flags.as_ref())
+        .map(|flags| flags.join(" "))
+        .unwrap_or_default();
+    state.rename_pane_editing_flags = false;
     state.mode = Mode::RenamePane;
+}
+
+fn parse_launch_flags_input(input: &str) -> Option<Vec<String>> {
+    let flags: Vec<String> = input.split_whitespace().map(str::to_string).collect();
+    (!flags.is_empty()).then_some(flags)
 }
 
 fn workspace_create_label(input: &str, suggested_name: &str) -> Option<String> {
@@ -534,6 +544,9 @@ pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
                                 let terminal_id = pane.attached_terminal_id.clone();
                                 if let Some(terminal) = state.terminals.get_mut(&terminal_id) {
                                     terminal.set_manual_label(new_name);
+                                    terminal.set_sticky_launch_flags(parse_launch_flags_input(
+                                        &state.launch_flags_input,
+                                    ));
                                     state.mark_session_dirty();
                                 }
                             }
@@ -566,12 +579,24 @@ pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
     }
 }
 
+fn editing_launch_flags(state: &AppState) -> bool {
+    state.mode == Mode::RenamePane && state.rename_pane_editing_flags
+}
+
 fn clear_rename_input(state: &mut AppState) {
-    state.name_input.clear();
-    state.name_input_replace_on_type = false;
+    if editing_launch_flags(state) {
+        state.launch_flags_input.clear();
+    } else {
+        state.name_input.clear();
+        state.name_input_replace_on_type = false;
+    }
 }
 
 pub(crate) fn insert_rename_input_text(state: &mut AppState, text: &str) {
+    if editing_launch_flags(state) {
+        state.launch_flags_input.push_str(text);
+        return;
+    }
     if state.name_input_replace_on_type {
         clear_rename_input(state);
     }
@@ -579,7 +604,9 @@ pub(crate) fn insert_rename_input_text(state: &mut AppState, text: &str) {
 }
 
 fn delete_rename_input_char(state: &mut AppState) {
-    if state.name_input_replace_on_type {
+    if editing_launch_flags(state) {
+        state.launch_flags_input.pop();
+    } else if state.name_input_replace_on_type {
         clear_rename_input(state);
     } else {
         state.name_input.pop();
@@ -601,41 +628,40 @@ fn rename_word_delete_class(ch: char) -> RenameWordDeleteClass {
 }
 
 fn delete_rename_input_word(state: &mut AppState) {
+    if editing_launch_flags(state) {
+        delete_word_from(&mut state.launch_flags_input);
+        return;
+    }
     if state.name_input_replace_on_type {
         clear_rename_input(state);
         return;
     }
+    delete_word_from(&mut state.name_input);
+}
 
-    while state
-        .name_input
-        .chars()
-        .last()
-        .is_some_and(char::is_whitespace)
-    {
-        state.name_input.pop();
+fn delete_word_from(buffer: &mut String) {
+    while buffer.chars().last().is_some_and(char::is_whitespace) {
+        buffer.pop();
     }
 
-    let Some(class) = state
-        .name_input
-        .chars()
-        .last()
-        .map(rename_word_delete_class)
-    else {
+    let Some(class) = buffer.chars().last().map(rename_word_delete_class) else {
         return;
     };
 
-    while state
-        .name_input
+    while buffer
         .chars()
         .last()
         .is_some_and(|ch| !ch.is_whitespace() && rename_word_delete_class(ch) == class)
     {
-        state.name_input.pop();
+        buffer.pop();
     }
 }
 
 fn handle_rename_edit_key(state: &mut AppState, key: KeyEvent) {
     match key.code {
+        KeyCode::Tab if state.mode == Mode::RenamePane => {
+            state.rename_pane_editing_flags = !state.rename_pane_editing_flags;
+        }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             clear_rename_input(state);
         }
@@ -1049,11 +1075,22 @@ impl App {
                     (self.state.active, self.state.rename_pane_target)
                 {
                     if let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) {
+                        // Always Some(..), an empty Vec included: the modal
+                        // reflects the pane's full current flags state, so
+                        // saving must overwrite (and clear when emptied),
+                        // never "leave untouched" (that's only for callers
+                        // that don't show this field at all, e.g. "clear
+                        // pane name").
+                        let sticky_launch_flags = Some(
+                            parse_launch_flags_input(&self.state.launch_flags_input)
+                                .unwrap_or_default(),
+                        );
                         self.runtime_pane_rename(
                             "tui.pane.rename",
                             crate::api::schema::PaneRenameParams {
                                 pane_id,
                                 label: Some(new_name),
+                                sticky_launch_flags,
                             },
                         );
                     }
@@ -1249,6 +1286,7 @@ impl App {
                         crate::api::schema::PaneRenameParams {
                             pane_id,
                             label: None,
+                            ..Default::default()
                         },
                     );
                 }
@@ -1338,6 +1376,8 @@ fn cancel_rename_modal(state: &mut AppState) {
     state.rename_pane_target = None;
     state.name_input.clear();
     state.name_input_replace_on_type = false;
+    state.launch_flags_input.clear();
+    state.rename_pane_editing_flags = false;
     leave_modal(state);
 }
 
@@ -1545,7 +1585,7 @@ mod tests {
         state.mode = Mode::RenameWorkspace;
         state.name_input = "mouse".into();
         let inner = state.rename_modal_inner().unwrap();
-        let (save, _, _) = crate::ui::rename_button_rects(inner);
+        let (save, _, _) = crate::ui::rename_button_rects_for_mode(inner, state.mode);
         let action = modal_action_from_buttons(save.x, save.y, &[(save, ModalAction::Save)]);
         assert_eq!(action, Some(ModalAction::Save));
     }

@@ -381,9 +381,10 @@ impl AppState {
                     self.mode,
                     Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane
                 ) {
+                    let mode = self.mode;
                     let action = self
                         .rename_modal_inner()
-                        .map(crate::ui::rename_button_rects)
+                        .map(|inner| crate::ui::rename_button_rects_for_mode(inner, mode))
                         .and_then(|(save, clear, cancel)| {
                             modal_action_from_buttons(
                                 mouse.column,
@@ -2679,7 +2680,8 @@ mod tests {
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 24));
         let inner = app.state.rename_modal_inner().unwrap();
-        let (save, _, _) = crate::ui::rename_button_rects(inner);
+        let (save, _, _) =
+            crate::ui::rename_button_rects_for_mode(inner, crate::app::Mode::RenameWorkspace);
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),

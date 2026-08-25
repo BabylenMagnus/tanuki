@@ -1155,6 +1155,14 @@ impl App {
             Some(label) if !label.is_empty() => terminal.set_manual_label(label),
             _ => terminal.clear_manual_label(),
         }
+        // Unlike `label`, omitting `sticky_launch_flags` leaves it untouched
+        // (e.g. the "clear pane name" shortcut reuses this same method and
+        // must not incidentally wipe sticky flags). Pass an empty list to
+        // explicitly clear them -- `set_sticky_launch_flags` already treats
+        // an empty Vec as "no flags".
+        if let Some(flags) = params.sticky_launch_flags {
+            terminal.set_sticky_launch_flags(Some(flags));
+        }
         self.state.mark_session_dirty();
         let pane = self.pane_info(ws_idx, pane_id).unwrap();
 

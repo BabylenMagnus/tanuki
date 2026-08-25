@@ -19,10 +19,22 @@ use crate::terminal::TerminalRuntimeRegistry;
 const NEW_LINKED_WORKTREE_POPUP_WIDTH: u16 = 68;
 const NEW_LINKED_WORKTREE_POPUP_HEIGHT: u16 = 12;
 
-pub(crate) fn rename_button_rects(inner: Rect) -> (Rect, Rect, Rect) {
+/// Rename-pane's modal is two rows taller than the other rename modals: a
+/// caption + input row for sticky launch flags (see
+/// `TerminalState::sticky_launch_flags`).
+pub(crate) fn rename_modal_height(mode: Mode) -> u16 {
+    if mode == Mode::RenamePane {
+        9
+    } else {
+        7
+    }
+}
+
+pub(crate) fn rename_button_rects_for_mode(inner: Rect, mode: Mode) -> (Rect, Rect, Rect) {
     let save = t!("dialogs.save").to_string();
     let clear = t!("dialogs.clear").to_string();
     let cancel = t!("dialogs.cancel").to_string();
+    let row_offset = if mode == Mode::RenamePane { 5 } else { 3 };
     let rects = action_button_row_rects(
         inner,
         &[
@@ -40,7 +52,7 @@ pub(crate) fn rename_button_rects(inner: Rect) -> (Rect, Rect, Rect) {
             },
         ],
         2,
-        3,
+        row_offset,
     );
     (rects[0], rects[1], rects[2])
 }
@@ -59,28 +71,49 @@ pub(super) fn render_rename_overlay(app: &AppState, frame: &mut Frame, area: Rec
         _ => return,
     };
 
-    let Some(inner) = render_modal_shell(frame, area, 56, 7, &app.palette) else {
+    let Some(inner) = render_modal_shell(frame, area, 56, rename_modal_height(app.mode), &app.palette)
+    else {
         return;
     };
     if inner.height < 4 {
         return;
     }
 
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas::<5>(inner);
+    let is_rename_pane = app.mode == Mode::RenamePane;
+    let editing_flags = is_rename_pane && app.rename_pane_editing_flags;
+
+    let rows = if is_rename_pane {
+        Layout::vertical([
+            Constraint::Length(1), // header
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // name input
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // launch-flags caption
+            Constraint::Length(1), // launch-flags input
+            Constraint::Length(1), // blank
+            Constraint::Min(0),    // buttons
+        ])
+        .areas::<8>(inner)
+        .to_vec()
+    } else {
+        Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas::<5>(inner)
+        .to_vec()
+    };
 
     render_modal_header(frame, rows[0], &title, &app.palette);
 
+    let name_cursor = if !editing_flags { "█" } else { "" };
     let input_rect = Rect::new(rows[2].x, rows[2].y, rows[2].width, 1);
     frame.render_widget(Clear, input_rect);
     frame.render_widget(
-        Paragraph::new(format!(" {}█", app.name_input)).style(
+        Paragraph::new(format!(" {}{}", app.name_input, name_cursor)).style(
             Style::default()
                 .fg(app.palette.text)
                 .bg(app.palette.surface0),
@@ -88,7 +121,28 @@ pub(super) fn render_rename_overlay(app: &AppState, frame: &mut Frame, area: Rec
         input_rect,
     );
 
-    let (save_rect, clear_rect, cancel_rect) = rename_button_rects(inner);
+    if is_rename_pane {
+        let caption_rect = Rect::new(rows[4].x, rows[4].y, rows[4].width, 1);
+        frame.render_widget(
+            Paragraph::new(format!(" {}", t!("dialogs.launch_flags_label")))
+                .style(Style::default().fg(app.palette.subtext0)),
+            caption_rect,
+        );
+
+        let flags_cursor = if editing_flags { "█" } else { "" };
+        let flags_rect = Rect::new(rows[5].x, rows[5].y, rows[5].width, 1);
+        frame.render_widget(Clear, flags_rect);
+        frame.render_widget(
+            Paragraph::new(format!(" {}{}", app.launch_flags_input, flags_cursor)).style(
+                Style::default()
+                    .fg(app.palette.text)
+                    .bg(app.palette.surface0),
+            ),
+            flags_rect,
+        );
+    }
+
+    let (save_rect, clear_rect, cancel_rect) = rename_button_rects_for_mode(inner, app.mode);
 
     render_action_button(
         frame,

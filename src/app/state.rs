@@ -1958,6 +1958,14 @@ pub struct AppState {
     pub request_complete_onboarding: bool,
     pub name_input: String,
     pub name_input_replace_on_type: bool,
+    /// Second field of the rename-pane modal: sticky launch flags (see
+    /// `TerminalState::sticky_launch_flags`), space-separated. Only used in
+    /// `Mode::RenamePane`.
+    pub launch_flags_input: String,
+    /// Which of the two rename-pane modal fields (name vs. launch flags) is
+    /// currently receiving typed input. Toggled with Tab. Meaningless outside
+    /// `Mode::RenamePane`.
+    pub rename_pane_editing_flags: bool,
     pub release_notes: Option<ReleaseNotesState>,
     pub product_announcement: Option<ProductAnnouncementState>,
     pub navigator: NavigatorState,
@@ -2349,6 +2357,8 @@ impl AppState {
             request_complete_onboarding: false,
             name_input: String::new(),
             name_input_replace_on_type: false,
+            launch_flags_input: String::new(),
+            rename_pane_editing_flags: false,
             release_notes: None,
             product_announcement: None,
             navigator: NavigatorState::default(),

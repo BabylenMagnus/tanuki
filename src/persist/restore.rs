@@ -819,7 +819,7 @@ fn merge_persisted_launch_flags(
 /// from a live process or a previously saved `launch_argv`. Unlike
 /// `merge_persisted_launch_flags`, `sticky` is a flags-only list (no leading
 /// binary name).
-fn merge_sticky_launch_flags(argv: Vec<String>, sticky: Option<&[String]>) -> Vec<String> {
+pub(crate) fn merge_sticky_launch_flags(argv: Vec<String>, sticky: Option<&[String]>) -> Vec<String> {
     let Some(sticky) = sticky else {
         return argv;
     };

@@ -27,6 +27,24 @@ enum RuntimeExitAction {
     ClosePane,
 }
 
+/// A sticky-flagged pane gets its resume command retyped into the fresh
+/// shell spawned by `respawn_shell_for_launch_pane`, same as a native resume
+/// would -- but only when `launch_argv` gives us an actual command template
+/// to retype. With no known template, there's nothing safe to synthesize
+/// from sticky flags alone (pre-mortem launch-blocking Tiger #1), so this
+/// stays a bare shell exactly like before sticky flags existed.
+fn sticky_flagged_respawn_command(
+    sticky_launch_flags: &Option<Vec<String>>,
+    launch_argv: &Option<Vec<String>>,
+) -> Option<String> {
+    let sticky = sticky_launch_flags.as_ref()?;
+    let argv = launch_argv.clone()?;
+    super::agent_resume::shell_command_from_argv(&crate::persist::merge_sticky_launch_flags(
+        argv,
+        Some(sticky),
+    ))
+}
+
 impl App {
     pub(crate) fn dispatch_api_request(
         &mut self,
@@ -528,6 +546,8 @@ impl App {
         };
 
         let cwd = terminal.cwd.clone();
+        let resume_command =
+            sticky_flagged_respawn_command(&terminal.sticky_launch_flags, &terminal.launch_argv);
         let (rows, cols) = self
             .terminal_runtimes
             .get(&terminal_id)
@@ -561,8 +581,22 @@ impl App {
             }
         };
 
+        if let Some(mut command) = resume_command {
+            command.push('\r');
+            if let Err(err) = runtime.try_send_bytes(bytes::Bytes::from(command)) {
+                tracing::warn!(
+                    pane = pane_id.raw(),
+                    terminal = %terminal_id,
+                    err = %err,
+                    "failed to retype sticky-flagged resume command into respawned shell"
+                );
+            }
+        }
+
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            // sticky_launch_flags intentionally survives this reset, same as
+            // launch_argv already does -- see `clear_agent_runtime_identity_after_respawn`.
             terminal.clear_agent_runtime_identity_after_respawn();
         }
         self.state.focus_pane_in_workspace(ws_idx, pane_id);
@@ -2140,6 +2174,78 @@ mod tests {
         assert!(!terminal.respawn_shell_on_exit);
         assert!(terminal.persisted_agent_session.is_none());
         assert!(terminal.agent_name.is_none());
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+    }
+
+    #[test]
+    fn sticky_flagged_respawn_command_merges_when_launch_argv_known() {
+        let sticky = Some(vec!["--marker-flag".to_string()]);
+        let launch_argv = Some(vec!["claude".to_string(), "--resume".to_string(), "id".to_string()]);
+        assert_eq!(
+            sticky_flagged_respawn_command(&sticky, &launch_argv).as_deref(),
+            Some("claude --resume id --marker-flag")
+        );
+    }
+
+    #[test]
+    fn sticky_flagged_respawn_command_is_none_without_known_launch_argv() {
+        // Sticky flags with no known command template must never be
+        // synthesized into a command from scratch -- pre-mortem
+        // launch-blocking Tiger #1. The pane must stay a plain bare shell,
+        // exactly as it did before sticky flags existed.
+        let sticky = Some(vec!["--marker-flag".to_string()]);
+        assert_eq!(sticky_flagged_respawn_command(&sticky, &None), None);
+    }
+
+    #[test]
+    fn sticky_flagged_respawn_command_is_none_without_sticky_flags() {
+        let launch_argv = Some(vec!["claude".to_string(), "--resume".to_string(), "id".to_string()]);
+        assert_eq!(sticky_flagged_respawn_command(&None, &launch_argv), None);
+    }
+
+    #[tokio::test]
+    async fn pane_died_respawn_keeps_sticky_flags_across_identity_reset() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let workspace = crate::workspace::Workspace::test_new("restored");
+        let pane_id = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.terminal_id(pane_id).cloned().unwrap();
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        terminal.respawn_shell_on_exit = true;
+        terminal.launch_argv = Some(vec!["printf".into(), "resumed".into()]);
+        terminal.set_sticky_launch_flags(Some(vec!["--marker-flag".into()]));
+
+        app.handle_internal_event(AppEvent::PaneDied { pane_id });
+
+        assert!(
+            app.terminal_runtimes.get(&terminal_id).is_some(),
+            "respawn should leave a shell runtime"
+        );
+        let terminal = app
+            .state
+            .terminals
+            .get(&terminal_id)
+            .expect("terminal should survive respawn");
+        assert_eq!(
+            terminal.sticky_launch_flags.as_deref(),
+            Some(["--marker-flag".to_string()].as_slice()),
+            "sticky flags must survive the respawn identity reset"
+        );
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();

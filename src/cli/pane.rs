@@ -437,6 +437,7 @@ fn pane_rename(args: &[String]) -> std::io::Result<i32> {
     super::runtime::pane_rename(PaneRenameParams {
         pane_id: super::normalize_pane_id(raw_pane_id),
         label,
+        ..Default::default()
     })
 }
 

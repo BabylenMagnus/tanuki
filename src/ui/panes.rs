@@ -620,19 +620,18 @@ fn render_pane_border_titles(
         if !info.borders.contains(Borders::TOP) || info.rect.width <= 4 {
             continue;
         }
-        let Some(title) = ws
+        let Some(terminal) = ws
             .pane_state(info.id)
             .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
-            .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
-            .and_then(|label| pane_border_title(&label, info.rect.width, info.is_focused))
         else {
             continue;
         };
+        let has_sticky_launch_flags = terminal.sticky_launch_flags.is_some();
         let y = info.rect.y;
         if y < area.y || y >= area.y.saturating_add(area.height) {
             continue;
         }
-        let start_x = info.rect.x.saturating_add(1);
+        let mut start_x = info.rect.x.saturating_add(1);
         let end_x = info
             .rect
             .x
@@ -642,6 +641,28 @@ fn render_pane_border_titles(
         if start_x >= end_x {
             continue;
         }
+
+        // Sticky launch flags (e.g. --dangerously-skip-permissions) are a
+        // trust/permission setting, not cosmetic -- surface them as a badge
+        // right in the border so the state is visible at a glance, not only
+        // discoverable by opening the rename-pane modal.
+        if has_sticky_launch_flags {
+            buf.set_stringn(start_x, y, "⚡", 1, Style::default().fg(app.palette.yellow));
+            start_x = start_x.saturating_add(1);
+            if start_x >= end_x {
+                continue;
+            }
+        }
+
+        let badge_width = if has_sticky_launch_flags { 1 } else { 0 };
+        let title_pane_width = info.rect.width.saturating_sub(badge_width);
+        let Some(title) = terminal
+            .border_label(app.show_agent_labels_on_pane_borders)
+            .and_then(|label| pane_border_title(&label, title_pane_width, info.is_focused))
+        else {
+            continue;
+        };
+
         let color = if info.is_focused {
             app.palette.accent
         } else {

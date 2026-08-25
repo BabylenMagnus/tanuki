@@ -11,6 +11,7 @@ mod snapshot;
 
 pub use self::io::{clear, clear_history, load, load_history, save};
 pub use self::restore::restore;
+pub(crate) use self::restore::merge_sticky_launch_flags;
 #[cfg(unix)]
 pub use self::restore::{handoff_pane_aliases, restore_handoff};
 pub use self::snapshot::{

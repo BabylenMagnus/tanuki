@@ -287,6 +287,10 @@ dialogs.rename_pane:
   en: rename pane
   ru: переименовать панель
   ru-pre1918: переименовать панель
+dialogs.launch_flags_label:
+  en: launch flags (optional, tab to switch)
+  ru: флаги запуска (опционально, tab для переключения)
+  ru-pre1918: флаги запуска (опціонально, tab для переключенія)
 dialogs.new_worktree:
   en: new worktree
   ru: новый worktree

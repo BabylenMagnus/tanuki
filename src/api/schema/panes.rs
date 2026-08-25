@@ -220,11 +220,16 @@ pub struct PaneCurrentParams {
     pub caller_pane_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneRenameParams {
     pub pane_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Sticky launch flags (see `TerminalState::sticky_launch_flags`).
+    /// `None`/omitted leaves the pane's existing sticky flags untouched;
+    /// pass an empty list to explicitly clear them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticky_launch_flags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

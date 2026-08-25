@@ -621,6 +621,8 @@ impl App {
             request_complete_onboarding: false,
             name_input: String::new(),
             name_input_replace_on_type: false,
+            launch_flags_input: String::new(),
+            rename_pane_editing_flags: false,
             release_notes: None,
             product_announcement: startup_product_announcement.map(|announcement| {
                 state::ProductAnnouncementState {
@@ -3718,6 +3720,7 @@ mod tests {
             method: crate::api::schema::Method::PaneRename(crate::api::schema::PaneRenameParams {
                 pane_id: "w1:p1".into(),
                 label: Some("logs".into()),
+                ..Default::default()
             }),
         };
         let worktree_list = crate::api::schema::Request {
@@ -3960,6 +3963,7 @@ mod tests {
             method: crate::api::schema::Method::PaneRename(crate::api::schema::PaneRenameParams {
                 pane_id: pane_id.clone(),
                 label: Some("reviewer".into()),
+                ..Default::default()
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -3986,6 +3990,7 @@ mod tests {
             method: crate::api::schema::Method::PaneRename(crate::api::schema::PaneRenameParams {
                 pane_id,
                 label: None,
+                ..Default::default()
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();

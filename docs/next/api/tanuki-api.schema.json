@@ -2723,6 +2723,16 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "sticky_launch_flags": {
+              "description": "Sticky launch flags (see `TerminalState::sticky_launch_flags`).\n`None`/omitted leaves the pane's existing sticky flags untouched;\npass an empty list to explicitly clear them.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
             }
           },
           "required": [
