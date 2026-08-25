@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.97] - 2026-08-25
+
 ### Added
 - Add sticky launch flags support for panes and update UI labels
 
