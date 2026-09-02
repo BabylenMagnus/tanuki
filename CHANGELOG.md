@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.98] - 2026-09-02
+
 ### Added
 - Update versions and add new rules for detection systems
 
