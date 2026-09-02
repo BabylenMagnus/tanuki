@@ -18,7 +18,7 @@ include = [
 ]
 
 [dependencies]
-base64 = "0.22.1"
+base64 = "0.23.1"
 bincode = { version = "2", features = ["serde"] }
 bytes = "1"
 clap = { version = "4.5", default-features = false, features = ["std", "help", "usage"] }
@@ -28,15 +28,15 @@ ctrlc = "3"
 interprocess = "2.4.2"
 libc = "0.2"
 portable-pty = "=0.9.0"
-png = "0.17"
+png = "0.18"
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_ignored = "0.1.14"
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-toml = "0.8"
+toml = "1.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-width = "0.2"
@@ -51,7 +51,7 @@ rust-i18n = "4"
 # (webrtc-sctp 0.17.2 added a non-additive field to a public struct;
 # webrtc 0.17.0's own Cargo.toml doesn't exclude it, an upstream semver
 # violation). 0.17.2 is the release that matches its own sub-crates.
-webrtc = "=0.17.2"
+webrtc = "=0.20.3"
 # rust_socketio pulls in native-tls unconditionally (no rustls option). On Linux/musl
 # targets native-tls links the system OpenSSL via pkg-config, which isn't available
 # (or isn't musl-compatible) on CI/cross-compile runners. Forcing the `vendored`
@@ -96,8 +96,8 @@ windows-sys = { version = "0.61.2", features = [
 # Native Windows self-update (tanuki update, src/platform/windows_install.rs):
 # junction creates/reads/deletes NTFS directory junctions for the
 # versioned-release-dir layout without hand-rolling FSCTL_SET_REPARSE_POINT.
-junction = "1.2.0"
+junction = "2.0.0"
 # winreg is already resolved transitively (via vendor/portable-pty's Windows
 # deps); promoted to a direct dependency to read/write HKCU\Environment\Path.
-winreg = "0.10.1"
+winreg = "0.56.0"
 
