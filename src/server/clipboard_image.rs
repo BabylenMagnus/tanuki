@@ -114,9 +114,10 @@ fn sanitize_file_name(name: &str) -> String {
     let mut cleaned: String = last
         .chars()
         .map(|ch| {
-            if ch.is_control() || ch.is_whitespace() {
-                '_'
-            } else if matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*') {
+            if ch.is_control()
+                || ch.is_whitespace()
+                || matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+            {
                 '_'
             } else {
                 ch

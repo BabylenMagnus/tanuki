@@ -287,7 +287,13 @@ pub(crate) fn run_send(args: &[String]) -> i32 {
     };
 
     match send_to_remote(&target, &paths) {
-        Ok(all_staged) => all_staged.then_some(0).unwrap_or(1),
+        Ok(all_staged) => {
+            if all_staged {
+                0
+            } else {
+                1
+            }
+        }
         Err(err) => {
             eprintln!("error: {err}");
             crate::remote::print_remote_error_hint(&err, &target);
