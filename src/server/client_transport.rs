@@ -17,8 +17,8 @@ use tracing::{debug, warn};
 use crate::ipc::Transport;
 use crate::protocol::{
     self, AttachScrollDirection, AttachScrollSource, ClientInputEvent, ClientKeybindings,
-    ClientLaunchMode, ClientMessage, RenderEncoding, ServerMessage, MAX_CLIPBOARD_IMAGE_PAYLOAD,
-    MAX_FRAME_SIZE, MAX_GRAPHICS_FRAME_SIZE, PROTOCOL_VERSION,
+    ClientLaunchMode, ClientMessage, RenderEncoding, ServerMessage, MAX_CLIENT_FRAME_SIZE,
+    MAX_CLIPBOARD_FILE_PAYLOAD, MAX_CLIPBOARD_IMAGE_PAYLOAD, MAX_FRAME_SIZE, PROTOCOL_VERSION,
 };
 
 /// Minimum accepted attached client size.
@@ -309,6 +309,13 @@ pub(crate) enum ServerEvent {
         client_id: u64,
         extension: String,
         data: Vec<u8>,
+    },
+    /// A client sent a local file to stage on the server.
+    ClientClipboardFile {
+        client_id: u64,
+        name: String,
+        data: Vec<u8>,
+        paste: bool,
     },
     /// A client requested direct attach to one terminal.
     ClientAttachTerminal {
@@ -632,8 +639,7 @@ fn client_read_loop(
     should_quit: &Arc<AtomicBool>,
 ) -> io::Result<()> {
     while !should_quit.load(Ordering::Acquire) {
-        let msg: ClientMessage = match protocol::read_message(&mut stream, MAX_GRAPHICS_FRAME_SIZE)
-        {
+        let msg: ClientMessage = match protocol::read_message(&mut stream, MAX_CLIENT_FRAME_SIZE) {
             Ok(msg) => msg,
             Err(protocol::FramingError::UnexpectedEof) => {
                 // Client disconnected.
@@ -741,6 +747,25 @@ fn client_read_loop(
                         client_id,
                         extension,
                         data,
+                    }
+                }
+            }
+            ClientMessage::ClipboardFile { name, data, paste } => {
+                if data.len() > MAX_CLIPBOARD_FILE_PAYLOAD {
+                    warn!(
+                        client_id,
+                        size = data.len(),
+                        "oversized clipboard file from client, closing"
+                    );
+                    let _ = server_event_tx
+                        .blocking_send(ServerEvent::ClientDisconnected { client_id });
+                    break;
+                } else {
+                    ServerEvent::ClientClipboardFile {
+                        client_id,
+                        name,
+                        data,
+                        paste,
                     }
                 }
             }

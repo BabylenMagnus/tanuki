@@ -728,12 +728,6 @@ pub fn open_url(url: &str) -> std::io::Result<()> {
     }
 }
 
-// Implemented for parity with macOS/Linux (see platform::ClipboardImage), but
-// the client event loop's clipboard-image-paste bridging trigger is still
-// `#[cfg(unix)]`-only (see `should_bridge_clipboard_image_paste` in
-// `client/mod.rs`), so this is unreachable on Windows builds until that
-// wiring is added.
-#[cfg_attr(windows, allow(dead_code))]
 pub fn read_clipboard_image() -> Option<ClipboardImage> {
     for attempt in 0..10 {
         if unsafe { OpenClipboard(null_mut()) } != 0 {

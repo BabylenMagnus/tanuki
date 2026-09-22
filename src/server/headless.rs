@@ -3384,6 +3384,52 @@ impl HeadlessServer {
                     }
                 }
             }
+            ServerEvent::ClientClipboardFile {
+                client_id,
+                name,
+                data,
+                paste,
+            } => {
+                debug!(
+                    client_id,
+                    len = data.len(),
+                    paste,
+                    "client clipboard file received"
+                );
+                if matches!(
+                    self.clients.get(&client_id).map(|client| &client.mode),
+                    Some(ClientConnectionMode::TerminalObserve { .. })
+                ) {
+                    return false;
+                }
+                match crate::server::clipboard_image::stage_file(client_id, &name, &data) {
+                    Ok(path) => {
+                        let path = path.to_string_lossy().into_owned();
+                        info!(client_id, bytes = data.len(), path = %path, "staged client file");
+                        self.send_to_client(
+                            client_id,
+                            ServerMessage::FileStaged {
+                                name,
+                                path: Some(path.clone()),
+                                error: None,
+                            },
+                        );
+                        paste && self.paste_client_clipboard_image_path(client_id, path)
+                    }
+                    Err(err) => {
+                        warn!(client_id, err = %err, "failed to stage client file");
+                        self.send_to_client(
+                            client_id,
+                            ServerMessage::FileStaged {
+                                name,
+                                path: None,
+                                error: Some(err.to_string()),
+                            },
+                        );
+                        false
+                    }
+                }
+            }
             ServerEvent::ClientResize {
                 client_id,
                 cols,

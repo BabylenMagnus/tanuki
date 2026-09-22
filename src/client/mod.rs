@@ -13,6 +13,7 @@
 //! - Displays sound/toast notifications forwarded from server
 
 mod input;
+pub(crate) mod send;
 
 use std::collections::HashSet;
 use std::io::{self, BufRead, Write as _};
@@ -35,7 +36,8 @@ use tracing::{debug, info, warn};
 
 use crate::ipc::Transport;
 use crate::protocol::render_ansi;
-#[cfg(unix)]
+#[cfg(windows)]
+use crate::protocol::MAX_CLIPBOARD_FILE_PAYLOAD;
 use crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD;
 use crate::protocol::{
     self, AttachScrollDirection, AttachScrollSource, ClientKeybindings, ClientLaunchMode,
@@ -57,7 +59,6 @@ struct ClientLoopConfig {
     host_cursor: crate::config::HostCursorModeConfig,
     kitty_graphics_enabled: bool,
     mouse_capture_active: bool,
-    #[cfg(unix)]
     remote_image_paste_key: Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)>,
 }
 
@@ -79,7 +80,6 @@ struct ClientState {
     #[cfg(unix)]
     mouse_scroll_lines: usize,
     /// Local-client shortcut that sends a clipboard image to a remote Tanuki session.
-    #[cfg(unix)]
     remote_image_paste_key: Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)>,
     /// Whether outer focus gain should force a full host-terminal redraw.
     redraw_on_focus_gained: bool,
@@ -690,7 +690,6 @@ fn requested_render_encoding() -> RenderEncoding {
     }
 }
 
-#[cfg(unix)]
 fn is_remote_client_process() -> bool {
     std::env::var(crate::remote::REMOTE_KEYBINDINGS_ENV_VAR).is_ok()
 }
@@ -1167,7 +1166,6 @@ fn run_client_with_mode(
     let redraw_on_focus_gained = loaded_config.config.ui.redraw_on_focus_gained;
     let host_cursor = loaded_config.config.ui.host_cursor;
     let direct_attach_requested = attach_request.is_some();
-    #[cfg(unix)]
     let remote_image_paste_key = client_remote_image_paste_key(&loaded_config.config);
     let kitty_graphics_enabled =
         loaded_config.config.experimental.kitty_graphics && !direct_attach_requested;
@@ -1178,7 +1176,6 @@ fn run_client_with_mode(
         host_cursor,
         kitty_graphics_enabled,
         mouse_capture_active: mouse_capture,
-        #[cfg(unix)]
         remote_image_paste_key,
     };
 
@@ -1459,7 +1456,6 @@ async fn run_client_loop(
     #[cfg(windows)]
     let _ = config.mouse_scroll_lines;
     let draw_host_cursor = attach_escape.is_none() && should_draw_host_cursor(config.host_cursor);
-    #[cfg(unix)]
     let is_remote_client = is_remote_client_process();
 
     let mut state = ClientState {
@@ -1471,7 +1467,6 @@ async fn run_client_loop(
         attach_escape,
         #[cfg(unix)]
         mouse_scroll_lines: config.mouse_scroll_lines,
-        #[cfg(unix)]
         remote_image_paste_key: config.remote_image_paste_key,
         redraw_on_focus_gained: config.redraw_on_focus_gained,
         draw_host_cursor,
@@ -1663,6 +1658,73 @@ async fn run_client_loop(
                 ) {
                     state.request_full_redraw();
                 }
+                if should_bridge_clipboard_image_events(
+                    &raw_events,
+                    is_remote_client,
+                    state.remote_image_paste_key,
+                ) {
+                    if let Some(image) = crate::platform::read_clipboard_image() {
+                        if image.bytes.len() > MAX_CLIPBOARD_IMAGE_PAYLOAD {
+                            warn!(
+                                bytes = image.bytes.len(),
+                                max = MAX_CLIPBOARD_IMAGE_PAYLOAD,
+                                "local clipboard image is too large to bridge"
+                            );
+                            continue;
+                        }
+                        info!(
+                            bytes = image.bytes.len(),
+                            extension = image.extension,
+                            "bridging local clipboard image paste to remote server"
+                        );
+                        let msg = ClientMessage::ClipboardImage {
+                            extension: image.extension.to_owned(),
+                            data: image.bytes,
+                        };
+                        if let Err(e) = write_to_server(&mut write_stream, &msg) {
+                            return Err(ClientError::ConnectionLost(e));
+                        }
+                        continue;
+                    }
+                    info!(
+                        "clipboard image paste trigger received, but local clipboard has no image"
+                    );
+                }
+                if let [crate::raw_input::RawInputEvent::Paste(text)] = raw_events.as_slice() {
+                    if let Some(image) = read_image_file_from_paste_text(text, is_remote_client) {
+                        info!(
+                            bytes = image.bytes.len(),
+                            extension = image.extension,
+                            "bridging local image file drop to remote server"
+                        );
+                        let msg = ClientMessage::ClipboardImage {
+                            extension: image.extension.to_owned(),
+                            data: image.bytes,
+                        };
+                        if let Err(e) = write_to_server(&mut write_stream, &msg) {
+                            return Err(ClientError::ConnectionLost(e));
+                        }
+                        continue;
+                    }
+                    if let Some((name, data)) =
+                        read_dropped_file_from_paste_text(text, is_remote_client)
+                    {
+                        info!(
+                            bytes = data.len(),
+                            name = %name,
+                            "bridging local file drop to remote server"
+                        );
+                        let msg = ClientMessage::ClipboardFile {
+                            name,
+                            data,
+                            paste: true,
+                        };
+                        if let Err(e) = write_to_server(&mut write_stream, &msg) {
+                            return Err(ClientError::ConnectionLost(e));
+                        }
+                        continue;
+                    }
+                }
                 let msg = ClientMessage::InputEvents { events };
                 if let Err(e) = write_to_server(&mut write_stream, &msg) {
                     return Err(ClientError::ConnectionLost(e));
@@ -1752,12 +1814,15 @@ async fn run_client_loop(
                         title.as_deref(),
                     );
                 }
+                ServerMessage::FileStaged { name, path, error } => match (path, error) {
+                    (Some(path), _) => info!(name, path, "server staged dropped file"),
+                    (None, error) => warn!(name, ?error, "server failed to stage dropped file"),
+                },
                 ServerMessage::ReloadSoundConfig => {
                     reload_local_client_config(
                         &mut state.sound_config,
                         &mut state.redraw_on_focus_gained,
                         &mut state.draw_host_cursor,
-                        #[cfg(unix)]
                         &mut state.remote_image_paste_key,
                     );
                 }
@@ -1870,7 +1935,6 @@ fn write_to_server(stream: &mut Transport, msg: &ClientMessage) -> io::Result<()
 // Notifications
 // ---------------------------------------------------------------------------
 
-#[cfg(unix)]
 fn client_remote_image_paste_key(
     config: &crate::config::Config,
 ) -> Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)> {
@@ -1891,7 +1955,7 @@ fn reload_local_client_config(
     sound_config: &mut crate::config::SoundConfig,
     redraw_on_focus_gained: &mut bool,
     draw_host_cursor: &mut bool,
-    #[cfg(unix)] remote_image_paste_key: &mut Option<(
+    remote_image_paste_key: &mut Option<(
         crossterm::event::KeyCode,
         crossterm::event::KeyModifiers,
     )>,
@@ -1901,15 +1965,11 @@ fn reload_local_client_config(
             for diagnostic in loaded.config.ui.sound.diagnostics() {
                 warn!(diagnostic = %diagnostic, "local sound config diagnostic");
             }
-            #[cfg(unix)]
             let loaded_remote_image_paste_key = client_remote_image_paste_key(&loaded.config);
             *sound_config = loaded.config.ui.sound;
             *redraw_on_focus_gained = loaded.config.ui.redraw_on_focus_gained;
             *draw_host_cursor = should_draw_host_cursor(loaded.config.ui.host_cursor);
-            #[cfg(unix)]
-            {
-                *remote_image_paste_key = loaded_remote_image_paste_key;
-            }
+            *remote_image_paste_key = loaded_remote_image_paste_key;
             debug!("reloaded local client config");
         }
         Err(diagnostics) => {
@@ -1984,6 +2044,30 @@ fn sound_from_notify_message(message: &str) -> Option<crate::sound::Sound> {
     }
 }
 
+/// Whether `events` are the "paste the clipboard image" trigger of a remote
+/// client: the configured key, or an empty bracketed paste (what a terminal
+/// sends when the clipboard holds an image and no text).
+fn should_bridge_clipboard_image_events(
+    events: &[crate::raw_input::RawInputEvent],
+    is_remote_client: bool,
+    remote_image_paste_key: Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)>,
+) -> bool {
+    if matches!(events, [crate::raw_input::RawInputEvent::Paste(text)] if text.is_empty()) {
+        return is_remote_client;
+    }
+
+    let Some(remote_image_paste_key) = remote_image_paste_key else {
+        return false;
+    };
+
+    matches!(
+        events,
+        [crate::raw_input::RawInputEvent::Key(key)]
+            if key.kind == crossterm::event::KeyEventKind::Press
+                && crate::config::terminal_key_matches_combo(*key, remote_image_paste_key)
+    )
+}
+
 #[cfg(unix)]
 fn should_bridge_clipboard_image_paste(
     data: &[u8],
@@ -1994,16 +2078,10 @@ fn should_bridge_clipboard_image_paste(
         return is_remote_client;
     }
 
-    let Some(remote_image_paste_key) = remote_image_paste_key else {
-        return false;
-    };
-
-    let events = crate::raw_input::parse_raw_input_bytes_sync(data);
-    matches!(
-        events.as_slice(),
-        [crate::raw_input::RawInputEvent::Key(key)]
-            if key.kind == crossterm::event::KeyEventKind::Press
-                && crate::config::terminal_key_matches_combo(*key, remote_image_paste_key)
+    should_bridge_clipboard_image_events(
+        &crate::raw_input::parse_raw_input_bytes_sync(data),
+        is_remote_client,
+        remote_image_paste_key,
     )
 }
 
@@ -2013,12 +2091,29 @@ fn read_image_file_from_terminal_drop(
     is_remote_client: bool,
 ) -> Option<crate::platform::ClipboardImage> {
     let (path, extension) = image_path_from_terminal_drop(data, is_remote_client)?;
-    let metadata = std::fs::metadata(&path).ok()?;
+    read_image_file(&path, extension)
+}
+
+/// Windows: a dragged-in file arrives as a bracketed paste of its path.
+#[cfg(windows)]
+fn read_image_file_from_paste_text(
+    text: &str,
+    is_remote_client: bool,
+) -> Option<crate::platform::ClipboardImage> {
+    let (path, extension) = image_path_from_drop_text(text, is_remote_client)?;
+    read_image_file(&path, extension)
+}
+
+fn read_image_file(
+    path: &std::path::Path,
+    extension: &'static str,
+) -> Option<crate::platform::ClipboardImage> {
+    let metadata = std::fs::metadata(path).ok()?;
     if !metadata.is_file() {
         return None;
     }
 
-    let file = std::fs::File::open(&path).ok()?;
+    let file = std::fs::File::open(path).ok()?;
     let bytes =
         match crate::platform::read_limited_reader(file, MAX_CLIPBOARD_IMAGE_PAYLOAD).ok()? {
             crate::platform::LimitedRead::Complete(bytes) => bytes,
@@ -2046,6 +2141,16 @@ fn image_path_from_terminal_drop(
 
     let bytes = bracketed_paste_payload(data).unwrap_or(data);
     let text = std::str::from_utf8(bytes).ok()?;
+    image_path_from_drop_text(text, is_remote_client)
+}
+
+/// Parses the text a terminal produces when a file is dropped onto it: one
+/// absolute path, optionally quoted.
+fn path_from_drop_text(text: &str, is_remote_client: bool) -> Option<std::path::PathBuf> {
+    if !is_remote_client {
+        return None;
+    }
+
     let text = text.trim_end_matches(['\r', '\n']);
     if text.is_empty() || text.contains(['\r', '\n']) {
         return None;
@@ -2053,12 +2158,50 @@ fn image_path_from_terminal_drop(
 
     let text = unescape_terminal_drop_path(strip_matching_path_quotes(text));
     let path = std::path::PathBuf::from(text);
-    if !path.is_absolute() {
-        return None;
-    }
+    path.is_absolute().then_some(path)
+}
 
+/// Like [`path_from_drop_text`], but only for paths naming an image file.
+fn image_path_from_drop_text(
+    text: &str,
+    is_remote_client: bool,
+) -> Option<(std::path::PathBuf, &'static str)> {
+    let path = path_from_drop_text(text, is_remote_client)?;
     let extension = recognized_image_extension(path.extension()?.to_str()?)?;
     Some((path, extension))
+}
+
+/// Windows: a dropped non-image file, read for upload as `ClipboardFile`.
+///
+/// Deliberately Windows-only. There, an absolute `C:\...` path pasted into a
+/// remote (Unix) session can only be a dropped local file, since it means
+/// nothing on the server. On a Unix client an absolute path such as
+/// `/var/log/syslog` usually names a file that exists on *both* machines, so
+/// silently uploading the local copy of what was meant as pasted text would be
+/// a surprising data leak; Unix clients use `tanuki send` for arbitrary files.
+#[cfg(windows)]
+fn read_dropped_file_from_paste_text(
+    text: &str,
+    is_remote_client: bool,
+) -> Option<(String, Vec<u8>)> {
+    let path = path_from_drop_text(text, is_remote_client)?;
+    if !path.is_file() {
+        return None;
+    }
+    let file = std::fs::File::open(&path).ok()?;
+    let data = match crate::platform::read_limited_reader(file, MAX_CLIPBOARD_FILE_PAYLOAD).ok()? {
+        crate::platform::LimitedRead::Complete(data) => data,
+        crate::platform::LimitedRead::Empty => Vec::new(),
+        crate::platform::LimitedRead::Oversized => {
+            warn!(
+                max = MAX_CLIPBOARD_FILE_PAYLOAD,
+                "dropped file is too large to send to the remote server"
+            );
+            return None;
+        }
+    };
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    Some((name, data))
 }
 
 #[cfg(unix)]
@@ -2068,7 +2211,6 @@ fn bracketed_paste_payload(data: &[u8]) -> Option<&[u8]> {
     data.strip_prefix(START)?.strip_suffix(END)
 }
 
-#[cfg(unix)]
 fn strip_matching_path_quotes(text: &str) -> &str {
     if text.len() < 2 {
         return text;
@@ -2099,7 +2241,12 @@ fn unescape_terminal_drop_path(text: &str) -> String {
     unescaped
 }
 
-#[cfg(unix)]
+/// Backslash is the path separator on Windows, not an escape character.
+#[cfg(windows)]
+fn unescape_terminal_drop_path(text: &str) -> String {
+    text.to_owned()
+}
+
 fn recognized_image_extension(extension: &str) -> Option<&'static str> {
     if extension.eq_ignore_ascii_case("png") {
         Some("png")
@@ -2417,6 +2564,128 @@ mod tests {
         assert!(should_draw_host_cursor(
             crate::config::HostCursorModeConfig::Drawn
         ));
+    }
+
+    #[test]
+    fn clipboard_image_bridge_events_trigger_on_configured_key_and_empty_paste() {
+        use crate::raw_input::RawInputEvent;
+
+        let ctrl_v = crate::config::parse_key_combo("ctrl+v").unwrap();
+        let ctrl_v_event = RawInputEvent::Key(crate::input::TerminalKey::new(
+            crossterm::event::KeyCode::Char('v'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        let empty_paste = RawInputEvent::Paste(String::new());
+        let text_paste = RawInputEvent::Paste("text".into());
+        let plain_v = RawInputEvent::Key(crate::input::TerminalKey::new(
+            crossterm::event::KeyCode::Char('v'),
+            crossterm::event::KeyModifiers::empty(),
+        ));
+
+        assert!(should_bridge_clipboard_image_events(
+            std::slice::from_ref(&ctrl_v_event),
+            true,
+            Some(ctrl_v)
+        ));
+        assert!(should_bridge_clipboard_image_events(
+            std::slice::from_ref(&empty_paste),
+            true,
+            None
+        ));
+        assert!(!should_bridge_clipboard_image_events(
+            std::slice::from_ref(&empty_paste),
+            false,
+            Some(ctrl_v)
+        ));
+        assert!(!should_bridge_clipboard_image_events(
+            std::slice::from_ref(&text_paste),
+            true,
+            Some(ctrl_v)
+        ));
+        assert!(!should_bridge_clipboard_image_events(
+            std::slice::from_ref(&ctrl_v_event),
+            true,
+            None
+        ));
+        assert!(!should_bridge_clipboard_image_events(
+            std::slice::from_ref(&plain_v),
+            true,
+            Some(ctrl_v)
+        ));
+        assert!(!should_bridge_clipboard_image_events(
+            &[ctrl_v_event, plain_v],
+            true,
+            Some(ctrl_v)
+        ));
+    }
+
+    #[test]
+    fn image_drop_text_accepts_absolute_quoted_image_path() {
+        #[cfg(windows)]
+        {
+            let (path, extension) =
+                image_path_from_drop_text("\"C:\\Users\\me\\My Shots\\shot.PNG\"\r\n", true)
+                    .unwrap();
+            assert_eq!(
+                path,
+                std::path::PathBuf::from("C:\\Users\\me\\My Shots\\shot.PNG")
+            );
+            assert_eq!(extension, "png");
+
+            let (path, extension) = image_path_from_drop_text("C:\\tmp\\a.jpeg", true).unwrap();
+            assert_eq!(path, std::path::PathBuf::from("C:\\tmp\\a.jpeg"));
+            assert_eq!(extension, "jpg");
+        }
+        #[cfg(unix)]
+        {
+            let (path, extension) =
+                image_path_from_drop_text("'/tmp/My Shots/shot.PNG'", true).unwrap();
+            assert_eq!(path, std::path::PathBuf::from("/tmp/My Shots/shot.PNG"));
+            assert_eq!(extension, "png");
+        }
+    }
+
+    #[test]
+    fn image_drop_text_rejects_non_remote_relative_non_image_and_multiline() {
+        #[cfg(windows)]
+        let (absolute_png, absolute_txt) = ("C:\\tmp\\a.png", "C:\\tmp\\a.txt");
+        #[cfg(unix)]
+        let (absolute_png, absolute_txt) = ("/tmp/a.png", "/tmp/a.txt");
+
+        assert!(image_path_from_drop_text(absolute_png, false).is_none());
+        assert!(image_path_from_drop_text("relative\\a.png", true).is_none());
+        assert!(image_path_from_drop_text("a.png", true).is_none());
+        assert!(image_path_from_drop_text(absolute_txt, true).is_none());
+        assert!(image_path_from_drop_text(&format!("{absolute_png}\nextra"), true).is_none());
+        assert!(image_path_from_drop_text("", true).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dropped_file_bridge_reads_any_quoted_local_file_only_for_remote_clients() {
+        let dir = std::env::temp_dir().join(format!("tanuki-drop-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("my notes.txt");
+        std::fs::write(&path, b"notes").unwrap();
+        let quoted = format!("\"{}\"", path.display());
+
+        let (name, data) = read_dropped_file_from_paste_text(&quoted, true).unwrap();
+        assert_eq!(name, "my notes.txt");
+        assert_eq!(data, b"notes");
+
+        assert!(read_dropped_file_from_paste_text(&quoted, false).is_none());
+        // Text that is not an existing absolute file path stays ordinary paste text.
+        assert!(read_dropped_file_from_paste_text("hello world", true).is_none());
+        assert!(read_dropped_file_from_paste_text("relative\\notes.txt", true).is_none());
+        assert!(read_dropped_file_from_paste_text(
+            &dir.join("missing.txt").display().to_string(),
+            true
+        )
+        .is_none());
+        // A directory is not a file to upload.
+        assert!(read_dropped_file_from_paste_text(&dir.display().to_string(), true).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
@@ -2976,14 +3245,12 @@ mod tests {
         let mut sound_config = crate::config::SoundConfig::default();
         let mut redraw_on_focus_gained = true;
         let mut draw_host_cursor = false;
-        #[cfg(unix)]
         let mut remote_image_paste_key = None;
 
         reload_local_client_config(
             &mut sound_config,
             &mut redraw_on_focus_gained,
             &mut draw_host_cursor,
-            #[cfg(unix)]
             &mut remote_image_paste_key,
         );
 
@@ -3158,7 +3425,6 @@ mod tests {
             attach_escape: None,
             #[cfg(unix)]
             mouse_scroll_lines: 3,
-            #[cfg(unix)]
             remote_image_paste_key: None,
             redraw_on_focus_gained: false,
             draw_host_cursor: false,

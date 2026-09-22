@@ -250,6 +250,98 @@ pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
     run_client_process(&local_socket, &reattach_command, remote.keybindings)
 }
 
+const SEND_USAGE: &str = "usage: tanuki send <ssh-target> <file>...";
+
+/// Splits `tanuki send`'s arguments into the ssh target and the files.
+pub(crate) fn parse_send_args(args: &[String]) -> Result<(String, Vec<String>), String> {
+    let Some((target, files)) = args.split_first() else {
+        return Err(SEND_USAGE.to_string());
+    };
+    let target = validate_remote_target(target)?.to_owned();
+    if files.is_empty() {
+        return Err(format!("no files to send\n{SEND_USAGE}"));
+    }
+    Ok((target, files.to_vec()))
+}
+
+/// `tanuki send <ssh-target> <file>...`: uploads local files to the server
+/// behind a `--remote` target and prints where each one was staged, one path
+/// per line on stdout, so the output can be pasted or piped. Returns the
+/// process exit code: 0 only when every file was staged.
+pub(crate) fn run_send(args: &[String]) -> i32 {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("{SEND_USAGE}");
+        println!();
+        println!("Uploads local files to the Tanuki server behind an SSH target (the same");
+        println!("target you would pass to `tanuki --remote`) and prints the path each file");
+        println!("was staged at on that server. Files are kept for 24 hours.");
+        return 0;
+    }
+
+    let (target, paths) = match parse_send_args(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return 2;
+        }
+    };
+
+    match send_to_remote(&target, &paths) {
+        Ok(all_staged) => all_staged.then_some(0).unwrap_or(1),
+        Err(err) => {
+            eprintln!("error: {err}");
+            crate::remote::print_remote_error_hint(&err, &target);
+            1
+        }
+    }
+}
+
+/// Returns whether every file was staged.
+fn send_to_remote(target: &str, paths: &[String]) -> io::Result<bool> {
+    // Read everything first so a bad path fails before any ssh work.
+    let files = crate::client::send::read_local_files(paths)?;
+
+    ensure_ssh_available()?;
+
+    let session_name = crate::session::active_name()
+        .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_string());
+    let local_socket = local_forward_socket_path(target, &session_name);
+    let manage_ssh_config = crate::config::Config::load()
+        .config
+        .remote
+        .manage_ssh_config;
+    let remote_ssh = RemoteSsh::new(target.to_owned(), manage_ssh_config);
+    let prepared_remote = prepare_remote_tanuki(&remote_ssh, false)?;
+    ensure_remote_server_ready(
+        &remote_ssh,
+        &prepared_remote.remote_tanuki,
+        prepared_remote.installed_or_replaced,
+        prepared_remote.stop_after_install_approved,
+        false,
+    )?;
+
+    let _bridge = SshStdioBridge::start(
+        target.to_owned(),
+        prepared_remote.remote_tanuki,
+        local_socket.clone(),
+        session_name,
+        remote_ssh.options(),
+    )?;
+
+    let staged = crate::client::send::send_files(&local_socket, files)?;
+    let mut all_staged = true;
+    for file in staged {
+        match file.result {
+            Ok(path) => println!("{path}"),
+            Err(error) => {
+                eprintln!("error: {}: {error}", file.name);
+                all_staged = false;
+            }
+        }
+    }
+    Ok(all_staged)
+}
+
 #[cfg(unix)]
 pub(crate) fn run_remote_client_bridge() -> io::Result<()> {
     ensure_remote_server_running()?;
@@ -2633,6 +2725,31 @@ mod tests {
             "macos-aarch64"
         );
         assert!(RemotePlatform::from_uname("FreeBSD", "x86_64").is_none());
+    }
+
+    #[test]
+    fn parse_send_args_splits_target_and_files() {
+        let args = ["guts-remote", "a.pdf", "dir/b.log"].map(String::from);
+        assert_eq!(
+            parse_send_args(&args).unwrap(),
+            (
+                "guts-remote".to_string(),
+                vec!["a.pdf".to_string(), "dir/b.log".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn parse_send_args_requires_a_target_and_at_least_one_file() {
+        assert!(parse_send_args(&[]).unwrap_err().starts_with("usage:"));
+        let err = parse_send_args(&["guts-remote".to_string()]).unwrap_err();
+        assert!(err.contains("no files to send"), "{err}");
+    }
+
+    #[test]
+    fn parse_send_args_rejects_an_option_shaped_target() {
+        let args = ["-oProxyCommand=evil", "a.pdf"].map(String::from);
+        assert!(parse_send_args(&args).is_err());
     }
 
     #[test]

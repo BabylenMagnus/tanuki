@@ -538,6 +538,12 @@ fn main() -> io::Result<()> {
         std::process::exit(2);
     }
 
+    // `tanuki send <ssh-target> <file>...` takes file paths as positional
+    // arguments, so it is dispatched before the generic option/command checks.
+    if args.get(1).map(|s| s.as_str()) == Some("send") {
+        std::process::exit(remote::run_send(&args[2..]));
+    }
+
     match cli::maybe_run(&args) {
         Ok(cli::CommandOutcome::Handled(code)) => std::process::exit(code),
         Ok(cli::CommandOutcome::NotCli) => {}
@@ -594,6 +600,7 @@ fn main() -> io::Result<()> {
         println!("       tanuki --session <name> [options]");
         println!("       tanuki --remote <ssh-target> [--session <name>]");
         println!("       tanuki --cloud <device-token-id>");
+        println!("       tanuki send <ssh-target> <file>...");
         println!("       tanuki server --cloud-host");
         println!("       tanuki session attach <name>");
         println!("       tanuki completion zsh");

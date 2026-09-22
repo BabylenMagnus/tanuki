@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -26,6 +26,14 @@ pub const MAX_GRAPHICS_FRAME_SIZE: usize = 32 * 1024 * 1024;
 
 /// Maximum clipboard image payload size for remote paste bridging.
 pub const MAX_CLIPBOARD_IMAGE_PAYLOAD: usize = 16 * 1024 * 1024;
+
+/// Maximum file payload size for remote file transfer (`ClientMessage::ClipboardFile`).
+pub const MAX_CLIPBOARD_FILE_PAYLOAD: usize = 64 * 1024 * 1024;
+
+/// Maximum frame size the server accepts from a client: the largest client
+/// payload (a file) plus headroom for the message envelope. Server-to-client
+/// frames keep `MAX_FRAME_SIZE` / `MAX_GRAPHICS_FRAME_SIZE`.
+pub const MAX_CLIENT_FRAME_SIZE: usize = MAX_CLIPBOARD_FILE_PAYLOAD + 64 * 1024;
 
 /// Length of the u32 little-endian length prefix in bytes.
 const LENGTH_PREFIX_BYTES: usize = 4;
@@ -410,6 +418,19 @@ pub enum ClientMessage {
         /// Replace an existing writable controller for this terminal.
         takeover: bool,
     },
+
+    /// A file from the client's machine, staged on the server. Appended at the
+    /// end of the enum so existing discriminants never shift on the wire.
+    ClipboardFile {
+        /// File name as the client knows it. The server sanitizes it and
+        /// never trusts it as a path.
+        name: String,
+        /// Raw file bytes.
+        data: Vec<u8>,
+        /// Paste the staged path into the active pane (drag-and-drop) instead
+        /// of only reporting it back (`tanuki send`).
+        paste: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -747,6 +768,18 @@ pub enum ServerMessage {
         /// Whether the cursor changed (disambiguates "cursor became hidden"
         /// from "cursor field not part of this patch").
         cursor_changed: bool,
+    },
+
+    /// Result of a `ClientMessage::ClipboardFile`: where the server staged
+    /// the file, or why it could not. Appended at the end of the enum so its
+    /// discriminant never shifts on the wire.
+    FileStaged {
+        /// The name the client sent, echoed so a multi-file sender can match replies.
+        name: String,
+        /// Absolute path of the staged file on the server, when staging succeeded.
+        path: Option<String>,
+        /// Human-readable failure, when staging failed.
+        error: Option<String>,
     },
 }
 
@@ -1139,6 +1172,64 @@ mod tests {
             }),
             9
         );
+        assert_eq!(
+            tag(&ClientMessage::ClipboardFile {
+                name: "a.txt".to_owned(),
+                data: Vec::new(),
+                paste: false,
+            }),
+            10
+        );
+    }
+
+    #[test]
+    fn client_clipboard_file_roundtrip() {
+        for paste in [false, true] {
+            let msg = ClientMessage::ClipboardFile {
+                name: "отчёт final.pdf".to_owned(),
+                data: vec![0, 1, 2, 0xff],
+                paste,
+            };
+            let mut buf = Vec::new();
+            write_message(&mut buf, &msg).unwrap();
+            let decoded: ClientMessage =
+                read_message(&mut buf.as_slice(), MAX_CLIENT_FRAME_SIZE).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn server_file_staged_roundtrip() {
+        for msg in [
+            ServerMessage::FileStaged {
+                name: "a.txt".to_owned(),
+                path: Some("/tmp/tanuki-files-1000/x/a.txt".to_owned()),
+                error: None,
+            },
+            ServerMessage::FileStaged {
+                name: "a.txt".to_owned(),
+                path: None,
+                error: Some("disk full".to_owned()),
+            },
+        ] {
+            let mut buf = Vec::new();
+            write_message(&mut buf, &msg).unwrap();
+            let decoded: ServerMessage = read_message(&mut buf.as_slice(), MAX_FRAME_SIZE).unwrap();
+            assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn max_file_payload_frame_fits_client_frame_limit() {
+        // A maximum-size file must not be rejected by the server's frame cap.
+        let msg = ClientMessage::ClipboardFile {
+            name: "x".repeat(255),
+            data: vec![0; MAX_CLIPBOARD_FILE_PAYLOAD],
+            paste: true,
+        };
+        let mut buf = Vec::new();
+        write_message(&mut buf, &msg).unwrap();
+        assert!(buf.len() - LENGTH_PREFIX_BYTES <= MAX_CLIENT_FRAME_SIZE);
     }
 
     #[test]

@@ -94,14 +94,11 @@ pub struct ClipboardCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Windows does not wire clipboard-image bridging into semantic input yet.
-#[cfg_attr(windows, allow(dead_code))]
 pub struct ClipboardImage {
     pub bytes: Vec<u8>,
     pub extension: &'static str,
 }
 
-#[cfg(unix)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum LimitedRead {
     Empty,
@@ -109,7 +106,6 @@ pub(crate) enum LimitedRead {
     Oversized,
 }
 
-#[cfg(unix)]
 pub(crate) fn read_limited_reader(
     mut reader: impl std::io::Read,
     max_bytes: usize,
