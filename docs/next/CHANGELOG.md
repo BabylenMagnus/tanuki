@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add clipboard image bridging for Windows client and refactor Unix handling
+
 ## [0.1.98] - 2026-09-02
 
 ### Added
