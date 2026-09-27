@@ -11,6 +11,14 @@ use super::{
 
 pub const MAX_TOAST_DELAY_SECONDS: u64 = 3600;
 
+/// Default `keys.remote_image_paste`. Windows Terminal binds Ctrl+V to its own
+/// paste by default and never forwards the key (or anything, for an image or
+/// file on the clipboard), so the bridge trigger there is Alt+V.
+#[cfg(windows)]
+const DEFAULT_REMOTE_IMAGE_PASTE: &str = "alt+v";
+#[cfg(not(windows))]
+const DEFAULT_REMOTE_IMAGE_PASTE: &str = "ctrl+v";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannelConfig {
@@ -374,7 +382,9 @@ pub struct KeysConfig {
     pub next_agent: BindingConfig,
     /// Focus an agent by index 1-9. Unset by default.
     pub focus_agent: BindingConfig,
-    /// Local-client shortcut that sends a clipboard image to a remote Tanuki session. Default: "ctrl+v".
+    /// Local-client shortcut that sends the clipboard image, or files copied in
+    /// Explorer (Windows), to a remote Tanuki session. Default: "ctrl+v"
+    /// ("alt+v" on Windows, where Windows Terminal binds Ctrl+V to its own paste).
     pub remote_image_paste: String,
     /// Create a new tab in the active workspace. Default: "prefix+c"
     pub new_tab: BindingConfig,
@@ -1017,7 +1027,7 @@ impl Default for KeysConfig {
             previous_agent: BindingConfig::empty(),
             next_agent: BindingConfig::empty(),
             focus_agent: BindingConfig::empty(),
-            remote_image_paste: "ctrl+v".into(),
+            remote_image_paste: DEFAULT_REMOTE_IMAGE_PASTE.into(),
             new_tab: BindingConfig::one("prefix+c"),
             rename_tab: BindingConfig::one("prefix+shift+t"),
             previous_tab: BindingConfig::one("prefix+p"),

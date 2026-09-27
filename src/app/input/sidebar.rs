@@ -536,7 +536,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             menu.x + 2,
-            menu.y + 2,
+            menu.y + 3,
         ));
 
         assert_eq!(app.state.mode, Mode::Settings);
@@ -580,7 +580,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             menu.x + 2,
-            menu.y + 3,
+            menu.y + 4,
         ));
 
         assert!(app.state.request_reload_config);
@@ -604,6 +604,7 @@ mod tests {
             app.state.global_menu_labels(),
             vec![
                 "settings",
+                "connect to device...",
                 "keybinds",
                 "reload config",
                 "update & restart",
@@ -627,14 +628,20 @@ mod tests {
 
         assert_eq!(
             app.state.global_menu_labels(),
-            vec!["settings", "keybinds", "reload config", "detach"]
+            vec![
+                "settings",
+                "connect to device...",
+                "keybinds",
+                "reload config",
+                "detach"
+            ]
         );
 
         let menu = app.state.global_menu_rect();
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             menu.x + 2,
-            menu.y + 4,
+            menu.y + 5,
         ));
 
         assert!(app.state.detach_requested);
@@ -651,6 +658,7 @@ mod tests {
             app.state.global_menu_labels(),
             vec![
                 "settings",
+                "connect to device...",
                 "keybinds",
                 "reload config",
                 "what's new",

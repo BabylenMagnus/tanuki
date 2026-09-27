@@ -32,7 +32,7 @@ use windows_sys::{
             },
             JobObjects::IsProcessInJob,
             Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
-            Ole::{CF_DIB, CF_DIBV5, CF_UNICODETEXT},
+            Ole::{CF_DIB, CF_DIBV5, CF_HDROP, CF_UNICODETEXT},
             Threading::{
                 GetCurrentProcess, GetExitCodeProcess, OpenProcess, TerminateProcess,
                 CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW, DETACHED_PROCESS,
@@ -759,6 +759,66 @@ pub fn read_clipboard_image() -> Option<ClipboardImage> {
     None
 }
 
+/// Upper bound for the `CF_HDROP` allocation. It only holds path strings, so
+/// even a very large multi-file selection stays far below this.
+const MAX_CLIPBOARD_FILE_LIST_ALLOCATION: usize = 1024 * 1024;
+
+/// Files copied in Explorer (Ctrl+C on a file), as absolute local paths.
+///
+/// Explorer puts a `CF_HDROP` list on the clipboard for copied files. Returns
+/// an empty vector when the clipboard holds no file list.
+pub fn read_clipboard_files() -> Vec<PathBuf> {
+    for attempt in 0..10 {
+        if unsafe { OpenClipboard(null_mut()) } != 0 {
+            let _clipboard = ClipboardGuard;
+            return clipboard_global_bytes(CF_HDROP as u32, MAX_CLIPBOARD_FILE_LIST_ALLOCATION)
+                .map(|bytes| parse_dropfiles(&bytes))
+                .unwrap_or_default();
+        }
+        if attempt < 9 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    Vec::new()
+}
+
+/// Parses a `DROPFILES` block: a 20-byte header (`pFiles` offset, `POINT`,
+/// `fNC`, `fWide`) followed at `pFiles` by a double-NUL-terminated string list.
+fn parse_dropfiles(bytes: &[u8]) -> Vec<PathBuf> {
+    const HEADER_LEN: usize = 20;
+    if bytes.len() < HEADER_LEN {
+        return Vec::new();
+    }
+    let offset = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let wide = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]) != 0;
+    if offset < HEADER_LEN || offset > bytes.len() {
+        return Vec::new();
+    }
+    let list = &bytes[offset..];
+
+    let mut paths = Vec::new();
+    if wide {
+        let units: Vec<u16> = list
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        for entry in units.split(|unit| *unit == 0) {
+            if entry.is_empty() {
+                break;
+            }
+            paths.push(PathBuf::from(String::from_utf16_lossy(entry)));
+        }
+    } else {
+        for entry in list.split(|byte| *byte == 0) {
+            if entry.is_empty() {
+                break;
+            }
+            paths.push(PathBuf::from(String::from_utf8_lossy(entry).into_owned()));
+        }
+    }
+    paths
+}
+
 fn read_registered_png_clipboard() -> Option<Vec<u8>> {
     static PNG_FORMAT: std::sync::LazyLock<u32> = std::sync::LazyLock::new(|| {
         let name = wide_null("PNG");
@@ -1032,6 +1092,62 @@ mod tests {
     use windows_sys::Win32::System::Console::{
         AllocConsole, FreeConsole, GetConsoleProcessList, GetConsoleWindow,
     };
+
+    fn dropfiles_block(entries: &[&str], wide: bool) -> Vec<u8> {
+        let mut block = vec![0_u8; 20];
+        block[0..4].copy_from_slice(&20_u32.to_le_bytes());
+        block[16..20].copy_from_slice(&u32::from(wide).to_le_bytes());
+        for entry in entries {
+            if wide {
+                for unit in entry.encode_utf16() {
+                    block.extend_from_slice(&unit.to_le_bytes());
+                }
+                block.extend_from_slice(&0_u16.to_le_bytes());
+            } else {
+                block.extend_from_slice(entry.as_bytes());
+                block.push(0);
+            }
+        }
+        block.extend_from_slice(if wide { &[0, 0] } else { &[0] });
+        block
+    }
+
+    #[test]
+    fn dropfiles_parses_wide_paths_with_spaces_and_unicode() {
+        let block = dropfiles_block(&[r"C:\Users\me\My Report.pdf", r"D:\Отчёт\план.docx"], true);
+
+        assert_eq!(
+            super::parse_dropfiles(&block),
+            vec![
+                std::path::PathBuf::from(r"C:\Users\me\My Report.pdf"),
+                std::path::PathBuf::from(r"D:\Отчёт\план.docx"),
+            ]
+        );
+    }
+
+    #[test]
+    fn dropfiles_parses_narrow_paths() {
+        let block = dropfiles_block(&[r"C:\a\b.txt"], false);
+
+        assert_eq!(
+            super::parse_dropfiles(&block),
+            vec![std::path::PathBuf::from(r"C:\a\b.txt")]
+        );
+    }
+
+    #[test]
+    fn dropfiles_rejects_short_or_inconsistent_blocks() {
+        assert!(super::parse_dropfiles(&[]).is_empty());
+        assert!(super::parse_dropfiles(&[0; 19]).is_empty());
+
+        let mut bad_offset = dropfiles_block(&[r"C:\a.txt"], true);
+        bad_offset[0..4].copy_from_slice(&9999_u32.to_le_bytes());
+        assert!(super::parse_dropfiles(&bad_offset).is_empty());
+
+        let mut header_offset = dropfiles_block(&[r"C:\a.txt"], true);
+        header_offset[0..4].copy_from_slice(&4_u32.to_le_bytes());
+        assert!(super::parse_dropfiles(&header_offset).is_empty());
+    }
 
     #[test]
     fn windows_notification_text_is_null_terminated_and_unicode_safe() {

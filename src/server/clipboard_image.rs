@@ -289,7 +289,7 @@ mod tests {
     fn sanitize_file_name_replaces_spaces_control_and_reserved_chars() {
         assert_eq!(sanitize_file_name("my file (1).png"), "my_file_(1).png");
         assert_eq!(sanitize_file_name("a\tb\nc.txt"), "a_b_c.txt");
-        assert_eq!(sanitize_file_name("a<b>:\"c|d?e*.txt"), "a_b__c_d_e_.txt");
+        assert_eq!(sanitize_file_name("a<b>:\"c|d?e*.txt"), "a_b___c_d_e_.txt");
         assert_eq!(sanitize_file_name("отчёт.pdf"), "отчёт.pdf");
     }
 

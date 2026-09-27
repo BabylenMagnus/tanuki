@@ -1686,8 +1686,27 @@ async fn run_client_loop(
                         }
                         continue;
                     }
+                    let files = read_clipboard_files_for_upload();
+                    if !files.is_empty() {
+                        for (name, data) in files {
+                            info!(
+                                bytes = data.len(),
+                                name = %name,
+                                "bridging local clipboard file to remote server"
+                            );
+                            let msg = ClientMessage::ClipboardFile {
+                                name,
+                                data,
+                                paste: true,
+                            };
+                            if let Err(e) = write_to_server(&mut write_stream, &msg) {
+                                return Err(ClientError::ConnectionLost(e));
+                            }
+                        }
+                        continue;
+                    }
                     info!(
-                        "clipboard image paste trigger received, but local clipboard has no image"
+                        "clipboard paste trigger received, but local clipboard has no image or file"
                     );
                 }
                 if let [crate::raw_input::RawInputEvent::Paste(text)] = raw_events.as_slice() {
@@ -2185,23 +2204,55 @@ fn read_dropped_file_from_paste_text(
     is_remote_client: bool,
 ) -> Option<(String, Vec<u8>)> {
     let path = path_from_drop_text(text, is_remote_client)?;
+    read_file_for_upload(&path)
+}
+
+/// Reads a local regular file for a `ClipboardFile` upload: `(name, bytes)`,
+/// or `None` for a missing path, a directory, an unreadable file, or one over
+/// [`MAX_CLIPBOARD_FILE_PAYLOAD`].
+#[cfg(windows)]
+fn read_file_for_upload(path: &std::path::Path) -> Option<(String, Vec<u8>)> {
     if !path.is_file() {
         return None;
     }
-    let file = std::fs::File::open(&path).ok()?;
+    let file = std::fs::File::open(path).ok()?;
     let data = match crate::platform::read_limited_reader(file, MAX_CLIPBOARD_FILE_PAYLOAD).ok()? {
         crate::platform::LimitedRead::Complete(data) => data,
         crate::platform::LimitedRead::Empty => Vec::new(),
         crate::platform::LimitedRead::Oversized => {
             warn!(
                 max = MAX_CLIPBOARD_FILE_PAYLOAD,
-                "dropped file is too large to send to the remote server"
+                "local file is too large to send to the remote server"
             );
             return None;
         }
     };
     let name = path.file_name()?.to_string_lossy().into_owned();
     Some((name, data))
+}
+
+/// Most files sent by one clipboard-paste keypress, so a huge Explorer
+/// selection cannot stall the input loop for minutes.
+#[cfg(windows)]
+const MAX_CLIPBOARD_FILES_PER_PASTE: usize = 8;
+
+/// Files copied in Explorer, read for upload. Directories and unreadable or
+/// oversized entries are skipped.
+#[cfg(windows)]
+fn read_clipboard_files_for_upload() -> Vec<(String, Vec<u8>)> {
+    let paths = crate::platform::read_clipboard_files();
+    if paths.len() > MAX_CLIPBOARD_FILES_PER_PASTE {
+        warn!(
+            count = paths.len(),
+            max = MAX_CLIPBOARD_FILES_PER_PASTE,
+            "too many files on the clipboard; sending only the first ones"
+        );
+    }
+    paths
+        .iter()
+        .take(MAX_CLIPBOARD_FILES_PER_PASTE)
+        .filter_map(|path| read_file_for_upload(path))
+        .collect()
 }
 
 #[cfg(unix)]
