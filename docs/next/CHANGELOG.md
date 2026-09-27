@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.100] - 2026-09-27
+
 ### Added
 - Update protocol version to 19 and enhance clipboard file handling
 
