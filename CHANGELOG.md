@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.101] - 2026-10-01
+
 ### Added
 - Add update failure notification and Windows relaunch handling
 
