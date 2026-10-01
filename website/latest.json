@@ -1,14 +1,24 @@
 {
-  "version": "0.1.100",
+  "version": "0.1.101",
   "protocol": 19,
-  "notes": "### Added\n- Update protocol version to 19 and enhance clipboard file handling",
+  "notes": "### Added\n- Add update failure notification and Windows relaunch handling",
   "assets": {
-    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.100/tanuki-linux-x86_64",
-    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.100/tanuki-linux-aarch64",
-    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.100/tanuki-macos-x86_64",
-    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.100/tanuki-macos-aarch64"
+    "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-linux-x86_64",
+    "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-linux-aarch64",
+    "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-macos-x86_64",
+    "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-macos-aarch64"
   },
   "releases": {
+    "0.1.101": {
+      "notes": "### Added\n- Add update failure notification and Windows relaunch handling",
+      "protocol": 19,
+      "assets": {
+        "linux-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-linux-x86_64",
+        "linux-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-linux-aarch64",
+        "macos-x86_64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-macos-x86_64",
+        "macos-aarch64": "https://github.com/BabylenMagnus/tanuki/releases/download/v0.1.101/tanuki-macos-aarch64"
+      }
+    },
     "0.1.100": {
       "notes": "### Added\n- Update protocol version to 19 and enhance clipboard file handling",
       "protocol": 19,
