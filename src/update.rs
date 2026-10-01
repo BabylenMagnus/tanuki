@@ -142,31 +142,70 @@ fn windows_stop_and_restart_running_sessions(release: &ReleaseInfo) {
 /// detached/hidden process — the user needs to see update progress and land
 /// in the relaunched session. Session targeting (env vars like
 /// `TANUKI_SESSION`) is inherited from the current process automatically.
+/// Unix only: spawns a detached `sh -c "<exe> update && <exe>"` shell; the
+/// caller then detaches/exits so the relaunch inherits the terminal. Already
+/// success-gated via `&&` — the old binary is only relaunched if
+/// `tanuki update` exits 0. See `start_update_and_restart_windows` below for
+/// the Windows equivalent, which can't use this shell-script approach:
+/// errors would be invisible there (a `cmd /C` console closes the instant
+/// both commands finish, successful or not) and an unconditional `&` used to
+/// relaunch the old binary even when the update failed.
+#[cfg(not(windows))]
 pub(crate) fn spawn_update_and_relaunch() {
     let Ok(exe) = env::current_exe() else {
         return;
     };
     let exe = exe.to_string_lossy().into_owned();
+    let script = format!("\"{exe}\" update && \"{exe}\"");
+    let mut command = Command::new("sh");
+    command.args(["-c", &script]);
+    crate::platform::detach_server_daemon_command(&mut command);
+    let _ = command.spawn();
+}
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        let script = format!("\"{exe}\" update & \"{exe}\"");
-        let _ = Command::new("cmd")
-            .args(["/C", &script])
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn();
-    }
-
-    #[cfg(not(windows))]
-    {
-        let script = format!("\"{exe}\" update && \"{exe}\"");
-        let mut command = Command::new("sh");
-        command.args(["-c", &script]);
-        crate::platform::detach_server_daemon_command(&mut command);
-        let _ = command.spawn();
-    }
+/// Windows only: runs `tanuki update` out-of-process on a background
+/// thread — so the blocking download/install never freezes the TUI — and
+/// captures its output instead of inheriting stdout/stderr (which would
+/// otherwise garble the raw-mode terminal). Reports the result back through
+/// `events`; the run loop (`app::run`) only relaunches `relaunch_exe` when
+/// `success` is true, and otherwise surfaces `error` as a toast. This
+/// mirrors how the `self_update` crate's `restart()` only ever runs after
+/// its caller has confirmed `VersionStatus::Updated`.
+#[cfg(windows)]
+pub(crate) fn start_update_and_restart_windows(
+    events: tokio::sync::mpsc::Sender<crate::events::AppEvent>,
+) {
+    std::thread::spawn(move || {
+        let event = match env::current_exe() {
+            Ok(exe) => match Command::new(&exe).arg("update").output() {
+                Ok(output) if output.status.success() => {
+                    crate::events::AppEvent::UpdateAndRestartFinished {
+                        success: true,
+                        error: None,
+                        relaunch_exe: Some(exe),
+                    }
+                }
+                Ok(output) => crate::events::AppEvent::UpdateAndRestartFinished {
+                    success: false,
+                    error: Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| Some(format!("tanuki update exited with {}", output.status))),
+                    relaunch_exe: None,
+                },
+                Err(err) => crate::events::AppEvent::UpdateAndRestartFinished {
+                    success: false,
+                    error: Some(format!("failed to run tanuki update: {err}")),
+                    relaunch_exe: None,
+                },
+            },
+            Err(err) => crate::events::AppEvent::UpdateAndRestartFinished {
+                success: false,
+                error: Some(format!("failed to locate current executable: {err}")),
+                relaunch_exe: None,
+            },
+        };
+        let _ = events.blocking_send(event);
+    });
 }
 
 fn fake_release_notes_body(version: &str) -> String {

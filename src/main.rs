@@ -905,6 +905,12 @@ fn main() -> io::Result<()> {
             event_hub,
         );
         let result = app.run(&mut terminal).await;
+        // Only set on Windows, and only once `tanuki update` has actually
+        // succeeded (see `update::start_update_and_restart_windows`) — take
+        // it now so the relaunch still happens even though `app` is dropped
+        // below, but only spawn it after the terminal is fully restored so
+        // the new process doesn't fight the old one over the screen.
+        let relaunch_exe = app.state.pending_relaunch_exe.take();
 
         // Reset modifyOtherKeys if we enabled it.
         if modify_other_keys_mode.is_some() {
@@ -929,6 +935,10 @@ fn main() -> io::Result<()> {
 
         // Drop app (and all workspaces/panes) before runtime shuts down
         drop(app);
+
+        if let Some(exe) = relaunch_exe {
+            let _ = std::process::Command::new(exe).spawn();
+        }
 
         result
     });

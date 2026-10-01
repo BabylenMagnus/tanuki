@@ -879,6 +879,10 @@ toasts.reloaded_config:
   en: reloaded config
   ru: конфиг перезагружен
   ru-pre1918: конфигъ перезагруженъ
+toasts.update_failed:
+  en: update failed
+  ru: обновление не удалось
+  ru-pre1918: обновленiе не удалось
 toasts.failed_to_open_worktree:
   en: "failed to open worktree: %{err}"
   ru: "не удалось открыть worktree: %{err}"

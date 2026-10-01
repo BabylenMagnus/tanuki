@@ -605,6 +605,8 @@ impl App {
             request_submit_worktree_open: false,
             request_submit_worktree_remove: false,
             request_reload_config: false,
+            request_update_and_restart: false,
+            pending_relaunch_exe: None,
             request_client_config_reload: false,
             request_cloud_host_apply: false,
             cloud_host_viewer_count: None,
@@ -1098,6 +1100,15 @@ impl App {
             if self.state.request_reload_config {
                 self.state.request_reload_config = false;
                 self.reload_config();
+                needs_render = true;
+            }
+
+            if self.state.request_update_and_restart {
+                self.state.request_update_and_restart = false;
+                #[cfg(windows)]
+                {
+                    crate::update::start_update_and_restart_windows(self.event_tx.clone());
+                }
                 needs_render = true;
             }
 

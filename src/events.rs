@@ -161,4 +161,13 @@ pub enum AppEvent {
     CloudDevicesFetched {
         result: Result<Vec<crate::remote::cloud::SiblingDevice>, String>,
     },
+    /// Windows-only: the out-of-process `tanuki update` spawned by the
+    /// "update & restart" global-menu action finished. Relaunch must be
+    /// gated on `success` — the caller only spawns `relaunch_exe` when the
+    /// update actually replaced the on-disk binary.
+    UpdateAndRestartFinished {
+        success: bool,
+        error: Option<String>,
+        relaunch_exe: Option<std::path::PathBuf>,
+    },
 }

@@ -119,7 +119,7 @@ fn open_update_release_notes(state: &mut AppState) {
     state.mode = Mode::ReleaseNotes;
 }
 
-pub(super) fn request_detach(state: &mut AppState) {
+pub(crate) fn request_detach(state: &mut AppState) {
     if state.detach_exits {
         state.should_quit = true;
     } else {
@@ -135,9 +135,23 @@ pub(super) fn apply_global_menu_action(state: &mut AppState, action: GlobalMenuA
         }
         GlobalMenuAction::WhatsNew => open_update_release_notes(state),
         GlobalMenuAction::UpdateAndRestart => {
-            crate::update::spawn_update_and_relaunch();
             leave_modal(state);
-            request_detach(state);
+            // Windows can't safely relaunch until we know `tanuki update`
+            // actually replaced the on-disk binary (see
+            // `update::start_update_and_restart_windows`) — the run loop
+            // performs the update in the background and only detaches once
+            // `AppEvent::UpdateAndRestartFinished` confirms success. Unix
+            // already gates the relaunch on success via a plain `&&` shell
+            // one-liner, so it can detach immediately as before.
+            #[cfg(windows)]
+            {
+                state.request_update_and_restart = true;
+            }
+            #[cfg(not(windows))]
+            {
+                crate::update::spawn_update_and_relaunch();
+                request_detach(state);
+            }
         }
         GlobalMenuAction::Keybinds => {
             super::settings::open_settings_at(state, crate::app::state::SettingsSection::Keybinds)

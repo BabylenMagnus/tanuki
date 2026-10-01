@@ -1930,6 +1930,15 @@ pub struct AppState {
     pub request_submit_worktree_open: bool,
     pub request_submit_worktree_remove: bool,
     pub request_reload_config: bool,
+    /// Windows-only: set when the "update & restart" global-menu action was
+    /// clicked, consumed by the run loop to spawn the background
+    /// `tanuki update` check (see `update::start_update_and_restart_windows`).
+    pub request_update_and_restart: bool,
+    /// Windows-only: set once `tanuki update` has succeeded, holding the
+    /// path to relaunch. Consumed after the run loop exits (post terminal
+    /// restore) so the new binary only ever replaces a *successfully*
+    /// updated old one.
+    pub pending_relaunch_exe: Option<std::path::PathBuf>,
     /// Set when the headless server should ask attached clients to reload
     /// their client-local sound config from disk.
     pub request_client_config_reload: bool,
@@ -2341,6 +2350,8 @@ impl AppState {
             request_submit_worktree_open: false,
             request_submit_worktree_remove: false,
             request_reload_config: false,
+            request_update_and_restart: false,
+            pending_relaunch_exe: None,
             request_client_config_reload: false,
             request_cloud_host_apply: false,
             cloud_host_viewer_count: None,

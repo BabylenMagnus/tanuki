@@ -2861,6 +2861,35 @@ impl AppState {
             AppEvent::WorktreeRemoveFinished(_) => Vec::new(),
             AppEvent::PluginCommandFinished { .. } => Vec::new(),
             AppEvent::CloudDevicesFetched { .. } => Vec::new(),
+            AppEvent::UpdateAndRestartFinished {
+                success,
+                error,
+                relaunch_exe,
+            } => {
+                if success {
+                    // `tanuki update` already replaced the on-disk binary —
+                    // only now is it safe to detach/quit so the run loop
+                    // relaunches the *updated* exe after terminal restore.
+                    self.pending_relaunch_exe = relaunch_exe;
+                    if self.detach_exits {
+                        self.should_quit = true;
+                    } else {
+                        self.detach_requested = true;
+                    }
+                } else if matches!(
+                    self.toast_config.delivery,
+                    crate::config::ToastDelivery::Tanuki
+                ) {
+                    self.toast = Some(ToastNotification {
+                        kind: ToastKind::NeedsAttention,
+                        title: t!("toasts.update_failed").to_string(),
+                        context: error.unwrap_or_default(),
+                        position: None,
+                        target: None,
+                    });
+                }
+                Vec::new()
+            }
         }
     }
 
