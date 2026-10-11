@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.102] - 2026-10-11
+
 ### Added
 - Improve client ownership and resize handling logic
 
