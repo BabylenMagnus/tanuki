@@ -3241,14 +3241,25 @@ impl HeadlessServer {
                         Some(writer),
                     ),
                 );
-                if !direct_attach_requested {
+                // A new App client only takes over session-wide foreground
+                // (and the shared-runtime resize + redraw-all-clients it
+                // triggers) when there is no current owner. Two concurrently
+                // active clients at different sizes used to ping-pong
+                // foreground on every connect/resize here, force-redrawing
+                // each other every time — see
+                // wiki/tanuki-terminal-shared-focus-resize-flicker.md.
+                let took_ownership =
+                    !direct_attach_requested && self.foreground_client_id.is_none();
+                if took_ownership {
                     self.foreground_client_id = Some(client_id);
                 }
                 if first_app_client {
                     self.app.mark_git_status_refresh_due(Instant::now());
                 }
-                self.sync_foreground_client_state();
-                self.resize_shared_runtime_to_effective_size();
+                if took_ownership {
+                    self.sync_foreground_client_state();
+                    self.resize_shared_runtime_to_effective_size();
+                }
                 self.nudge_handoff_panes_on_first_client_attach();
                 true
             }
@@ -3487,9 +3498,23 @@ impl HeadlessServer {
                         width_px: cell_width_px,
                         height_px: cell_height_px,
                     };
+                    client.render_state.reset_baseline();
                 }
-                self.promote_client_to_foreground(client_id);
-                self.resize_shared_runtime_to_effective_size();
+                // Only a resize from the current foreground owner (or a
+                // resize that happens to land with no owner at all) drives
+                // the shared PTY resize + redraw-all-clients broadcast.
+                // A non-owner client resizing (e.g. a second concurrently
+                // attached viewer at a different screen size) must not
+                // steal ownership or force every other client to redraw —
+                // that ping-pong was the root cause of the multi-client
+                // flicker, see
+                // wiki/tanuki-terminal-shared-focus-resize-flicker.md.
+                let is_owner_or_unowned = self.foreground_client_id.is_none()
+                    || self.foreground_client_id == Some(client_id);
+                if is_owner_or_unowned {
+                    self.promote_client_to_foreground(client_id);
+                    self.resize_shared_runtime_to_effective_size();
+                }
                 true
             }
             ServerEvent::ClientDetach { client_id } => {
@@ -5759,6 +5784,11 @@ new_tab = "prefix+t"
             .iter()
             .any(|binding| binding.label == "prefix+t"));
 
+        // A second client connecting while client 1 still owns the session
+        // must not steal foreground or its keybindings — only a stable
+        // owner (here, the client that connects while there is none) drives
+        // shared session state. See
+        // wiki/tanuki-terminal-shared-focus-resize-flicker.md.
         assert!(server.handle_server_event(ServerEvent::ClientConnected {
             client_id: 2,
             cols: 80,
@@ -5770,6 +5800,22 @@ new_tab = "prefix+t"
             direct_attach_requested: false,
             writer: writer_b,
         }));
+        assert_eq!(
+            server.app.state.prefix_code,
+            crossterm::event::KeyCode::Char('a')
+        );
+        assert!(server
+            .app
+            .state
+            .keybinds
+            .new_tab
+            .bindings
+            .iter()
+            .any(|binding| binding.label == "prefix+t"));
+
+        // Once the owner disconnects, the remaining client takes over and
+        // its own keybindings apply.
+        assert!(server.handle_server_event(ServerEvent::ClientDisconnected { client_id: 1 }));
         assert_eq!(
             server.app.state.prefix_code,
             crossterm::event::KeyCode::Char('b')
@@ -5949,6 +5995,13 @@ next_tab = ""
             client_id: 1,
             data: b"\r".to_vec(),
         }));
+
+        // Client 1 is still the owner at this point, so it keeps its own
+        // local keybindings — a second connect must not steal foreground.
+        // Disconnect it first so client 2 becomes the new owner and
+        // inherits the (reloaded, partially-invalid) server keybindings
+        // this test is actually about.
+        assert!(server.handle_server_event(ServerEvent::ClientDisconnected { client_id: 1 }));
 
         assert!(server.handle_server_event(ServerEvent::ClientConnected {
             client_id: 2,
