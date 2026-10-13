@@ -64,6 +64,7 @@ use crate::server::socket_paths::{
 };
 use crate::server::terminal_attach::paste_payload_for_runtime;
 
+mod client_views;
 mod pane_graphics;
 
 #[cfg(test)]
@@ -385,6 +386,17 @@ pub struct HeadlessServer {
     /// ids allocated during a previous cloud-host session that a
     /// disconnecting viewer might still reference.
     next_cloud_client_id: Arc<std::sync::atomic::AtomicU64>,
+    /// Tab id that currently owns the shared popup pane (TSK-48, herdr `6c0bb273`).
+    /// Not wired into any call site yet -- populated/consumed starting in TSK-49
+    /// when the per-client shell-view reconciliation loop lands.
+    #[allow(dead_code)]
+    popup_owner_tab_id: Option<String>,
+    /// Per-tab geometry controller: which client id currently owns resize
+    /// authority for a given public tab id (TSK-48, herdr `6c0bb273`). Replaces
+    /// the single session-wide `foreground_client_id`-driven `effective_size`
+    /// model with per-tab ownership. Not wired into any call site yet.
+    #[allow(dead_code)]
+    tab_geometry_controllers: HashMap<String, u64>,
 }
 
 fn apply_terminal_attach_scroll(
@@ -626,6 +638,8 @@ impl HeadlessServer {
             server_event_tx,
             cloud_host: cloud_host_transport,
             next_cloud_client_id,
+            popup_owner_tab_id: None,
+            tab_geometry_controllers: HashMap::new(),
         })
     }
 
@@ -1277,6 +1291,18 @@ impl HeadlessServer {
         let Some(client) = self.clients.get(&client_id) else {
             return;
         };
+        if client.is_full_app_client() {
+            // Claim the tab only if nobody currently owns it (harmless, and
+            // keeps a lone client's resize working without a dedicated
+            // interaction-claiming call site, which our fork doesn't have —
+            // see TSK-49's wiki note on upstream's `ClientShell*` endpoint
+            // protocol not existing here). Never steals from an existing
+            // owner; a genuine non-owner resize is then just a no-op below.
+            if !self.claim_unowned_shell_tab_geometry(client_id, start_pending_agent_resumes) {
+                self.resize_shell_tab_if_controller(client_id, start_pending_agent_resumes);
+            }
+            return;
+        }
         let (cols, rows) = self.effective_size;
         let area = Rect::new(0, 0, cols, rows);
         if self.app.state.kitty_graphics_enabled && client.cell_size.is_known() {
@@ -1727,7 +1753,23 @@ impl HeadlessServer {
     fn remove_client(&mut self, client_id: u64) -> bool {
         let was_foreground = self.foreground_client_id == Some(client_id);
         self.send_client_graphics_cleanup(client_id);
+        let disconnected_focus = self
+            .clients
+            .get(&client_id)
+            .filter(|client| client.is_full_app_client() && client.outer_terminal_focus == Some(true))
+            .and_then(|_| self.shell_focus_target(client_id));
+        let should_release_focus = disconnected_focus.as_ref().is_some_and(|target| {
+            !self.clients.iter().any(|(&other_id, client)| {
+                other_id != client_id
+                    && client.is_full_app_client()
+                    && client.outer_terminal_focus == Some(true)
+                    && self.shell_tab_id_for_client(other_id).as_deref()
+                        == Some(target.tab_id.as_str())
+            })
+        });
         let removed = self.clients.remove(&client_id);
+        self.tab_geometry_controllers
+            .retain(|_, controller_id| *controller_id != client_id);
         if let Some(removed) = removed {
             crate::server::clipboard_image::remove_files(removed.staged_clipboard_files);
             if let ClientConnectionMode::TerminalAttach { terminal_id } = removed.mode {
@@ -1740,6 +1782,11 @@ impl HeadlessServer {
                 }
             }
         }
+        if should_release_focus {
+            if let Some(target) = disconnected_focus.as_ref() {
+                self.send_shell_focus_target(target, crate::ghostty::FocusEvent::Lost);
+            }
+        }
         if was_foreground {
             self.promote_latest_remaining_client()
         } else {
@@ -1747,24 +1794,18 @@ impl HeadlessServer {
         }
     }
 
-    fn client_removal_needs_shared_resize(&self, client_id: u64) -> bool {
-        if self.foreground_client_id == Some(client_id) {
-            return true;
-        }
-        matches!(
-            self.clients.get(&client_id).map(|client| &client.mode),
-            Some(
-                ClientConnectionMode::TerminalAttach { .. }
-                    | ClientConnectionMode::TerminalObserve { .. }
-            )
-        ) && self.foreground_client_id.is_some()
-    }
-
     fn remove_client_and_resize_if_needed(&mut self, client_id: u64) {
-        let needs_shared_resize = self.client_removal_needs_shared_resize(client_id);
-        let foreground_changed = self.remove_client(client_id);
-        if needs_shared_resize || foreground_changed {
-            self.resize_shared_runtime_to_effective_size();
+        let restore_shell_controller = self.clients.get(&client_id).and_then(|client| {
+            let ClientConnectionMode::TerminalAttach { terminal_id } = &client.mode else {
+                return None;
+            };
+            self.shell_geometry_controller_for_terminal(terminal_id)
+        });
+        self.remove_client(client_id);
+        if let Some((controller_id, target)) = restore_shell_controller {
+            self.restore_shell_tab_geometry(controller_id, target);
+        } else {
+            self.resize_tabs_for_only_shell_client(true);
         }
     }
 
@@ -2416,7 +2457,26 @@ impl HeadlessServer {
     /// in the headless server — use this method instead.
     ///
     /// Returns true if the event changed visual state (requiring a re-render).
-    fn handle_internal_event_with_forwarding(&mut self, ev: AppEvent) -> bool {
+    fn handle_internal_event_with_forwarding(&mut self, mut ev: AppEvent) -> bool {
+        // A worktree-add finishing with `focus: true` wants to focus the
+        // new tab/workspace once it lands -- proxy its `respond_to` so we
+        // can inspect whether the request actually succeeded before
+        // deciding whether to run that focus (TSK-52, herdr `6c0bb273`
+        // `notifications.rs`, missed during TSK-50's render.rs-only pass).
+        let mut focused_worktree_response = if let AppEvent::WorktreeAddFinished(result) = &mut ev
+        {
+            result
+                .api_request
+                .as_mut()
+                .filter(|request| request.focus)
+                .map(|request| {
+                    let (proxy_tx, proxy_rx) = std::sync::mpsc::channel();
+                    let original = std::mem::replace(&mut request.respond_to, proxy_tx);
+                    (original, proxy_rx)
+                })
+        } else {
+            None
+        };
         match &ev {
             AppEvent::ClipboardWrite { content } => {
                 // Clipboard writes are client-local side effects. Forward them only to
@@ -2662,7 +2722,34 @@ impl HeadlessServer {
 
                 true
             }
+            AppEvent::WorktreeAddFinished(_) => {
+                // Upstream also checks for a client already mid-way through
+                // its own deferred navigation via the embedded client-shell
+                // endpoint protocol (`shell_deferred_navigation_request_id`)
+                // before running this public-API focus -- that protocol
+                // doesn't exist in our fork at all (confirmed TSK-49 step 8,
+                // TSK-52: `deferred_endpoint_navigation_tab_id` has no
+                // caller), so there is nothing to defer to here.
+                self.app.handle_internal_event(ev);
+                let api_focus_succeeded =
+                    client_views::forward_proxied_api_response(focused_worktree_response.take());
+                self.reconcile_client_shell_locations();
+                if api_focus_succeeded {
+                    self.focus_all_shell_clients_on_default_target();
+                }
+                true
+            }
+            AppEvent::WorktreeRemoveFinished(_) => {
+                let focus_before = self.shell_focus_targets();
+                let focused_tabs_before = self.focused_shell_tabs();
+                self.app.handle_internal_event(ev);
+                self.reconcile_client_shell_locations();
+                self.finish_shell_location_reconciliation(focus_before, &focused_tabs_before);
+                true
+            }
             AppEvent::PaneDied { pane_id } => {
+                let focus_before = self.shell_focus_targets();
+                let focused_tabs_before = self.focused_shell_tabs();
                 let pane_id_val = *pane_id;
                 let terminal_id = self.app.state.workspaces.iter().find_map(|ws| {
                     ws.tabs.iter().find_map(|tab| {
@@ -2681,6 +2768,8 @@ impl HeadlessServer {
                 }
 
                 self.app.handle_internal_event(ev);
+                self.reconcile_client_shell_locations();
+                self.finish_shell_location_reconciliation(focus_before, &focused_tabs_before);
 
                 if self.app.find_pane(pane_id_val).is_none() {
                     if let Some(terminal_id) = terminal_id {
@@ -3241,24 +3330,21 @@ impl HeadlessServer {
                         Some(writer),
                     ),
                 );
-                // A new App client only takes over session-wide foreground
-                // (and the shared-runtime resize + redraw-all-clients it
-                // triggers) when there is no current owner. Two concurrently
-                // active clients at different sizes used to ping-pong
-                // foreground on every connect/resize here, force-redrawing
-                // each other every time — see
-                // wiki/tanuki-terminal-shared-focus-resize-flicker.md.
-                let took_ownership =
-                    !direct_attach_requested && self.foreground_client_id.is_none();
-                if took_ownership {
+                // Each App client tracks its own tab/workspace focus and
+                // geometry ownership independently (TSK-49, herdr `6c0bb273`)
+                // rather than a single shared foreground owner stealing
+                // the shared PTY on every connect — see
+                // wiki/tanuki-terminal-upstream-multi-client-tab-views.md.
+                self.reconcile_client_shell_locations();
+                if !direct_attach_requested {
                     self.foreground_client_id = Some(client_id);
                 }
                 if first_app_client {
                     self.app.mark_git_status_refresh_due(Instant::now());
                 }
-                if took_ownership {
+                if !direct_attach_requested {
                     self.sync_foreground_client_state();
-                    self.resize_shared_runtime_to_effective_size();
+                    self.claim_unowned_shell_tab_geometry(client_id, true);
                 }
                 self.nudge_handoff_panes_on_first_client_attach();
                 true
@@ -3500,21 +3586,14 @@ impl HeadlessServer {
                     };
                     client.render_state.reset_baseline();
                 }
-                // Only a resize from the current foreground owner (or a
-                // resize that happens to land with no owner at all) drives
-                // the shared PTY resize + redraw-all-clients broadcast.
-                // A non-owner client resizing (e.g. a second concurrently
-                // attached viewer at a different screen size) must not
-                // steal ownership or force every other client to redraw —
-                // that ping-pong was the root cause of the multi-client
-                // flicker, see
-                // wiki/tanuki-terminal-shared-focus-resize-flicker.md.
-                let is_owner_or_unowned = self.foreground_client_id.is_none()
-                    || self.foreground_client_id == Some(client_id);
-                if is_owner_or_unowned {
-                    self.promote_client_to_foreground(client_id);
-                    self.resize_shared_runtime_to_effective_size();
-                }
+                // Each App client's geometry is claimed per-tab (TSK-49): a
+                // non-controller client resizing can no longer steal
+                // ownership or force every other client to redraw, since
+                // `resize_shared_runtime_to_effective_size` routes full-app
+                // clients through `resize_shell_tab_if_controller`, which is
+                // a no-op unless `client_id` already owns that tab.
+                self.promote_client_to_foreground(client_id);
+                self.resize_shared_runtime_to_effective_size();
                 true
             }
             ServerEvent::ClientDetach { client_id } => {
@@ -3588,16 +3667,6 @@ impl HeadlessServer {
         impact
     }
 
-    /// Handles a single API request with shutdown awareness.
-    ///
-    /// Also forwards any toast/sound notifications that result from the API
-    /// request to connected clients. API methods like `pane.report_agent`
-    /// trigger internal events that may set toast state or would normally
-    /// play sounds — in headless mode we forward these to clients instead.
-    fn handle_api_request_with_shutdown_check(&mut self, msg: api::ApiRequestMessage) -> bool {
-        self.handle_api_request_with_shutdown_check_inner(msg, false)
-    }
-
     fn handle_api_request_with_render_impact(
         &mut self,
         msg: api::ApiRequestMessage,
@@ -3608,7 +3677,7 @@ impl HeadlessServer {
         ) {
             return self.handle_pane_graphics_stream_frame(msg);
         }
-        if self.handle_api_request_with_shutdown_check_inner(msg, false) {
+        if self.handle_api_request_with_shutdown_check(msg) {
             RenderImpact::Full
         } else {
             RenderImpact::None
@@ -3927,32 +3996,51 @@ impl HeadlessServer {
         changed
     }
 
+    /// Whether `client_id`'s own focused pane (its `shell_focused_runtime`,
+    /// not the shared `app.state.active`) currently wants mouse reporting.
+    /// Ported from upstream `6c0bb273` (TSK-50): mouse capture mode becomes
+    /// per-client instead of one broadcast value for every full-app client.
+    fn shell_client_requests_mouse_capture(&self, client_id: u64) -> bool {
+        self.app.state.mode == crate::app::Mode::Terminal
+            && self
+                .shell_focused_runtime(client_id)
+                .and_then(|(runtime, _)| runtime.input_state())
+                .is_some_and(crate::pane::InputState::mouse_reporting_enabled)
+    }
+
     fn stream_host_mouse_capture_mode(&mut self) {
-        let enabled = self
-            .app
-            .state
-            .should_capture_host_mouse_from(&self.app.terminal_runtimes);
-        let serialized = match Self::frame_server_message(&ServerMessage::MouseCapture { enabled })
-        {
-            Ok(framed) => framed,
-            Err(err) => {
-                warn!(err = %err, "failed to serialize mouse capture mode for clients");
-                return;
-            }
-        };
+        let requested: Vec<(u64, bool)> = self
+            .clients
+            .iter()
+            .filter(|(_, client)| client.is_full_app_client())
+            .map(|(&client_id, _)| {
+                let enabled = self.app.state.mouse_capture
+                    || self.app.state.popup_pane.is_some()
+                    || self.shell_client_requests_mouse_capture(client_id);
+                (client_id, enabled)
+            })
+            .collect();
 
         let mut broken_clients: Vec<u64> = Vec::new();
-        for (&client_id, client) in &mut self.clients {
-            if !client.is_full_app_client() {
+        for (client_id, enabled) in requested {
+            let Some(client) = self.clients.get_mut(&client_id) else {
                 continue;
-            }
+            };
             if client.host_mouse_capture_active == Some(enabled) {
                 continue;
             }
             let Some(writer) = &client.writer else {
                 continue;
             };
-            if writer.control.send(serialized.clone()).is_err() {
+            let serialized =
+                match Self::frame_server_message(&ServerMessage::MouseCapture { enabled }) {
+                    Ok(framed) => framed,
+                    Err(err) => {
+                        warn!(err = %err, "failed to serialize mouse capture mode for client");
+                        continue;
+                    }
+                };
+            if writer.control.send(serialized).is_err() {
                 debug!(
                     client_id,
                     "client writer channel closed during mouse capture update"
@@ -3996,7 +4084,7 @@ impl HeadlessServer {
 
         sources.iter().any(|&pane_id| {
             let terminal_id = self.terminal_id_for_pane(pane_id);
-            (has_app_target && (terminal_id.is_none() || self.app_surface_contains_pane(pane_id)))
+            (has_app_target && (terminal_id.is_none() || self.any_shell_surface_contains_pane(pane_id)))
                 || terminal_id
                     .is_none_or(|source| direct_terminal_targets.contains(source.as_str()))
         })
@@ -4018,33 +4106,6 @@ impl HeadlessServer {
         self.app
             .find_pane(pane_id)
             .map(|(_, pane)| &pane.attached_terminal_id)
-    }
-
-    fn app_surface_contains_pane(&self, pane_id: crate::layout::PaneId) -> bool {
-        if self
-            .app
-            .state
-            .popup_pane
-            .as_ref()
-            .is_some_and(|popup| popup.pane_id == pane_id)
-        {
-            return true;
-        }
-        let Some(workspace) = self
-            .app
-            .state
-            .active
-            .and_then(|ws_idx| self.app.state.workspaces.get(ws_idx))
-        else {
-            return false;
-        };
-        let Some(tab) = workspace.active_tab() else {
-            return false;
-        };
-        if !tab.panes.contains_key(&pane_id) {
-            return false;
-        }
-        !tab.zoomed || tab.layout.focused() == pane_id
     }
 
     fn render_retained_pty_update_and_stream(&mut self) -> bool {
@@ -4114,7 +4175,14 @@ impl HeadlessServer {
         // cells, so it must never claim to be a from-scratch redraw.
         frame.is_full = false;
 
-        let Some(ws_idx) = self.app.state.active else {
+        // The lone client here may have diverged from the shared
+        // `app.state.active` via its own API navigation (TSK-49/50) -- use
+        // its own target, not the shared one, so this fast path still hits
+        // for a single client that has navigated independently.
+        let Some(ws_idx) = self
+            .shell_target_for_client(*client_id)
+            .map(|target| target.workspace_index)
+        else {
             retained_fallback!("no_active_workspace");
         };
         let pane_infos = self.app.state.view.pane_infos.clone();
@@ -4324,6 +4392,45 @@ impl HeadlessServer {
         for (client_id, (cols, rows), cell_size, is_foreground, mode) in render_targets {
             let area = Rect::new(0, 0, cols, rows);
             let is_app_client = matches!(mode, ClientConnectionMode::App);
+            // Temporarily point the shared `app.state.active`/workspace
+            // `active_tab` at this client's own target (TSK-50 Part B,
+            // herdr `6c0bb273`) so the single-shared-chrome render pipeline
+            // below (sidebar highlight, tab bar, terminal_area, pane
+            // surface) produces *this* client's independent view instead
+            // of always the one app-wide active workspace/tab. Restored
+            // right after this client's frame + graphics are built, below.
+            // Uses the plain `active_tab` field directly rather than
+            // `Workspace::switch_tab`, which marks panes "seen" -- a real
+            // side effect we must not trigger just to render someone else's
+            // divergent view.
+            let shell_render_restore = is_app_client.then(|| {
+                let saved_active = self.app.state.active;
+                // A popup is scoped to whichever tab opened it
+                // (`popup_owner_tab_id`, TSK-48) -- hide it from every
+                // other client's render pass. Only when an owner is
+                // actually on record: an owner-less popup (opened via a
+                // path that never set one) stays visible to everyone,
+                // the pre-TSK-50 behavior, rather than vanishing for all.
+                let hide_popup = self.app.state.popup_pane.is_some()
+                    && self.popup_owner_tab_id.as_deref().is_some_and(|owner| {
+                        Some(owner) != self.shell_tab_id_for_client(client_id).as_deref()
+                    });
+                let saved_popup = hide_popup.then(|| self.app.state.popup_pane.take()).flatten();
+                let Some(target) = self.shell_target_for_client(client_id) else {
+                    return (saved_active, None, saved_popup);
+                };
+                let saved_tab = self
+                    .app
+                    .state
+                    .workspaces
+                    .get(target.workspace_index)
+                    .map(|workspace| (target.workspace_index, workspace.active_tab));
+                self.app.state.active = Some(target.workspace_index);
+                if let Some(workspace) = self.app.state.workspaces.get_mut(target.workspace_index) {
+                    workspace.active_tab = target.tab_index;
+                }
+                (saved_active, saved_tab, saved_popup)
+            });
             let frame = match mode {
                 ClientConnectionMode::App => {
                     let render_started = crate::render_prof::timer();
@@ -4432,6 +4539,17 @@ impl HeadlessServer {
                 crate::render_prof::duration_since("full_render.graphics_encode", graphics_started);
             } else {
                 frame.graphics = next_graphics_cache.clear_bytes();
+            }
+            if let Some((saved_active, saved_tab, saved_popup)) = shell_render_restore {
+                self.app.state.active = saved_active;
+                if let Some((workspace_index, tab_index)) = saved_tab {
+                    if let Some(workspace) = self.app.state.workspaces.get_mut(workspace_index) {
+                        workspace.active_tab = tab_index;
+                    }
+                }
+                if saved_popup.is_some() {
+                    self.app.state.popup_pane = saved_popup;
+                }
             }
 
             let Some(writer) = client.writer.as_ref().cloned() else {
@@ -5374,6 +5492,8 @@ mod tests {
             server_event_tx,
             cloud_host: None,
             next_cloud_client_id: Arc::new(std::sync::atomic::AtomicU64::new(1_000_000_000)),
+            popup_owner_tab_id: None,
+            tab_geometry_controllers: HashMap::new(),
         }
     }
 
@@ -5784,11 +5904,14 @@ new_tab = "prefix+t"
             .iter()
             .any(|binding| binding.label == "prefix+t"));
 
-        // A second client connecting while client 1 still owns the session
-        // must not steal foreground or its keybindings — only a stable
-        // owner (here, the client that connects while there is none) drives
-        // shared session state. See
-        // wiki/tanuki-terminal-shared-focus-resize-flicker.md.
+        // Each App client now drives session-wide host presentation (theme,
+        // keybindings, title) independently of per-tab geometry ownership
+        // (TSK-49, herdr `6c0bb273`) — a newly connecting client always
+        // becomes foreground and its keybindings apply immediately, since
+        // the old stable-owner workaround was only needed to stop the
+        // *shared PTY resize* from ping-ponging, which per-tab geometry
+        // claiming now prevents on its own. See
+        // wiki/tanuki-terminal-upstream-multi-client-tab-views.md.
         assert!(server.handle_server_event(ServerEvent::ClientConnected {
             client_id: 2,
             cols: 80,
@@ -5802,7 +5925,7 @@ new_tab = "prefix+t"
         }));
         assert_eq!(
             server.app.state.prefix_code,
-            crossterm::event::KeyCode::Char('a')
+            crossterm::event::KeyCode::Char('b')
         );
         assert!(server
             .app
@@ -5811,10 +5934,10 @@ new_tab = "prefix+t"
             .new_tab
             .bindings
             .iter()
-            .any(|binding| binding.label == "prefix+t"));
+            .any(|binding| binding.label == "prefix+c"));
 
-        // Once the owner disconnects, the remaining client takes over and
-        // its own keybindings apply.
+        // Client 1 disconnecting doesn't change anything — client 2 was
+        // already foreground.
         assert!(server.handle_server_event(ServerEvent::ClientDisconnected { client_id: 1 }));
         assert_eq!(
             server.app.state.prefix_code,
@@ -8300,6 +8423,7 @@ next_tab = ""
         server.app.state.selected = 0;
         server.app.state.mode = crate::app::Mode::Terminal;
 
+        let (writer, _control_rx, _render_rx) = test_client_writer();
         server.clients.insert(
             1,
             ClientConnection::new(
@@ -8309,15 +8433,18 @@ next_tab = ""
                 None,
                 1,
                 RenderEncoding::SemanticFrame,
-                None,
+                Some(writer),
             ),
         );
         server.foreground_client_id = Some(1);
         server.sync_foreground_client_state();
         server.resize_shared_runtime_to_effective_size();
 
-        let terminal_area = server.app.state.view.terminal_area;
-        let expected = (terminal_area.height, terminal_area.width.saturating_sub(1));
+        // The sole App client's own terminal_size now drives each tab's
+        // geometry directly (TSK-49, per-tab resize path), rather than a
+        // shared `app.state.view.terminal_area` the old single-owner model
+        // used to populate.
+        let expected = (40u16, 120u16.saturating_sub(1));
         assert_eq!(
             server
                 .app
@@ -8335,6 +8462,336 @@ next_tab = ""
                 .unwrap()
                 .current_size(),
             expected
+        );
+    }
+
+    #[tokio::test]
+    async fn render_and_stream_gives_each_app_client_its_own_navigated_tab() {
+        // The point of the whole herdr `6c0bb273` port (TSK-50): two App
+        // clients connect to the same workspace, one navigates to a
+        // different tab via the client-scoped API, and each must receive a
+        // frame reflecting *its own* tab -- not the one shared
+        // `app.state.active`/`workspace.active_tab` every client used to
+        // render from before this task.
+        let mut server = test_headless_server();
+        let mut workspace = crate::workspace::Workspace::test_new("ws");
+        let tab0_pane = workspace.tabs[0].root_pane;
+        workspace.insert_test_runtime(
+            tab0_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"ALPHACONTENT"),
+        );
+        let tab1 = workspace.test_add_tab(Some("logs"));
+        let tab1_pane = workspace.tabs[tab1].root_pane;
+        workspace.insert_test_runtime(
+            tab1_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"BETACONTENT"),
+        );
+        server.app.state.workspaces = vec![workspace];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+
+        let (writer_a, _control_a, render_a) = test_client_writer();
+        let (writer_b, _control_b, render_b) = test_client_writer();
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 1,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer: writer_a,
+        }));
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 2,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer: writer_b,
+        }));
+
+        let tab1_id = server.app.public_tab_id(0, tab1).expect("tab id");
+        let (respond_to, _response_rx) = std::sync::mpsc::channel();
+        server.handle_client_shell_api_request(
+            2,
+            api::ApiRequestMessage {
+                request: api::schema::Request {
+                    id: "nav".into(),
+                    method: api::schema::Method::TabFocus(api::schema::TabTarget {
+                        tab_id: tab1_id,
+                    }),
+                },
+                respond_to,
+                response_write_complete: None,
+            },
+        );
+
+        server.render_and_stream();
+
+        let frame_a = read_server_frame(render_a.recv().unwrap());
+        let frame_b = read_server_frame(render_b.recv().unwrap());
+        let text_a: String = frame_a.cells.iter().map(|cell| cell.symbol.as_str()).collect();
+        let text_b: String = frame_b.cells.iter().map(|cell| cell.symbol.as_str()).collect();
+
+        assert!(
+            text_a.contains("ALPHACONTENT"),
+            "client 1 (not navigated) should still see tab 0's content: {text_a}"
+        );
+        assert!(
+            !text_a.contains("BETACONTENT"),
+            "client 1 should not see tab 1's content: {text_a}"
+        );
+        assert!(
+            text_b.contains("BETACONTENT"),
+            "client 2 (navigated via API) should see its own tab 1 content: {text_b}"
+        );
+        assert!(
+            !text_b.contains("ALPHACONTENT"),
+            "client 2 should no longer see tab 0's content: {text_b}"
+        );
+
+        // `handle_client_shell_api_request` already updates the shared
+        // "default" shell target to match whatever a client just navigated
+        // to (`set_default_shell_target_from_client`, TSK-49) -- that's
+        // real, pre-existing behavior unrelated to this test, not something
+        // `render_and_stream`'s per-client swap introduces. What matters
+        // here is that the swap/restore dance in `render_and_stream`
+        // doesn't itself perturb that shared value: it must come out of
+        // the render pass exactly as it went in, even though it was
+        // temporarily overwritten (twice, once per client) along the way.
+        assert_eq!(server.app.state.active, Some(0));
+        assert_eq!(server.app.state.workspaces[0].active_tab, 1);
+    }
+
+    #[tokio::test]
+    async fn public_background_tab_create_preserves_diverged_client_locations() {
+        // TSK-52: a public (session-wide, non-client-scoped) API call that
+        // merely triggers shell-location reconciliation -- a background
+        // `TabCreate` with `focus: false` -- must not disturb a client that
+        // already diverged to its own tab via `handle_client_shell_api_request`.
+        // `ClientShellLocation::reconcile` only *fills in* missing entries
+        // (`or_insert_with`), never overwrites an existing one, but this
+        // was never exercised end-to-end with two real diverged clients
+        // until now.
+        let mut server = test_headless_server();
+        let mut workspace = crate::workspace::Workspace::test_new("ws");
+        let tab0_pane = workspace.tabs[0].root_pane;
+        workspace.insert_test_runtime(
+            tab0_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"ALPHACONTENT"),
+        );
+        let tab1 = workspace.test_add_tab(Some("logs"));
+        let tab1_pane = workspace.tabs[tab1].root_pane;
+        workspace.insert_test_runtime(
+            tab1_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"BETACONTENT"),
+        );
+        server.app.state.workspaces = vec![workspace];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+
+        let (writer_a, _control_a, render_a) = test_client_writer();
+        let (writer_b, _control_b, render_b) = test_client_writer();
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 1,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer: writer_a,
+        }));
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 2,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer: writer_b,
+        }));
+
+        let tab1_id = server.app.public_tab_id(0, tab1).expect("tab id");
+        let (respond_to, _response_rx) = std::sync::mpsc::channel();
+        server.handle_client_shell_api_request(
+            2,
+            api::ApiRequestMessage {
+                request: api::schema::Request {
+                    id: "nav".into(),
+                    method: api::schema::Method::TabFocus(api::schema::TabTarget {
+                        tab_id: tab1_id,
+                    }),
+                },
+                respond_to,
+                response_write_complete: None,
+            },
+        );
+
+        // A background, unfocused tab create -- public (not client-scoped),
+        // and specifically chosen because `Method::TabCreate` is one of the
+        // methods that triggers `shell_locations_may_need_reconcile`.
+        let (respond_to, _response_rx) = std::sync::mpsc::channel();
+        server.handle_api_request_with_shutdown_check(api::ApiRequestMessage {
+            request: api::schema::Request {
+                id: "bg-tab-create".into(),
+                method: api::schema::Method::TabCreate(api::schema::TabCreateParams {
+                    workspace_id: None,
+                    cwd: None,
+                    focus: false,
+                    label: Some("background".into()),
+                    env: Default::default(),
+                }),
+            },
+            respond_to,
+            response_write_complete: None,
+        });
+
+        server.render_and_stream();
+
+        let text_a: String = read_server_frame(render_a.recv().unwrap())
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        let text_b: String = read_server_frame(render_b.recv().unwrap())
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+
+        assert!(
+            text_a.contains("ALPHACONTENT") && !text_a.contains("BETACONTENT"),
+            "client 1 must still be on tab 0 after the background tab create: {text_a}"
+        );
+        assert!(
+            text_b.contains("BETACONTENT") && !text_b.contains("ALPHACONTENT"),
+            "client 2 must still be on its own diverged tab 1 after the \
+             background tab create: {text_b}"
+        );
+    }
+
+    #[tokio::test]
+    async fn popup_is_visible_only_to_its_owning_clients_tab() {
+        // TSK-52: `popup_owner_tab_id` (TSK-48) records which tab's client
+        // opened a popup, but `ui::panes::render_popup_pane` itself never
+        // consulted it -- it renders `app.state.popup_pane` unconditionally
+        // whenever one exists, with no per-client scoping at all. Harmless
+        // before TSK-50 (every client shared one view anyway); a real gap
+        // now that per-client divergence is real. Fixed in `render_and_stream`
+        // by hiding the popup during a non-owning client's render pass,
+        // the same swap/restore pattern as the active-tab swap above.
+        let mut server = test_headless_server();
+        let mut workspace = crate::workspace::Workspace::test_new("ws");
+        let tab0_pane = workspace.tabs[0].root_pane;
+        workspace.insert_test_runtime(
+            tab0_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"ALPHACONTENT"),
+        );
+        let tab1 = workspace.test_add_tab(Some("logs"));
+        let tab1_pane = workspace.tabs[tab1].root_pane;
+        workspace.insert_test_runtime(
+            tab1_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"BETACONTENT"),
+        );
+        server.app.state.workspaces = vec![workspace];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+
+        let popup_terminal_id = crate::terminal::TerminalId::alloc();
+        server.app.terminal_runtimes.insert(
+            popup_terminal_id.clone(),
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(20, 6, b"POPUPCONTENT"),
+        );
+        server.app.state.popup_pane = Some(crate::app::state::PopupPaneState {
+            pane_id: crate::layout::PaneId::alloc(),
+            terminal_id: popup_terminal_id,
+            width: None,
+            height: None,
+        });
+
+        let (writer_a, _control_a, render_a) = test_client_writer();
+        let (writer_b, _control_b, render_b) = test_client_writer();
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 1,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer: writer_a,
+        }));
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 2,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer: writer_b,
+        }));
+
+        // Client 2 navigates away to tab 1; client 1 stays on tab 0, which
+        // owns the popup opened above.
+        let tab1_id = server.app.public_tab_id(0, tab1).expect("tab id");
+        let (respond_to, _response_rx) = std::sync::mpsc::channel();
+        server.handle_client_shell_api_request(
+            2,
+            api::ApiRequestMessage {
+                request: api::schema::Request {
+                    id: "nav".into(),
+                    method: api::schema::Method::TabFocus(api::schema::TabTarget {
+                        tab_id: tab1_id,
+                    }),
+                },
+                respond_to,
+                response_write_complete: None,
+            },
+        );
+        let tab0_id = server.app.public_tab_id(0, 0).expect("tab id");
+        server.popup_owner_tab_id = Some(tab0_id);
+
+        server.render_and_stream();
+
+        let text_a: String = read_server_frame(render_a.recv().unwrap())
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        let text_b: String = read_server_frame(render_b.recv().unwrap())
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+
+        assert!(
+            text_a.contains("POPUPCONTENT"),
+            "client 1 (on the popup's owning tab 0) should see the popup: {text_a}"
+        );
+        assert!(
+            !text_b.contains("POPUPCONTENT"),
+            "client 2 (diverged to tab 1, not the popup's owner) should not \
+             see the popup: {text_b}"
+        );
+        assert!(
+            server.app.state.popup_pane.is_some(),
+            "the popup must still exist in shared state after rendering \
+             both clients -- hiding it for client 2 must not delete it"
         );
     }
 

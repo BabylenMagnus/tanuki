@@ -787,6 +787,12 @@ pub struct ViewState {
     pub toast_hit_area: Rect,
     pub pane_infos: Vec<PaneInfo>,
     pub split_borders: Vec<SplitBorder>,
+    /// Which workspace/tab `pane_infos`/`split_borders` above were computed
+    /// for (TSK-47, herdr `6c0bb273`). Always the app-wide active target
+    /// today — `tab_surface()` reads it so every existing call site keeps
+    /// working unchanged; TSK-48+ is where per-client targets start
+    /// flowing through here instead of this single shared scratch field.
+    pub target: Option<crate::ui::TabSurfaceTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2394,6 +2400,7 @@ impl AppState {
                 toast_hit_area: Rect::default(),
                 pane_infos: Vec::new(),
                 split_borders: Vec::new(),
+                target: None,
             },
             drag: None,
             workspace_press: None,

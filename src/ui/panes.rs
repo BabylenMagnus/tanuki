@@ -213,25 +213,32 @@ pub(super) fn resize_tab_panes(
     }
 }
 
-/// Compute pane layout info and optionally resize pane runtimes to match.
-pub(super) fn compute_pane_infos(
+/// Compute pane layout info and optionally resize pane runtimes to match,
+/// for an explicit `(workspace_index, tab_index)` target rather than
+/// implicitly reading `app.active` — ported from herdr upstream commit
+/// `6c0bb273` (TSK-47), the generalization `client_views.rs` (TSK-48) needs
+/// to render each client's own view independently.
+pub(super) fn compute_pane_infos_for_tab(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
+    workspace_index: usize,
+    tab_index: usize,
     area: Rect,
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) -> Vec<PaneInfo> {
-    let Some(ws_idx) = app.active else {
-        return Vec::new();
-    };
-    let Some(ws) = app.workspaces.get(ws_idx) else {
+    let Some(tab) = app
+        .workspaces
+        .get(workspace_index)
+        .and_then(|ws| ws.tabs.get(tab_index))
+    else {
         return Vec::new();
     };
 
-    let multi_pane = ws.layout.pane_count() > 1;
+    let multi_pane = tab.layout.pane_count() > 1;
 
-    if ws.zoomed {
-        let focused_id = ws.layout.focused();
+    if tab.zoomed {
+        let focused_id = tab.layout.focused();
         let borders = if multi_pane && app.pane_borders {
             Borders::ALL
         } else {
@@ -240,10 +247,12 @@ pub(super) fn compute_pane_infos(
         let pane_inner = pane_inner_rect(area, borders);
         let mut inner_rect = pane_inner;
         let mut scrollbar_rect = None;
-        if let Some(rt) = app.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, focused_id) {
+        if let Some(rt) =
+            app.runtime_for_pane_in_workspace(terminal_runtimes, workspace_index, focused_id)
+        {
             (inner_rect, scrollbar_rect) = stable_scrollbar_gutter(rt, pane_inner);
             if resize_panes
-                && ws.terminal_id(focused_id).is_some_and(|terminal_id| {
+                && tab.terminal_id(focused_id).is_some_and(|terminal_id| {
                     !app.direct_attach_resize_locks.contains(terminal_id)
                 })
             {
@@ -265,17 +274,19 @@ pub(super) fn compute_pane_infos(
         }];
     }
 
-    let mut pane_infos = apply_pane_chrome(ws.layout.panes(area), app.pane_borders, app.pane_gaps);
+    let mut pane_infos = apply_pane_chrome(tab.layout.panes(area), app.pane_borders, app.pane_gaps);
 
     for info in &mut pane_infos {
         let pane_inner = pane_inner_rect(info.rect, info.borders);
 
         let mut inner_rect = pane_inner;
         let mut scrollbar_rect = None;
-        if let Some(rt) = app.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id) {
+        if let Some(rt) =
+            app.runtime_for_pane_in_workspace(terminal_runtimes, workspace_index, info.id)
+        {
             (inner_rect, scrollbar_rect) = stable_scrollbar_gutter(rt, pane_inner);
             if resize_panes
-                && ws.terminal_id(info.id).is_some_and(|terminal_id| {
+                && tab.terminal_id(info.id).is_some_and(|terminal_id| {
                     !app.direct_attach_resize_locks.contains(terminal_id)
                 })
             {
@@ -295,21 +306,29 @@ pub(super) fn compute_pane_infos(
     pane_infos
 }
 
+/// Renders pane content for an explicit workspace target (TSK-47, herdr
+/// `6c0bb273`-style generalization) rather than implicitly reading
+/// `app.active`. `multi_pane` is derived from `pane_infos.len()` rather
+/// than the tab's own layout: when zoomed, `pane_infos` has exactly one
+/// (always-focused) entry, so the dimming decision below is unaffected
+/// either way; when not zoomed, `pane_infos.len()` already equals the
+/// tab's real pane count.
 pub(super) fn render_panes(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
     frame: &mut Frame,
+    target: Option<super::tab_surface::TabSurfaceTarget>,
     pane_infos: &[PaneInfo],
     split_borders: &[crate::layout::SplitBorder],
 ) {
-    let Some(ws_idx) = app.active else {
+    let Some(ws_idx) = target.map(|target| target.workspace_index) else {
         return;
     };
     let Some(ws) = app.workspaces.get(ws_idx) else {
         return;
     };
 
-    let multi_pane = ws.layout.pane_count() > 1;
+    let multi_pane = pane_infos.len() > 1;
     let terminal_active = app.mode == Mode::Terminal;
 
     for info in pane_infos {
@@ -375,7 +394,7 @@ pub(crate) fn popup_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect
         .map(|geometry| (geometry.outer, geometry.inner))
 }
 
-pub(super) fn resize_popup_pane(
+pub(crate) fn resize_popup_pane(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
     area: Rect,
@@ -1286,9 +1305,11 @@ mod tests {
 
         let area = Rect::new(10, 3, 40, 8);
         let terminal_runtimes = TerminalRuntimeRegistry::new();
-        let infos = compute_pane_infos(
+        let infos = compute_pane_infos_for_tab(
             &app,
             &terminal_runtimes,
+            0,
+            0,
             area,
             false,
             crate::kitty_graphics::HostCellSize::default(),
@@ -1315,9 +1336,11 @@ mod tests {
 
         let area = Rect::new(10, 3, 40, 8);
         let terminal_runtimes = TerminalRuntimeRegistry::new();
-        let infos = compute_pane_infos(
+        let infos = compute_pane_infos_for_tab(
             &app,
             &terminal_runtimes,
+            0,
+            0,
             area,
             false,
             crate::kitty_graphics::HostCellSize::default(),
@@ -1344,9 +1367,11 @@ mod tests {
 
         let area = Rect::new(10, 3, 40, 8);
         let terminal_runtimes = TerminalRuntimeRegistry::new();
-        let infos = compute_pane_infos(
+        let infos = compute_pane_infos_for_tab(
             &app,
             &terminal_runtimes,
+            0,
+            0,
             area,
             false,
             crate::kitty_graphics::HostCellSize::default(),
@@ -1373,9 +1398,11 @@ mod tests {
 
         let area = Rect::new(10, 3, 4, 8);
         let terminal_runtimes = TerminalRuntimeRegistry::new();
-        let infos = compute_pane_infos(
+        let infos = compute_pane_infos_for_tab(
             &app,
             &terminal_runtimes,
+            0,
+            0,
             area,
             false,
             crate::kitty_graphics::HostCellSize::default(),
@@ -1406,9 +1433,11 @@ mod tests {
 
         let area = Rect::new(10, 3, 40, 8);
         let terminal_runtimes = TerminalRuntimeRegistry::new();
-        let infos = compute_pane_infos(
+        let infos = compute_pane_infos_for_tab(
             &app,
             &terminal_runtimes,
+            0,
+            0,
             area,
             false,
             crate::kitty_graphics::HostCellSize::default(),

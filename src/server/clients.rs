@@ -28,6 +28,70 @@ pub(crate) enum DeferredRender {
     Full,
 }
 
+/// A connection-local projection of which workspace/tab a client is viewing,
+/// independent of every other connected client (TSK-46, ported from herdr
+/// upstream commit `6c0bb273`). `None` on `ClientConnection` means "follow
+/// the app-wide default target" (today's single shared `self.app.state.active`);
+/// `Some` means this client has its own focus, set by `ClientShellLocation::focus_tab`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ClientShellLocation {
+    pub(crate) focused_workspace_id: Option<String>,
+    pub(crate) active_tab_ids: HashMap<String, String>,
+}
+
+/// A snapshot of the real current workspace/tab topology, used to reconcile
+/// a `ClientShellLocation` that may be pointing at a workspace/tab that was
+/// since closed or renamed elsewhere.
+pub(crate) struct ClientShellTopology {
+    pub(crate) focused_workspace_id: Option<String>,
+    pub(crate) fallback_workspace_id: Option<String>,
+    pub(crate) active_tab_ids: HashMap<String, String>,
+    pub(crate) tab_workspace_ids: HashMap<String, String>,
+}
+
+impl ClientShellLocation {
+    pub(crate) fn focused_tab_id(&self) -> Option<&str> {
+        self.focused_workspace_id
+            .as_deref()
+            .and_then(|workspace_id| self.active_tab_ids.get(workspace_id))
+            .map(String::as_str)
+    }
+
+    pub(crate) fn focus_workspace(&mut self, workspace_id: String) {
+        self.focused_workspace_id = Some(workspace_id);
+    }
+
+    pub(crate) fn focus_tab(&mut self, workspace_id: String, tab_id: String) {
+        self.focused_workspace_id = Some(workspace_id.clone());
+        self.active_tab_ids.insert(workspace_id, tab_id);
+    }
+
+    /// Drops any remembered tab that no longer belongs to its workspace (or
+    /// whose workspace no longer exists), then falls back to the topology's
+    /// own focused/fallback workspace if this location's focus is now stale.
+    pub(crate) fn reconcile(&mut self, topology: &ClientShellTopology) {
+        self.active_tab_ids.retain(|workspace_id, tab_id| {
+            topology.active_tab_ids.contains_key(workspace_id)
+                && topology.tab_workspace_ids.get(tab_id) == Some(workspace_id)
+        });
+        for (workspace_id, tab_id) in &topology.active_tab_ids {
+            self.active_tab_ids
+                .entry(workspace_id.clone())
+                .or_insert_with(|| tab_id.clone());
+        }
+        if self
+            .focused_workspace_id
+            .as_ref()
+            .is_none_or(|workspace_id| !topology.active_tab_ids.contains_key(workspace_id))
+        {
+            self.focused_workspace_id = topology
+                .focused_workspace_id
+                .clone()
+                .or_else(|| topology.fallback_workspace_id.clone());
+        }
+    }
+}
+
 /// A connected client tracked by the server.
 pub(crate) struct ClientConnection {
     /// Whether this connection is the full app client or a direct terminal attach.
@@ -66,6 +130,10 @@ pub(crate) struct ClientConnection {
     pub(crate) host_mouse_capture_active: Option<bool>,
     /// Temporary files staged from this client's local clipboard image pastes.
     pub(crate) staged_clipboard_files: Vec<PathBuf>,
+    /// Connection-local workspace/tab focus (TSK-46). `None` means this
+    /// client still follows the app-wide default target; not wired into any
+    /// call sites yet — see TSK-48/TSK-49 for where this starts being read.
+    pub(crate) shell_location: Option<ClientShellLocation>,
     /// Channels for sending framed ServerMessage data to the client writer thread.
     pub(crate) writer: Option<ClientWriter>,
 }
@@ -128,6 +196,7 @@ impl ClientConnection {
             pane_graphics_render_pending: false,
             host_mouse_capture_active: None,
             staged_clipboard_files: Vec::new(),
+            shell_location: None,
             writer,
         }
     }

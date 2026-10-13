@@ -243,13 +243,14 @@ pub(crate) fn has_visible_pane_graphics(
         return false;
     }
 
-    let Some(ws_idx) = app.active else {
+    let Some(target) = surface.target else {
         return false;
     };
+    let ws_idx = target.workspace_index;
     if app
         .workspaces
         .get(ws_idx)
-        .and_then(crate::workspace::Workspace::active_tab)
+        .and_then(|workspace| workspace.tabs.get(target.tab_index))
         .is_none()
     {
         return false;
@@ -528,20 +529,22 @@ fn collect_visible_placements(
     cell_size: HostCellSize,
     uploaded_images: &HashMap<u32, ImageSignature>,
 ) -> Vec<HostPlacement> {
-    let ws_idx = match app.active {
-        Some(idx) => idx,
-        None => {
-            tracing::debug!("collect_visible_placements: no active workspace");
-            return Vec::new();
-        }
+    let Some(target) = surface.target else {
+        tracing::debug!("collect_visible_placements: no tab surface target");
+        return Vec::new();
     };
+    let ws_idx = target.workspace_index;
     if app
         .workspaces
         .get(ws_idx)
-        .and_then(crate::workspace::Workspace::active_tab)
+        .and_then(|workspace| workspace.tabs.get(target.tab_index))
         .is_none()
     {
-        tracing::debug!(ws_idx, "collect_visible_placements: no active tab");
+        tracing::debug!(
+            ws_idx,
+            tab_idx = target.tab_index,
+            "collect_visible_placements: no target tab"
+        );
         return Vec::new();
     }
 

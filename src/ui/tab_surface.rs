@@ -1,32 +1,55 @@
 use ratatui::{layout::Rect, Frame};
 
-use super::panes::{compute_pane_infos, render_panes, resize_tab_panes};
+use super::panes::{compute_pane_infos_for_tab, render_panes, resize_tab_panes};
 use crate::app::state::ViewState;
 use crate::app::{AppState, Mode};
 use crate::layout::{PaneInfo, SplitBorder};
 use crate::protocol::CursorState;
 use crate::terminal::TerminalRuntimeRegistry;
 
+/// An explicit "what to render" descriptor — a specific workspace/tab pair —
+/// rather than implicitly reading the app-wide `app.active`. Ported from
+/// herdr upstream commit `6c0bb273` (TSK-47): the building block
+/// `client_views.rs` (TSK-48) uses to give every connected client its own
+/// independent view instead of one shared one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TabSurfaceTarget {
+    pub(crate) workspace_index: usize,
+    pub(crate) tab_index: usize,
+}
+
 pub(crate) struct TabSurfaceLayout {
+    pub(crate) target: Option<TabSurfaceTarget>,
     pub(crate) pane_infos: Vec<PaneInfo>,
     pub(crate) split_borders: Vec<SplitBorder>,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct TabSurfaceView<'a> {
+    pub(crate) target: Option<TabSurfaceTarget>,
     pub(crate) pane_infos: &'a [PaneInfo],
     pub(crate) split_borders: &'a [SplitBorder],
 }
 
 impl ViewState {
+    /// `self.target` is the workspace/tab this scratch view was last
+    /// computed for (set alongside `pane_infos`/`split_borders` in
+    /// `compute_view_internal`/`compute_mobile_view`) — always the app-wide
+    /// active target today, so every existing call site keeps working
+    /// unchanged. TSK-48+ is where per-client targets start flowing through
+    /// here instead of this single shared scratch field.
     pub(crate) fn tab_surface(&self) -> TabSurfaceView<'_> {
         TabSurfaceView {
+            target: self.target,
             pane_infos: &self.pane_infos,
             split_borders: &self.split_borders,
         }
     }
 }
 
+/// Computes the tab surface for the app-wide active workspace/tab. Thin
+/// wrapper over `compute_tab_surface_for` kept for call sites that haven't
+/// been made target-aware yet (TSK-47).
 pub(crate) fn compute_tab_surface(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
@@ -34,20 +57,56 @@ pub(crate) fn compute_tab_surface(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) -> TabSurfaceLayout {
-    let split_borders = app
-        .active
-        .and_then(|i| app.workspaces.get(i))
-        .map(|ws| {
-            if ws.zoomed {
+    let target = app.active.and_then(|workspace_index| {
+        let workspace = app.workspaces.get(workspace_index)?;
+        Some(TabSurfaceTarget {
+            workspace_index,
+            tab_index: workspace.active_tab_index(),
+        })
+    });
+    compute_tab_surface_for(app, terminal_runtimes, target, area, resize_panes, cell_size)
+}
+
+/// Computes the tab surface for an explicit target rather than implicitly
+/// reading `app.active` — ported from herdr upstream commit `6c0bb273`
+/// (TSK-47).
+pub(crate) fn compute_tab_surface_for(
+    app: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+    target: Option<TabSurfaceTarget>,
+    area: Rect,
+    resize_panes: bool,
+    cell_size: crate::kitty_graphics::HostCellSize,
+) -> TabSurfaceLayout {
+    let tab = target.and_then(|target| {
+        app.workspaces
+            .get(target.workspace_index)?
+            .tabs
+            .get(target.tab_index)
+    });
+    let split_borders = tab
+        .map(|tab| {
+            if tab.zoomed {
                 Vec::new()
             } else {
-                ws.layout.splits(area)
+                tab.layout.splits(area)
             }
         })
         .unwrap_or_default();
-    let pane_infos = compute_pane_infos(app, terminal_runtimes, area, resize_panes, cell_size);
+    let pane_infos = target.map_or_else(Vec::new, |target| {
+        compute_pane_infos_for_tab(
+            app,
+            terminal_runtimes,
+            target.workspace_index,
+            target.tab_index,
+            area,
+            resize_panes,
+            cell_size,
+        )
+    });
 
     TabSurfaceLayout {
+        target,
         pane_infos,
         split_borders,
     }
@@ -56,10 +115,18 @@ pub(crate) fn compute_tab_surface(
 pub(crate) fn resize_tab_surface(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
-    tab: &crate::workspace::Tab,
+    workspace_index: usize,
+    tab_index: usize,
     area: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    let Some(tab) = app
+        .workspaces
+        .get(workspace_index)
+        .and_then(|workspace| workspace.tabs.get(tab_index))
+    else {
+        return;
+    };
     resize_tab_panes(app, terminal_runtimes, tab, area, cell_size);
 }
 
@@ -73,6 +140,7 @@ pub(crate) fn render_tab_surface(
         app,
         terminal_runtimes,
         frame,
+        surface.target,
         surface.pane_infos,
         surface.split_borders,
     );
@@ -83,7 +151,7 @@ pub(crate) fn tab_surface_hyperlinks(
     terminal_runtimes: &TerminalRuntimeRegistry,
     surface: TabSurfaceView<'_>,
 ) -> Vec<((u16, u16), String, String)> {
-    let Some(ws_idx) = app.active else {
+    let Some(ws_idx) = surface.target.map(|target| target.workspace_index) else {
         return Vec::new();
     };
     if app.workspaces.get(ws_idx).is_none() {
@@ -105,11 +173,16 @@ pub(crate) fn tab_surface_cursor(
     terminal_runtimes: &TerminalRuntimeRegistry,
     surface: TabSurfaceView<'_>,
 ) -> Option<CursorState> {
+    // Upstream (`6c0bb273`) drops this app-wide Mode::Terminal gate in favor
+    // of per-client mode tracking that doesn't exist in our fork yet — kept
+    // here deliberately so this task doesn't change today's single-shared-
+    // mode cursor behavior. Revisit once TSK-50/51 give each client its own
+    // mode, not just its own view target.
     if app.mode != Mode::Terminal {
         return None;
     }
 
-    let ws_idx = app.active?;
+    let ws_idx = surface.target?.workspace_index;
     let info = surface.pane_infos.iter().find(|info| info.is_focused)?;
     if !app.pane_exposes_host_cursor(ws_idx, info.id) {
         return None;
@@ -210,6 +283,7 @@ mod tests {
         app.view.split_borders.clear();
 
         let surface_view = TabSurfaceView {
+            target: surface.target,
             pane_infos: &surface.pane_infos,
             split_borders: &surface.split_borders,
         };

@@ -838,6 +838,20 @@ impl App {
         self.sync_focus_events_with_outer_event(None);
     }
 
+    /// Baselines `last_focus` without emitting any events (TSK-48, herdr
+    /// `6c0bb273`). Used by per-client shell-focus reconciliation, which emits
+    /// its own shell-scoped focus transitions separately and would otherwise
+    /// double-fire the generic WorkspaceFocused/TabFocused/PaneFocused events
+    /// that `sync_focus_events` sends.
+    pub(crate) fn accept_current_focus_without_events(&mut self) {
+        self.last_focus = self.state.active.and_then(|idx| {
+            self.state
+                .workspaces
+                .get(idx)
+                .and_then(|ws| ws.focused_pane_id().map(|pane_id| (idx, pane_id)))
+        });
+    }
+
     pub(super) fn send_outer_focus_event(&mut self, event: crate::ghostty::FocusEvent) {
         self.sync_focus_events_with_outer_event(Some(event));
     }
@@ -902,7 +916,7 @@ impl App {
         self.last_focus = current_focus;
     }
 
-    fn send_pane_focus_event(
+    pub(crate) fn send_pane_focus_event(
         &self,
         ws_idx: usize,
         pane_id: crate::layout::PaneId,

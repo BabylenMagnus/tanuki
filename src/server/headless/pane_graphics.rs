@@ -73,7 +73,8 @@ impl HeadlessServer {
 
         let render_targets = render_targets(&self.clients, self.foreground_client_id);
         let mut app_view_size = None;
-        for (_, terminal_size, _, _, mode) in &render_targets {
+        let mut app_target = None;
+        for (client_id, terminal_size, _, _, mode) in &render_targets {
             if !matches!(mode, ClientConnectionMode::App) {
                 continue;
             }
@@ -82,6 +83,19 @@ impl HeadlessServer {
                 return RetainedGraphicsOutcome::Fallback;
             }
             app_view_size = Some(*terminal_size);
+            // This fast path re-encodes graphics against the single shared
+            // `app.state.view` rather than recomputing a per-client tab
+            // surface (unlike `render_and_stream`'s per-client swap, TSK-50)
+            // -- safe only when every App client is currently looking at
+            // the same tab. Falls back to the full render path otherwise,
+            // the same way `mixed_app_geometry` above already does for
+            // differing client sizes.
+            let target = self.shell_target_for_client(*client_id);
+            if app_target.is_some_and(|existing| existing != target) {
+                crate::render_prof::event("retained_graphics_fallback.mixed_app_target");
+                return RetainedGraphicsOutcome::Fallback;
+            }
+            app_target = Some(target);
         }
         let mut deferred = false;
         let mut prepared = Vec::new();

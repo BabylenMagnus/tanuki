@@ -38,8 +38,8 @@ use self::mobile::{
 use self::navigator::render_navigator_overlay;
 pub(crate) use self::onboarding::onboarding_welcome_continue_rect;
 use self::onboarding::render_onboarding_overlay;
-pub(crate) use self::panes::popup_pane_rects;
-use self::panes::{render_empty, render_popup_pane, resize_popup_pane};
+pub(crate) use self::panes::{popup_pane_rects, resize_popup_pane};
+use self::panes::{render_empty, render_popup_pane};
 pub(crate) use self::release_notes::{
     product_announcement_display_lines, release_notes_close_button_rect,
     release_notes_display_lines, release_notes_wrapped_line_count, PRODUCT_ANNOUNCEMENT_MODAL_SIZE,
@@ -57,7 +57,8 @@ use self::status::{
     toast_notification_rect,
 };
 pub(crate) use self::tab_surface::{
-    compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
+    compute_tab_surface, compute_tab_surface_for, render_tab_surface, resize_tab_surface,
+    TabSurfaceLayout, TabSurfaceTarget,
 };
 use self::tabs::render_tab_bar;
 pub(crate) use self::{
@@ -165,11 +166,11 @@ fn resize_background_tab_panes_to_area(
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
     for (ws_idx, ws) in app.workspaces.iter().enumerate() {
-        for (tab_idx, tab) in ws.tabs.iter().enumerate() {
+        for (tab_idx, _tab) in ws.tabs.iter().enumerate() {
             if app.active == Some(ws_idx) && tab_idx == ws.active_tab_index() {
                 continue;
             }
-            resize_tab_surface(app, terminal_runtimes, tab, terminal_area, cell_size);
+            resize_tab_surface(app, terminal_runtimes, ws_idx, tab_idx, terminal_area, cell_size);
         }
     }
 }
@@ -182,11 +183,11 @@ fn resize_background_tab_panes_for_desktop(
 ) {
     for (ws_idx, ws) in app.workspaces.iter().enumerate() {
         let (_, terminal_area) = desktop_tab_bar_and_terminal_area(app, ws, main_area);
-        for (tab_idx, tab) in ws.tabs.iter().enumerate() {
+        for (tab_idx, _tab) in ws.tabs.iter().enumerate() {
             if app.active == Some(ws_idx) && tab_idx == ws.active_tab_index() {
                 continue;
             }
-            resize_tab_surface(app, terminal_runtimes, tab, terminal_area, cell_size);
+            resize_tab_surface(app, terminal_runtimes, ws_idx, tab_idx, terminal_area, cell_size);
         }
     }
 }
@@ -271,6 +272,7 @@ fn compute_view_internal(
     app.tab_scroll = tab_bar_view.scroll;
 
     let TabSurfaceLayout {
+        target,
         pane_infos,
         split_borders,
     } = compute_tab_surface(
@@ -313,6 +315,7 @@ fn compute_view_internal(
         toast_hit_area,
         pane_infos,
         split_borders,
+        target,
     };
     app.sync_copy_mode_search_geometry();
 }
@@ -340,6 +343,7 @@ fn compute_mobile_view(
     }
 
     let TabSurfaceLayout {
+        target,
         pane_infos,
         split_borders,
     } = compute_tab_surface(
@@ -376,6 +380,7 @@ fn compute_mobile_view(
         toast_hit_area,
         pane_infos,
         split_borders,
+        target,
     };
     app.sync_copy_mode_search_geometry();
 }
