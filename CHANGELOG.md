@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Update release manifest URLs to use tanukicode.ru domain
+
 ## [0.1.104] - 2026-10-13
 
 ### Added
