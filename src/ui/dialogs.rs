@@ -71,7 +71,8 @@ pub(super) fn render_rename_overlay(app: &AppState, frame: &mut Frame, area: Rec
         _ => return,
     };
 
-    let Some(inner) = render_modal_shell(frame, area, 56, rename_modal_height(app.mode), &app.palette)
+    let Some(inner) =
+        render_modal_shell(frame, area, 56, rename_modal_height(app.mode), &app.palette)
     else {
         return;
     };

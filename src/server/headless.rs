@@ -1756,7 +1756,9 @@ impl HeadlessServer {
         let disconnected_focus = self
             .clients
             .get(&client_id)
-            .filter(|client| client.is_full_app_client() && client.outer_terminal_focus == Some(true))
+            .filter(|client| {
+                client.is_full_app_client() && client.outer_terminal_focus == Some(true)
+            })
             .and_then(|_| self.shell_focus_target(client_id));
         let should_release_focus = disconnected_focus.as_ref().is_some_and(|target| {
             !self.clients.iter().any(|(&other_id, client)| {
@@ -2463,8 +2465,7 @@ impl HeadlessServer {
         // can inspect whether the request actually succeeded before
         // deciding whether to run that focus (TSK-52, herdr `6c0bb273`
         // `notifications.rs`, missed during TSK-50's render.rs-only pass).
-        let mut focused_worktree_response = if let AppEvent::WorktreeAddFinished(result) = &mut ev
-        {
+        let mut focused_worktree_response = if let AppEvent::WorktreeAddFinished(result) = &mut ev {
             result
                 .api_request
                 .as_mut()
@@ -3220,9 +3221,23 @@ impl HeadlessServer {
             self.resize_shared_runtime_to_effective_size_before_input();
         }
         let theme_changed = self.update_client_host_theme_from_events(client_id, &events);
+        // Keybind/mouse navigation (next workspace, sidebar click, new tab, ...)
+        // mutates the shared `app.state.active`, but every full-app client is
+        // rendered from its own `shell_location` (TSK-49). Start from this
+        // client's own place so relative navigation is computed from what it
+        // sees, then carry its place along with whatever the input changed.
+        let shell_nav_before = if source_is_full_app {
+            self.set_default_shell_target_from_client(client_id);
+            Some((self.default_shell_target(), self.shell_view_shape()))
+        } else {
+            None
+        };
         let chrome_before = AppChromeSnapshot::capture(&self.app.state);
         self.app
             .route_client_events(events, self.foreground_client_id == Some(client_id));
+        let shell_view_followed = shell_nav_before.is_some_and(|(target, shape)| {
+            self.follow_client_input_navigation(client_id, target, shape)
+        });
         let config_reloaded_from_disk = self.app.take_config_reloaded_from_disk();
         if config_reloaded_from_disk {
             self.reload_server_config(false);
@@ -3254,6 +3269,7 @@ impl HeadlessServer {
         } else {
             host_surface_redraw
                 || foreground_changed
+                || shell_view_followed
                 || theme_changed
                 || outer_focus_changed
                 || chrome_before != chrome_after
@@ -4084,7 +4100,8 @@ impl HeadlessServer {
 
         sources.iter().any(|&pane_id| {
             let terminal_id = self.terminal_id_for_pane(pane_id);
-            (has_app_target && (terminal_id.is_none() || self.any_shell_surface_contains_pane(pane_id)))
+            (has_app_target
+                && (terminal_id.is_none() || self.any_shell_surface_contains_pane(pane_id)))
                 || terminal_id
                     .is_none_or(|source| direct_terminal_targets.contains(source.as_str()))
         })
@@ -4415,7 +4432,9 @@ impl HeadlessServer {
                     && self.popup_owner_tab_id.as_deref().is_some_and(|owner| {
                         Some(owner) != self.shell_tab_id_for_client(client_id).as_deref()
                     });
-                let saved_popup = hide_popup.then(|| self.app.state.popup_pane.take()).flatten();
+                let saved_popup = hide_popup
+                    .then(|| self.app.state.popup_pane.take())
+                    .flatten();
                 let Some(target) = self.shell_target_for_client(client_id) else {
                     return (saved_active, None, saved_popup);
                 };
@@ -8536,8 +8555,16 @@ next_tab = ""
 
         let frame_a = read_server_frame(render_a.recv().unwrap());
         let frame_b = read_server_frame(render_b.recv().unwrap());
-        let text_a: String = frame_a.cells.iter().map(|cell| cell.symbol.as_str()).collect();
-        let text_b: String = frame_b.cells.iter().map(|cell| cell.symbol.as_str()).collect();
+        let text_a: String = frame_a
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        let text_b: String = frame_b
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
 
         assert!(
             text_a.contains("ALPHACONTENT"),
@@ -8567,6 +8594,168 @@ next_tab = ""
         // temporarily overwritten (twice, once per client) along the way.
         assert_eq!(server.app.state.active, Some(0));
         assert_eq!(server.app.state.workspaces[0].active_tab, 1);
+    }
+
+    // Regression tests for "workspace/tab switching is dead" (v0.1.103): raw
+    // keyboard/mouse navigation changed the shared `app.state.active` but a
+    // full-app client is rendered from its own `shell_location`, which only
+    // `handle_client_shell_api_request` used to update, and nothing in
+    // production calls that. These drive navigation through real
+    // `ServerEvent::ClientInput` bytes and check what the client is actually
+    // sent. They are named `client_input_navigation_*` so deploy.py and CI can
+    // run exactly this group on Windows, where the gate is otherwise scoped
+    // to `windows_*` tests only.
+
+    fn nav_test_workspace(name: &str, tab0: &[u8], tab1: &[u8]) -> crate::workspace::Workspace {
+        let mut workspace = crate::workspace::Workspace::test_new(name);
+        let tab0_pane = workspace.tabs[0].root_pane;
+        workspace.insert_test_runtime(
+            tab0_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, tab0),
+        );
+        let tab1_index = workspace.test_add_tab(Some("second"));
+        let tab1_pane = workspace.tabs[tab1_index].root_pane;
+        workspace.insert_test_runtime(
+            tab1_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, tab1),
+        );
+        workspace
+    }
+
+    fn nav_connect_client(
+        server: &mut HeadlessServer,
+        client_id: u64,
+    ) -> std::sync::mpsc::Receiver<Vec<u8>> {
+        let (writer, _control, render) = test_client_writer();
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer,
+        }));
+        render
+    }
+
+    /// Sends the default prefix (ctrl+b) followed by `key`, as a user would.
+    fn nav_press_prefixed(server: &mut HeadlessServer, client_id: u64, key: u8) {
+        for data in [vec![0x02], vec![key]] {
+            server.handle_server_event(ServerEvent::ClientInput { client_id, data });
+        }
+    }
+
+    fn nav_frame_text(render: &std::sync::mpsc::Receiver<Vec<u8>>) -> String {
+        let frame = read_server_frame(render.recv().unwrap());
+        frame
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn client_input_navigation_next_tab_moves_the_clients_view() {
+        let mut server = test_headless_server();
+        server.app.state.workspaces =
+            vec![nav_test_workspace("ws", b"ALPHACONTENT", b"BETACONTENT")];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        let render = nav_connect_client(&mut server, 1);
+
+        // Default `next_tab` is `prefix+n`.
+        nav_press_prefixed(&mut server, 1, b'n');
+        server.render_and_stream();
+
+        let text = nav_frame_text(&render);
+        assert!(
+            text.contains("BETACONTENT") && !text.contains("ALPHACONTENT"),
+            "next tab via real input must change what the client is sent: {text}"
+        );
+        assert_eq!(server.app.state.workspaces[0].active_tab, 1);
+    }
+
+    #[tokio::test]
+    async fn client_input_navigation_next_workspace_moves_the_clients_view() {
+        let mut server = test_headless_server();
+        let mut first = crate::workspace::Workspace::test_new("first");
+        let first_pane = first.tabs[0].root_pane;
+        first.insert_test_runtime(
+            first_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"FIRSTWORKSPACE"),
+        );
+        let mut second = crate::workspace::Workspace::test_new("second");
+        let second_pane = second.tabs[0].root_pane;
+        second.insert_test_runtime(
+            second_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 10, b"SECONDWORKSPACE"),
+        );
+        server.app.state.workspaces = vec![first, second];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        let render = nav_connect_client(&mut server, 1);
+
+        // In navigate mode a number key jumps straight to that workspace and
+        // leaves navigate mode (same path the sidebar hint bar advertises).
+        server.app.state.mode = crate::app::Mode::Navigate;
+        server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 1,
+            data: b"2".to_vec(),
+        });
+        server.render_and_stream();
+
+        let text = nav_frame_text(&render);
+        assert!(
+            text.contains("SECONDWORKSPACE") && !text.contains("FIRSTWORKSPACE"),
+            "next workspace via real input must change what the client is sent: {text}"
+        );
+        assert_eq!(server.app.state.active, Some(1));
+    }
+
+    #[tokio::test]
+    async fn client_input_navigation_is_relative_to_the_clients_own_view() {
+        // Client 2 navigates (via the public shell API) to tab 1 while client 1
+        // stays on tab 0. Client 1 pressing "next tab" must land on tab 1 -
+        // relative to *its* view - not wrap from the shared active tab back
+        // to tab 0 and appear to do nothing.
+        let mut server = test_headless_server();
+        server.app.state.workspaces =
+            vec![nav_test_workspace("ws", b"ALPHACONTENT", b"BETACONTENT")];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        let render_a = nav_connect_client(&mut server, 1);
+        let _render_b = nav_connect_client(&mut server, 2);
+
+        let tab1_id = server.app.public_tab_id(0, 1).expect("tab id");
+        let (respond_to, _response_rx) = std::sync::mpsc::channel();
+        server.handle_client_shell_api_request(
+            2,
+            api::ApiRequestMessage {
+                request: api::schema::Request {
+                    id: "nav".into(),
+                    method: api::schema::Method::TabFocus(api::schema::TabTarget {
+                        tab_id: tab1_id,
+                    }),
+                },
+                respond_to,
+                response_write_complete: None,
+            },
+        );
+
+        nav_press_prefixed(&mut server, 1, b'n');
+        server.render_and_stream();
+
+        let text = nav_frame_text(&render_a);
+        assert!(
+            text.contains("BETACONTENT") && !text.contains("ALPHACONTENT"),
+            "client 1's next-tab must advance from its own tab 0 to tab 1: {text}"
+        );
     }
 
     #[tokio::test]

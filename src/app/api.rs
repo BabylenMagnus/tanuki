@@ -2197,7 +2197,11 @@ mod tests {
     #[test]
     fn sticky_flagged_respawn_command_merges_when_launch_argv_known() {
         let sticky = Some(vec!["--marker-flag".to_string()]);
-        let launch_argv = Some(vec!["claude".to_string(), "--resume".to_string(), "id".to_string()]);
+        let launch_argv = Some(vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "id".to_string(),
+        ]);
         assert_eq!(
             sticky_flagged_respawn_command(&sticky, &launch_argv).as_deref(),
             Some("claude --resume id --marker-flag")
@@ -2216,7 +2220,11 @@ mod tests {
 
     #[test]
     fn sticky_flagged_respawn_command_is_none_without_sticky_flags() {
-        let launch_argv = Some(vec!["claude".to_string(), "--resume".to_string(), "id".to_string()]);
+        let launch_argv = Some(vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "id".to_string(),
+        ]);
         assert_eq!(sticky_flagged_respawn_command(&None, &launch_argv), None);
     }
 

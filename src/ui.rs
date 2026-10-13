@@ -170,7 +170,14 @@ fn resize_background_tab_panes_to_area(
             if app.active == Some(ws_idx) && tab_idx == ws.active_tab_index() {
                 continue;
             }
-            resize_tab_surface(app, terminal_runtimes, ws_idx, tab_idx, terminal_area, cell_size);
+            resize_tab_surface(
+                app,
+                terminal_runtimes,
+                ws_idx,
+                tab_idx,
+                terminal_area,
+                cell_size,
+            );
         }
     }
 }
@@ -187,7 +194,14 @@ fn resize_background_tab_panes_for_desktop(
             if app.active == Some(ws_idx) && tab_idx == ws.active_tab_index() {
                 continue;
             }
-            resize_tab_surface(app, terminal_runtimes, ws_idx, tab_idx, terminal_area, cell_size);
+            resize_tab_surface(
+                app,
+                terminal_runtimes,
+                ws_idx,
+                tab_idx,
+                terminal_area,
+                cell_size,
+            );
         }
     }
 }

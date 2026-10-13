@@ -128,7 +128,8 @@ impl App {
     pub(super) fn spawn_cloud_devices_fetch(&mut self) {
         let event_tx = self.event_tx.clone();
         std::thread::spawn(move || {
-            let result = crate::remote::cloud::list_sibling_devices().map_err(|err| err.to_string());
+            let result =
+                crate::remote::cloud::list_sibling_devices().map_err(|err| err.to_string());
             let _ = event_tx.blocking_send(crate::events::AppEvent::CloudDevicesFetched { result });
         });
     }

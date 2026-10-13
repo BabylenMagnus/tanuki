@@ -221,7 +221,56 @@ impl HeadlessServer {
         true
     }
 
-    fn set_default_shell_target_from_client(&mut self, client_id: u64) -> bool {
+    /// Cheap fingerprint of the workspace/tab topology, used to notice that
+    /// raw input created or closed a workspace/tab without rebuilding the full
+    /// topology on every keystroke.
+    pub(super) fn shell_view_shape(&self) -> (usize, usize) {
+        let workspaces = &self.app.state.workspaces;
+        (
+            workspaces.len(),
+            workspaces
+                .iter()
+                .map(|workspace| workspace.tabs.len())
+                .sum(),
+        )
+    }
+
+    /// Carries `client_id`'s own shell location along with navigation that raw
+    /// keyboard/mouse input applied to the shared `app.state.active`.
+    ///
+    /// Our fork has no embedded client-shell endpoint protocol, so local UI
+    /// navigation reaches the server as plain input events, never through
+    /// `handle_client_shell_api_request`. Without this, the shared state moved
+    /// but the client kept rendering its old `shell_location`, so switching
+    /// workspaces/tabs looked completely dead. Returns whether the client's
+    /// view moved (or the topology changed) and needs a repaint.
+    pub(super) fn follow_client_input_navigation(
+        &mut self,
+        client_id: u64,
+        target_before: Option<crate::ui::TabSurfaceTarget>,
+        shape_before: (usize, usize),
+    ) -> bool {
+        let target_changed = self.default_shell_target() != target_before;
+        let shape_changed = self.shell_view_shape() != shape_before;
+        if !target_changed && !shape_changed {
+            return false;
+        }
+        let focus_before = self.shell_focus_targets();
+        let focused_tabs_before = self.focused_shell_tabs();
+        self.reconcile_client_shell_locations();
+        if target_changed {
+            self.focus_shell_client_on_default_target(client_id);
+            // Never steal geometry from another client's tab; only claim a tab
+            // nobody controls yet so a lone client's PTYs match its screen.
+            self.claim_unowned_shell_tab_geometry(client_id, false);
+        }
+        // Shell-scoped Lost/Gained are sent for every client whose view moved;
+        // baseline the generic app focus tracker so it does not double-fire.
+        self.finish_shell_location_reconciliation(focus_before, &focused_tabs_before);
+        true
+    }
+
+    pub(super) fn set_default_shell_target_from_client(&mut self, client_id: u64) -> bool {
         let Some(target) = self.shell_target_for_client(client_id) else {
             return false;
         };
@@ -826,7 +875,11 @@ impl HeadlessServer {
         let pane_id = tab.layout.focused();
         self.app
             .state
-            .runtime_for_pane_in_workspace(&self.app.terminal_runtimes, target.workspace_index, pane_id)
+            .runtime_for_pane_in_workspace(
+                &self.app.terminal_runtimes,
+                target.workspace_index,
+                pane_id,
+            )
             .map(|runtime| (runtime, pane_id))
     }
 
@@ -864,5 +917,4 @@ impl HeadlessServer {
             tab.panes.contains_key(&pane_id) && (!tab.zoomed || tab.layout.focused() == pane_id)
         })
     }
-
 }

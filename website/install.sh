@@ -2,7 +2,7 @@
 set -eu
 
 BIN="tanuki"
-MANIFEST_URL="https://github.com/BabylenMagnus/tanuki/releases/latest/download/manifest.json"
+MANIFEST_URL="https://s3.ru1.storage.beget.cloud/08f0003a29f6-tanuki/releases/latest/manifest.json"
 INSTALL_DIR="${TANUKI_INSTALL_DIR:-$HOME/.local/bin}"
 
 main() {
@@ -100,7 +100,7 @@ err()  { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; exit 1; }
 
 need() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        err "requires '$1' — install it first, or download a binary manually from https://github.com/BabylenMagnus/tanuki/releases"
+        err "requires '$1' — install it first, or download a binary manually from https://tanukicode.ru/docs/tanuki/install"
     fi
 }
 

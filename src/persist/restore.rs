@@ -819,7 +819,10 @@ fn merge_persisted_launch_flags(
 /// from a live process or a previously saved `launch_argv`. Unlike
 /// `merge_persisted_launch_flags`, `sticky` is a flags-only list (no leading
 /// binary name).
-pub(crate) fn merge_sticky_launch_flags(argv: Vec<String>, sticky: Option<&[String]>) -> Vec<String> {
+pub(crate) fn merge_sticky_launch_flags(
+    argv: Vec<String>,
+    sticky: Option<&[String]>,
+) -> Vec<String> {
     let Some(sticky) = sticky else {
         return argv;
     };
@@ -1416,9 +1419,9 @@ mod tests {
                                 value: "claude-session".into(),
                             }),
                             launch_argv: None,
-                            sticky_launch_flags: Some(vec![
-                                "--dangerously-skip-permissions".into(),
-                            ]),
+                            sticky_launch_flags: Some(
+                                vec!["--dangerously-skip-permissions".into()],
+                            ),
                         },
                     )]),
                     zoomed: false,
@@ -1459,7 +1462,12 @@ mod tests {
             .expect("native agent resume should be pending");
         assert_eq!(
             plan.argv,
-            vec!["claude", "--resume", "claude-session", "--dangerously-skip-permissions"]
+            vec![
+                "claude",
+                "--resume",
+                "claude-session",
+                "--dangerously-skip-permissions"
+            ]
         );
         assert_eq!(
             terminal.sticky_launch_flags.as_deref(),

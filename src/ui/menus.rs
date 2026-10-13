@@ -8,7 +8,9 @@ use ratatui::{
 
 use rust_i18n::t;
 
-use super::widgets::{panel_contrast_fg, render_modal_header, render_modal_shell, render_panel_shell};
+use super::widgets::{
+    panel_contrast_fg, render_modal_header, render_modal_shell, render_panel_shell,
+};
 use crate::app::AppState;
 
 const CLOUD_DEVICES_POPUP_WIDTH: u16 = 46;

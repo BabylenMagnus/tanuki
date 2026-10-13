@@ -64,7 +64,14 @@ pub(crate) fn compute_tab_surface(
             tab_index: workspace.active_tab_index(),
         })
     });
-    compute_tab_surface_for(app, terminal_runtimes, target, area, resize_panes, cell_size)
+    compute_tab_surface_for(
+        app,
+        terminal_runtimes,
+        target,
+        area,
+        resize_panes,
+        cell_size,
+    )
 }
 
 /// Computes the tab surface for an explicit target rather than implicitly

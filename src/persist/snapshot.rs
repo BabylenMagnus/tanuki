@@ -366,7 +366,8 @@ fn capture_tab(
                     value: session.session_ref.value.clone(),
                 })
         });
-        let sticky_launch_flags = terminal.and_then(|terminal| terminal.sticky_launch_flags.clone());
+        let sticky_launch_flags =
+            terminal.and_then(|terminal| terminal.sticky_launch_flags.clone());
         panes.insert(
             id.raw(),
             PaneSnapshot {
