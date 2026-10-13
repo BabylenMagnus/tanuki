@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.104] - 2026-10-13
+
 ### Added
 - Add new test for client input navigation in CI workflow
 
