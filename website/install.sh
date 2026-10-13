@@ -2,7 +2,7 @@
 set -eu
 
 BIN="tanuki"
-MANIFEST_URL="https://s3.ru1.storage.beget.cloud/08f0003a29f6-tanuki/releases/latest/manifest.json"
+MANIFEST_URL="https://tanukicode.ru/releases/latest/manifest.json"
 INSTALL_DIR="${TANUKI_INSTALL_DIR:-$HOME/.local/bin}"
 
 main() {

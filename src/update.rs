@@ -23,12 +23,10 @@ use std::time::Instant;
 use interprocess::local_socket::traits::Stream as _;
 use serde::{Deserialize, Deserializer};
 
-const STABLE_UPDATE_MANIFEST_URL: &str =
-    "https://s3.ru1.storage.beget.cloud/08f0003a29f6-tanuki/releases/latest/manifest.json";
+const STABLE_UPDATE_MANIFEST_URL: &str = "https://tanukicode.ru/releases/latest/manifest.json";
 // No preview channel is published yet — falls back to the stable manifest so
 // `channel set preview` doesn't hard-fail while there's nothing preview-specific to serve.
-const PREVIEW_UPDATE_MANIFEST_URL: &str =
-    "https://s3.ru1.storage.beget.cloud/08f0003a29f6-tanuki/releases/latest/manifest.json";
+const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://tanukicode.ru/releases/latest/manifest.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/tanuki.json";
 const TANUKI_UPDATE_COMMAND: &str = "tanuki update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade tanuki";

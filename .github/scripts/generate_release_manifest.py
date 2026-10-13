@@ -24,6 +24,8 @@ ASSET_TARGETS = [
     "tanuki-macos-aarch64",
 ]
 
+RELEASE_BASE_URL = "https://tanukicode.ru/releases"
+
 PROTOCOL_SOURCE_PATH = pathlib.Path("src/protocol/wire.rs")
 
 
@@ -46,7 +48,7 @@ def changelog_notes_for(version: str) -> str:
 
 
 def main() -> None:
-    version, repo, tag, artifacts_dir = sys.argv[1:5]
+    version, _repo, tag, artifacts_dir = sys.argv[1:5]
     artifacts = pathlib.Path(artifacts_dir)
 
     notes = changelog_notes_for(version)
@@ -63,7 +65,7 @@ def main() -> None:
         key = target.removeprefix("tanuki-").removesuffix(".exe")
         file = artifacts / target
         sha256 = hashlib.sha256(file.read_bytes()).hexdigest()
-        url = f"https://github.com/{repo}/releases/download/{tag}/{target}"
+        url = f"{RELEASE_BASE_URL}/{tag}/{target}"
         assets[key] = {"url": url, "sha256": sha256}
 
     manifest = {

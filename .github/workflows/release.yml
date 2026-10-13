@@ -228,3 +228,41 @@ jobs:
             --latest \
             artifacts/tanuki-* artifacts/manifest.json || \
           gh release upload "$TAG" artifacts/tanuki-* artifacts/manifest.json --repo "${{ github.repository }}" --clobber
+
+      # Mirrors the same binaries + manifest to our own S3 bucket (served
+      # publicly through tanukicode.ru/releases/, an nginx proxy in front of
+      # the bucket — see wiki/tanuki-terminal-release-distribution.md) so the
+      # updater (src/update.rs) and install.sh/install.ps1 have a GitHub-
+      # independent distribution path. This is a second, permanent channel
+      # alongside the "Create/update release" step above, not a one-time
+      # migration — both GitHub Releases and our own releases/ stay updated
+      # on every release going forward. Uploaded to both a version-pinned
+      # path (for the sha256-checksummed download URLs baked into this
+      # release's manifest.json) and releases/latest/ (what clients actually
+      # poll for update checks).
+      - name: Upload release to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TANUKI_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TANUKI_S3_SECRET_KEY }}
+          AWS_DEFAULT_REGION: ru-1
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          aws --endpoint-url https://s3.ru1.storage.beget.cloud s3 cp artifacts/ \
+            "s3://08f0003a29f6-tanuki/releases/${TAG}/" \
+            --recursive --exclude "*" --include "tanuki-*" --include "manifest.json"
+          aws --endpoint-url https://s3.ru1.storage.beget.cloud s3 cp \
+            artifacts/manifest.json \
+            "s3://08f0003a29f6-tanuki/releases/latest/manifest.json"
+
+          # Keep only the 5 most recent version prefixes under releases/ —
+          # bucket is 10GB total and shared with other Tanuki uploads.
+          aws --endpoint-url https://s3.ru1.storage.beget.cloud s3api list-objects-v2 \
+            --bucket 08f0003a29f6-tanuki --prefix "releases/v" --delimiter "/" \
+            --query "CommonPrefixes[].Prefix" --output text \
+            | tr '\t' '\n' | sort -rV | tail -n +6 | while read -r old_prefix; do
+              [ -n "$old_prefix" ] || continue
+              echo "pruning old release: $old_prefix"
+              aws --endpoint-url https://s3.ru1.storage.beget.cloud s3 rm \
+                "s3://08f0003a29f6-tanuki/${old_prefix}" --recursive
+            done

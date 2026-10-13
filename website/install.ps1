@@ -351,9 +351,9 @@ switch ($architecture) {
 
 if ([string]::IsNullOrWhiteSpace($ManifestUrl)) {
     $ManifestUrl = if ($Channel -eq "preview") {
-        "https://github.com/BabylenMagnus/tanuki/releases/latest/download/manifest.json"
+        "https://tanukicode.ru/releases/latest/manifest.json"
     } else {
-        "https://github.com/BabylenMagnus/tanuki/releases/latest/download/manifest.json"
+        "https://tanukicode.ru/releases/latest/manifest.json"
     }
 }
 
