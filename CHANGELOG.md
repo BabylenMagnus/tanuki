@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Add public-read ACL to S3 uploads for accessibility
+
 ## [0.1.105] - 2026-10-13
 
 ### Added
