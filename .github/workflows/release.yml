@@ -248,12 +248,20 @@ jobs:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -eu
+          # --acl public-read is required: this bucket's policy only grants
+          # the upload credentials PutObject (not PutObjectAcl), and objects
+          # uploaded without an explicit ACL default to private even though
+          # the bucket itself is public — confirmed the hard way on v0.1.105's
+          # first upload (every file came back 403 until re-uploaded with
+          # this flag). See wiki/tanuki-terminal-release-distribution.md.
           aws --endpoint-url https://s3.ru1.storage.beget.cloud s3 cp artifacts/ \
             "s3://08f0003a29f6-tanuki/releases/${TAG}/" \
-            --recursive --exclude "*" --include "tanuki-*" --include "manifest.json"
+            --recursive --exclude "*" --include "tanuki-*" --include "manifest.json" \
+            --acl public-read
           aws --endpoint-url https://s3.ru1.storage.beget.cloud s3 cp \
             artifacts/manifest.json \
-            "s3://08f0003a29f6-tanuki/releases/latest/manifest.json"
+            "s3://08f0003a29f6-tanuki/releases/latest/manifest.json" \
+            --acl public-read
 
           # Keep only the 5 most recent version prefixes under releases/ —
           # bucket is 10GB total and shared with other Tanuki uploads.
