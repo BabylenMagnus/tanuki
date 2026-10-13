@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.103] - 2026-10-13
+
 ### Added
 - Add client-specific workspace/tab focus management and reconciliation
 
