@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.107] - 2026-10-14
+
 ### Added
 - Update menu action to request update and restart from client
 
