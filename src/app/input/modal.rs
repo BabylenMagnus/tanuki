@@ -136,22 +136,12 @@ pub(super) fn apply_global_menu_action(state: &mut AppState, action: GlobalMenuA
         GlobalMenuAction::WhatsNew => open_update_release_notes(state),
         GlobalMenuAction::UpdateAndRestart => {
             leave_modal(state);
-            // Windows can't safely relaunch until we know `tanuki update`
-            // actually replaced the on-disk binary (see
-            // `update::start_update_and_restart_windows`) — the run loop
-            // performs the update in the background and only detaches once
-            // `AppEvent::UpdateAndRestartFinished` confirms success. Unix
-            // already gates the relaunch on success via a plain `&&` shell
-            // one-liner, so it can detach immediately as before.
-            #[cfg(windows)]
-            {
-                state.request_update_and_restart = true;
-            }
-            #[cfg(not(windows))]
-            {
-                crate::update::spawn_update_and_relaunch();
-                request_detach(state);
-            }
+            // The update itself runs outside the server: the monolithic run
+            // loop (`app::run`) performs it in the background, while the
+            // headless server asks the attached client -- the only process
+            // with a terminal for `tanuki update`'s prompts -- to do it
+            // (`ServerShutdown { reason: "update-and-restart" }`).
+            state.request_update_and_restart = true;
         }
         GlobalMenuAction::Keybinds => {
             super::settings::open_settings_at(state, crate::app::state::SettingsSection::Keybinds)
@@ -1539,6 +1529,29 @@ mod tests {
 
         assert!(state.should_quit);
         assert!(!state.detach_requested);
+    }
+
+    #[test]
+    fn global_menu_update_and_restart_only_requests_the_update() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.update_available = Some("9.9.9".into());
+        assert!(global_menu_actions(&state).contains(&GlobalMenuAction::UpdateAndRestart));
+        open_global_menu(&mut state);
+
+        apply_global_menu_action(&mut state, GlobalMenuAction::UpdateAndRestart);
+
+        // The menu never runs the update itself: the owner of the terminal
+        // (monolithic run loop, or the attached client) does.
+        assert!(state.request_update_and_restart);
+        assert!(!state.detach_requested);
+        assert!(!state.should_quit);
+        assert_ne!(state.mode, Mode::GlobalMenu);
+    }
+
+    #[test]
+    fn global_menu_has_no_update_entry_without_pending_update() {
+        let state = state_with_workspaces(&["test"]);
+        assert!(!global_menu_actions(&state).contains(&GlobalMenuAction::UpdateAndRestart));
     }
 
     #[test]

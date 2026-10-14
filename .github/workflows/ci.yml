@@ -163,7 +163,7 @@ jobs:
           Invoke-CargoWithZigCacheRecovery @("clippy", "--bin", "tanuki", "--locked", "--target", "x86_64-pc-windows-msvc", "--", "-D", "warnings")
           Invoke-Checked cargo @("test", "--locked", "--target", "x86_64-pc-windows-msvc", "--bin", "tanuki", "windows_")
           Invoke-Checked cargo @("test", "--locked", "--target", "x86_64-pc-windows-msvc", "--bin", "tanuki", "server::client_transport::tests")
-          Invoke-Checked cargo @("test", "--locked", "--target", "x86_64-pc-windows-msvc", "--bin", "tanuki", "server::headless::tests::client_input_navigation")
+          Invoke-Checked cargo @("test", "--locked", "--target", "x86_64-pc-windows-msvc", "--bin", "tanuki", "server::headless::tests::client_input_")
           Invoke-Checked cargo @("build", "--locked", "--target", "x86_64-pc-windows-msvc")
 
       - name: Smoke ConPTY pane

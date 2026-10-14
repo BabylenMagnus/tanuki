@@ -331,6 +331,36 @@ impl From<protocol::FramingError> for ClientError {
 /// with a scary error.
 const SHUTDOWN_IN_PROGRESS_REASON: &str = "server is shutting down";
 
+/// `ServerShutdown` reason the server sends to the client that picked
+/// "update & restart" in the sidebar menu. The client then runs
+/// `tanuki update` itself (it owns the terminal; the server cannot) and
+/// relaunches. Free-form string, so no protocol bump: an older client just
+/// prints it as a shutdown reason.
+pub(crate) const UPDATE_AND_RESTART_REASON: &str = "update-and-restart";
+
+/// Runs `tanuki update` in the caller's (already restored) terminal, then
+/// relaunches the updated binary. Remote clients only print the reattach hint:
+/// this process runs on the remote host, and the relaunch belongs to the local
+/// `--remote` side.
+fn run_update_and_restart() -> io::Result<()> {
+    let exe = std::env::current_exe()?;
+    eprintln!("tanuki: updating...");
+    let status = std::process::Command::new(&exe).arg("update").status()?;
+    if !status.success() {
+        eprintln!("tanuki: update failed ({status}); the old version keeps running");
+        return Ok(());
+    }
+    if let Ok(reattach_command) = std::env::var(crate::remote::REATTACH_COMMAND_ENV_VAR) {
+        eprintln!("tanuki: updated. Run `{reattach_command}` to reattach");
+        return Ok(());
+    }
+    let status = std::process::Command::new(&exe).status()?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    Ok(())
+}
+
 fn is_shutdown_race_reason(err: &ClientError) -> bool {
     matches!(
         err,
@@ -1321,6 +1351,17 @@ fn run_client_with_mode(
             rt.shutdown_timeout(Duration::from_millis(100));
             crate::logging::shutdown("client");
             return Ok(());
+        }
+
+        if matches!(
+            err,
+            ClientError::ServerShutdown {
+                reason: Some(ref reason)
+            } if reason == UPDATE_AND_RESTART_REASON
+        ) {
+            rt.shutdown_timeout(Duration::from_millis(100));
+            crate::logging::shutdown("client");
+            return run_update_and_restart();
         }
 
         if is_plain_local_launch && is_shutdown_race_reason(&err) {
@@ -2528,6 +2569,18 @@ fn init_logging() {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn update_and_restart_reason_is_not_a_detach_or_a_relaunch_race() {
+        let err = ClientError::ServerShutdown {
+            reason: Some(UPDATE_AND_RESTART_REASON.to_owned()),
+        };
+        assert_ne!(UPDATE_AND_RESTART_REASON, "detached");
+        assert!(!is_shutdown_race_reason(&err));
+        assert!(!is_transient_relaunch_race(&io::Error::other(err)));
+    }
+
     use super::*;
     use crate::protocol::CellData;
     use std::ffi::OsString;

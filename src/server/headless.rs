@@ -3249,15 +3249,26 @@ impl HeadlessServer {
         // app.state, so snapshotting before them would miss those changes.
         let chrome_after = AppChromeSnapshot::capture(&self.app.state);
 
-        if self.app.state.detach_requested {
+        // "update & restart" from the sidebar menu: `tanuki update` needs a
+        // terminal (prompts, progress) and must run outside this server, so
+        // hand it to the requesting client, which runs it after restoring its
+        // terminal (`client::UPDATE_AND_RESTART_REASON`).
+        let update_requested = std::mem::take(&mut self.app.state.request_update_and_restart);
+        if update_requested || self.app.state.detach_requested {
             self.app.state.detach_requested = false;
-            info!(client_id, "client detach requested via keybind");
+            let reason = if update_requested {
+                info!(client_id, "client update-and-restart requested via menu");
+                crate::client::UPDATE_AND_RESTART_REASON
+            } else {
+                info!(client_id, "client detach requested via keybind");
+                "detached"
+            };
 
             self.send_client_graphics_cleanup(client_id);
             self.send_to_client(
                 client_id,
                 ServerMessage::ServerShutdown {
-                    reason: Some("detached".to_owned()),
+                    reason: Some(reason.to_owned()),
                 },
             );
 
@@ -8715,6 +8726,128 @@ next_tab = ""
             "next workspace via real input must change what the client is sent: {text}"
         );
         assert_eq!(server.app.state.active, Some(1));
+    }
+
+    #[tokio::test]
+    async fn client_input_update_and_restart_menu_hands_the_update_to_the_client() {
+        let mut server = test_headless_server();
+        server.app.state.workspaces =
+            vec![nav_test_workspace("ws", b"ALPHACONTENT", b"BETACONTENT")];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.update_available = Some("9.9.9".into());
+        let (writer, control, _render) = test_client_writer();
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 1,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer,
+        }));
+
+        // Open the sidebar menu, move to "update & restart" (5th entry) and
+        // confirm it, as a user would.
+        server.app.state.mode = crate::app::Mode::GlobalMenu;
+        server.app.state.global_menu = crate::app::state::MenuListState::new(0);
+        server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 1,
+            data: b"jjjj\r".to_vec(),
+        });
+
+        let reason = read_server_shutdown_reason(control.recv().expect("shutdown message"));
+        assert_eq!(
+            reason,
+            Some(crate::client::UPDATE_AND_RESTART_REASON.to_owned()),
+            "the menu entry must hand the update to the attached client"
+        );
+        assert!(
+            !server.app.state.request_update_and_restart,
+            "the request must be consumed, not left set"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_input_update_and_restart_menu_does_not_disturb_other_clients() {
+        let mut server = test_headless_server();
+        server.app.state.workspaces =
+            vec![nav_test_workspace("ws", b"ALPHACONTENT", b"BETACONTENT")];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.update_available = Some("9.9.9".into());
+        let mut controls = Vec::new();
+        for client_id in [1, 2] {
+            let (writer, control, _render) = test_client_writer();
+            assert!(server.handle_server_event(ServerEvent::ClientConnected {
+                client_id,
+                cols: 100,
+                rows: 30,
+                cell_width_px: 0,
+                cell_height_px: 0,
+                render_encoding: RenderEncoding::SemanticFrame,
+                keybindings: None,
+                direct_attach_requested: false,
+                writer,
+            }));
+            controls.push(control);
+        }
+
+        server.app.state.mode = crate::app::Mode::GlobalMenu;
+        server.app.state.global_menu = crate::app::state::MenuListState::new(0);
+        server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 1,
+            data: b"jjjj\r".to_vec(),
+        });
+
+        let reason = read_server_shutdown_reason(controls[0].recv().expect("client 1 shutdown"));
+        assert_eq!(
+            reason,
+            Some(crate::client::UPDATE_AND_RESTART_REASON.to_owned())
+        );
+        // Only the requester leaves; the other client and the server (and
+        // therefore every pane) keep running until the update replaces them.
+        assert!(controls[1].try_recv().is_err());
+        assert!(server.clients.contains_key(&2));
+        assert!(!server.shutting_down);
+    }
+
+    #[tokio::test]
+    async fn client_input_menu_other_entries_do_not_request_an_update() {
+        let mut server = test_headless_server();
+        server.app.state.workspaces =
+            vec![nav_test_workspace("ws", b"ALPHACONTENT", b"BETACONTENT")];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.update_available = Some("9.9.9".into());
+        let (writer, control, _render) = test_client_writer();
+        assert!(server.handle_server_event(ServerEvent::ClientConnected {
+            client_id: 1,
+            cols: 100,
+            rows: 30,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            render_encoding: RenderEncoding::SemanticFrame,
+            keybindings: None,
+            direct_attach_requested: false,
+            writer,
+        }));
+
+        // "reload config" (4th entry) must not hand anything to the client.
+        server.app.state.mode = crate::app::Mode::GlobalMenu;
+        server.app.state.global_menu = crate::app::state::MenuListState::new(0);
+        server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 1,
+            data: b"jjj\r".to_vec(),
+        });
+
+        assert!(control.try_recv().is_err());
+        assert!(!server.app.state.request_update_and_restart);
     }
 
     #[tokio::test]

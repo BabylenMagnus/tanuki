@@ -1110,6 +1110,17 @@ impl App {
                 {
                     crate::update::start_update_and_restart_windows(self.event_tx.clone());
                 }
+                // Unix already gates the relaunch on success via a plain
+                // `&&` shell one-liner, so it can detach immediately.
+                #[cfg(not(windows))]
+                {
+                    crate::update::spawn_update_and_relaunch();
+                    if self.state.detach_exits {
+                        self.state.should_quit = true;
+                    } else {
+                        self.state.detach_requested = true;
+                    }
+                }
                 needs_render = true;
             }
 
